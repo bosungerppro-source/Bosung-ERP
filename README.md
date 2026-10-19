@@ -1,5 +1,9 @@
 # ColorPencil ERP (색연필 제조 ERP / Hệ thống ERP bút chì màu)
 
+## 저장소 · 받기 / Kho mã nguồn · Tải về
+- 소스: GitHub `bosungerppro-source/Bosung-ERP` (브랜치 `main`). 차수별 결정 · 작업 기록은 `docs/`.
+- 설치 파일 · 데모: 저장소의 **Releases**. 새 Release 는 **Actions → "Release — 설치 파일" → Run workflow** 에서 버전(예: `1.5.0`)을 넣으면 GitHub 가 설치 파일과 데모를 빌드해 태그와 함께 만듭니다 (`.github/workflows/release.yml`, 설명은 `docs/releases/v<버전>.md`).
+
 ## 구성 / Thành phần
 | 경로 | 설명 |
 |---|---|

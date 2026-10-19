@@ -1,6 +1,7 @@
 # ColorPencil ERP (BOSUNG VINA) — Claude 작업 지침
 
 BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부자재 ERP. Vanilla JS SPA(`app/`) + 의존성 없는 Node 서버(`server.js`) + Electron 설치형(`electron/`).
+저장소: GitHub `bosungerppro-source/Bosung-ERP` (비공개로 쓴다, 브랜치 `main`).
 
 ## 일하는 방식
 - 너는 이 ERP를 유지보수하는 시니어 개발자다. 대부분은 스스로 판단해서 적용하고, 정말 필요한 것만 묻는다.
@@ -41,5 +42,7 @@ npm run dist                                # dist/win-unpacked + 설치 파일 
 2. `package.json` · `app/js/core.js` (`ERP.v`) · `build/installer.nsi` 기본값 · `npm run dist` 스크립트의 버전 번호를 함께 올린다.
 3. `npm run demo` · `npm run dist` → 설치 파일 SHA-256 기록.
 4. 문서: README, `docs/CLAUDE_PROMPT.md` 새 차수 항목, `docs/PROMPT_v<차수>_*.md`, `docs/history/<차수>_work_log.md`.
-5. 커밋 → 태그 `v<버전>` → GitHub Release 에 설치 파일(나누지 않은 한 파일)과 `ERP_Demo.html` 첨부.
+5. `docs/releases/v<버전>.md` (Release 설명) 작성 → 커밋 → `main` push → 사용자에게 **Actions → "Release — 설치 파일" → Run workflow** (버전 입력) 실행을 안내. 워크플로가 설치 파일 · 데모를 빌드해 태그와 Release 를 만든다.
+   - Claude Code 클라우드 세션은 태그 push · Release 쓰기 · 저장소 설정 변경이 막혀 있고(403), GitHub GraphQL 도 쓸 수 없다 (`gh api repos/<owner>/<repo>/...` REST 만).
+   - 만든 설치 파일은 세션에서 사용자에게 바로 보낼 수도 있다 (28MB 조각 + `join_installer.bat` 방식도 가능).
 6. 사용자에게: 바뀐 점, PC에서 확인할 것, 사용자가 할 일.
