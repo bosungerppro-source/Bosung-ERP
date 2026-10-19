@@ -147,7 +147,8 @@ const TABLE = [
 
     // another machine on the LAN must not be able to read or change the key (simulated with a different loopback source address)
     let lan; try { lan = await req(S.port, 'PUT', '/api/ai/config', { key: 'sk-ant-evil' }, { localAddress: '127.0.0.2' }); } catch (e) { lan = null; }
-    if (lan) { ok('다른 PC에서는 키 변경 불가 (403)', lan.status === 403, lan.text); const g = await req(S.port, 'GET', '/api/ai/config'); ok('거부된 뒤에도 기존 키 유지', g.json.keyTail === 'wxyz'); }
+    // 9차: 사내망 PIN 으로 들어오기 전에는 401(LOGIN), PIN 으로 들어온 뒤에도 키 변경은 403 (selftest_v9 에서 확인)
+    if (lan) { ok('다른 PC에서는 키 변경 불가 (401 로그인 전)', lan.status === 401 || lan.status === 403, lan.text); const g = await req(S.port, 'GET', '/api/ai/config'); ok('거부된 뒤에도 기존 키 유지', g.json.keyTail === 'wxyz'); }
     else console.log('  (건너뜀: 127.0.0.2 로 연결할 수 없는 환경 — LAN 거부 시험 생략)');
 
     r = await req(S.port, 'PUT', '/api/ai/config', { key: '' });

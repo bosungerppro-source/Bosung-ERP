@@ -17,11 +17,12 @@ function doPost(e) {
     if (req.token !== TOKEN) return out_({ ok: false, error: 'bad token' });
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     switch (req.action) {
-      case 'ping': return out_({ ok: true, ver: 2, sheet: ss.getName(), url: ss.getUrl() });
+      case 'ping': return out_({ ok: true, ver: 3, sheet: ss.getName(), url: ss.getUrl() });
       case 'list': return out_({ ok: true, tables: list_(ss) });
       case 'put': return out_(put_(ss, req));
       case 'get': return out_(get_(ss, req));
       case 'snapshot': return out_(snapshot_(ss, req));
+      case 'backup': return out_(backup_(req));
       default: return out_({ ok: false, error: 'unknown action' });
     }
   } catch (err) { return out_({ ok: false, error: String(err) }); }
@@ -76,4 +77,23 @@ function snapshot_(ss, req) {
   var name = 'ERP_' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyyMMdd_HHmm');
   var f = DriveApp.getFileById(ss.getId()).makeCopy(name, folder);
   return { ok: true, name: name, url: f.getUrl() };
+}
+
+// 3판: backup: {name:'ERP_backup_YYYY-MM-DD.json.gz', b64, keep} — ERP(설치형)가 매일 보내는 전체 자료 압축본을 Drive 폴더에 저장.
+// 같은 이름(같은 날)은 바꾸고, 가장 최근 keep 개만 남긴다 (나머지는 휴지통). 복원: 내려받아 ERP → 백업 / 복원 에서 .json.gz 그대로 선택
+var BACKUP_RE = /^ERP_backup_\d{4}-\d\d-\d\d\.json\.gz$/;
+function backup_(req) {
+  var name = String(req.name || '');
+  if (!BACKUP_RE.test(name) || !req.b64) return { ok: false, error: 'bad backup request' };
+  var it = DriveApp.getFoldersByName(SNAPSHOT_FOLDER);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(SNAPSHOT_FOLDER);
+  var same = folder.getFilesByName(name);
+  while (same.hasNext()) same.next().setTrashed(true);
+  var blob = Utilities.newBlob(Utilities.base64Decode(req.b64), 'application/gzip', name);
+  var f = folder.createFile(blob);
+  var keep = Math.max(3, Math.min(365, Number(req.keep) || 30)), files = [], all = folder.getFiles();
+  while (all.hasNext()) { var x = all.next(); if (BACKUP_RE.test(x.getName())) files.push(x); }
+  files.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });
+  for (var i = keep; i < files.length; i++) files[i].setTrashed(true);
+  return { ok: true, name: name, url: f.getUrl(), size: blob.getBytes().length };
 }

@@ -19,6 +19,7 @@ nav.side{flex:0 0 232px;width:232px;background:var(--side);color:#E6E9ED;padding
 .lang button.on{background:#F2C531;color:#1B1F24;border-color:#F2C531}
 #savestate{display:flex;align-items:center;gap:6px}#savestate i{width:8px;height:8px;border-radius:50%;background:#0E7A5F;display:inline-block}
 #savestate.saving i{background:#F2C531}#savestate.error i{background:#E5594F}
+#remote{color:#F2C531;font-size:12px;text-decoration:none}#remote:hover{text-decoration:underline}
 main.main{flex:1;min-width:0;padding:26px 30px 44px;display:flex;flex-direction:column;gap:20px}
 .page-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px}
 .page-head h1{margin:0;font-size:25px;font-weight:700}.page-head p{margin:4px 0 0;color:var(--muted);font-size:13.5px}

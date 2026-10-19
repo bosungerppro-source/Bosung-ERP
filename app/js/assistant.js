@@ -62,7 +62,7 @@
   };
   A.saveCfg = async function (key, model) {
     if (DB.mode === 'server') {
-      const r = await fetch('/api/ai/config', { method: 'PUT', body: JSON.stringify({ key, model }) }); const c = await r.json().catch(() => ({}));
+      const r = await fetch('/api/ai/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, model }) }); const c = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof c.error === 'string' ? c.error : ('HTTP ' + r.status));
       A.hasKey = !!c.hasKey; A.model = c.model || A.model; A.keyTail = c.keyTail || '';
     } else {

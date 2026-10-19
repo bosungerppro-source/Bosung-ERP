@@ -23,6 +23,32 @@
     el.className = s; el.lastChild.textContent = s === 'saving' ? L('저장 중…', 'Đang lưu…') : s === 'error' ? L('저장 오류', 'Lỗi lưu') : L('저장됨', 'Đã lưu');
   };
 
+  // 9차: 다른 PC 의 변경을 불러왔을 때 — 창 · 입력 · 끌기 중이 아니고 3초 넘게 손대지 않았으면 화면을 다시 그린다 (스크롤 유지).
+  // 아니면 왼쪽 아래에 '다른 PC 변경 있음' 을 띄우고 3초마다 다시 본다 (데이터는 이미 합쳐져 있어 다른 화면으로 가도 최신)
+  let lastInput = 0, pdown = false, staleT = null;
+  ['keydown', 'pointerdown', 'wheel', 'input'].forEach(ev => document.addEventListener(ev, () => { lastInput = Date.now(); }, true));
+  document.addEventListener('pointerdown', () => { pdown = true; }, true);
+  ['pointerup', 'pointercancel'].forEach(ev => document.addEventListener(ev, () => { pdown = false; }, true));
+  function quiet() {
+    const a = document.activeElement;
+    const typing = a && (a.tagName === 'TEXTAREA' || a.isContentEditable || (a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|range|color)$/i.test(a.type || '')));
+    return !document.querySelector('.modal-back, .login-gate') && !typing && !pdown && !document.hidden && Date.now() - lastInput > 3000;
+  }
+  /** 같은 화면을 다시 그린다 — 창 스크롤과 표 안 스크롤 위치를 유지 */
+  ERP.refresh = function () {
+    const boxes = () => Array.from(document.querySelectorAll('#main .tbl-wrap, #main .entry-wrap'));
+    const y = window.scrollY, sc = boxes().map(e => [e.scrollTop, e.scrollLeft]);
+    ERP.render();
+    window.scrollTo(0, y); boxes().forEach((e, i) => { if (sc[i]) { e.scrollTop = sc[i][0]; e.scrollLeft = sc[i][1]; } });
+  };
+  ERP.onRemote = function () {
+    clearTimeout(staleT); staleT = null;
+    if (!$('#app nav.side')) return;   // 아직 첫 화면 전
+    if (quiet()) { ERP.refresh(); return; }
+    ERP.state.remoteStale = true; const el = $('#remote'); if (el) el.style.display = '';
+    staleT = setTimeout(ERP.onRemote, 3000);
+  };
+
   function current() { const m = location.hash.match(/^#\/([a-z_]+)/); return m && ERP.pages[m[1]] ? m[1] : 'dashboard'; }
 
   function badge(id) {
@@ -56,6 +82,7 @@
 
   ERP.render = function () {
     ERP.destroyCharts();
+    ERP.state.remoteStale = false; clearTimeout(staleT); staleT = null;
     const id = current(); const page = ERP.pages[id];
     const app = $('#app'); app.replaceChildren();
     const nav = h('nav', { class: 'side', 'aria-label': L('주 메뉴', 'Menu chính') },
@@ -65,9 +92,10 @@
       h('div', { class: 'side-foot' },
         h('div', { class: 'lang', role: 'group', 'aria-label': 'language' }, h('button', { class: ERP.lang === 'ko' ? 'on' : '', onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: ERP.lang === 'vi' ? 'on' : '', onclick: () => ERP.setLang('vi') }, 'Tiếng Việt')),
         h('div', { id: 'savestate', class: 'saved' }, h('i'), h('span', L('저장됨', 'Đã lưu'))),
+        h('a', { id: 'remote', href: '#', style: { display: 'none' }, onclick: (e) => { e.preventDefault(); ERP.refresh(); } }, '↻ ' + L('다른 PC 변경 있음 · 새로 고침', 'Có thay đổi từ máy khác · Làm mới')),
         h('div', DB.mode === 'server' ? L('서버 저장 모드 (PC 설치형)', 'Lưu trên máy chủ (bản cài đặt)') : L('브라우저 저장 모드 (테스트)', 'Lưu trong trình duyệt (bản thử)'))));
     const main = h('main', { class: 'main', id: 'main' });
-    app.append(nav, main);
+    app.append(nav, main); DB._state && DB._state();
     document.title = L(page.ko, page.vi) + ' · ColorPencil ERP';
     try { page.render(main); } catch (e) { console.error(e); main.appendChild(h('div', { class: 'card' }, h('h2', 'Error'), h('pre', String(e.stack || e)))); }
     window.scrollTo(0, 0);
@@ -79,6 +107,11 @@
     try { await DB.init(); ERP.loadProcs(); ERP.aiReady && ERP.aiReady(); } catch (e) { console.error(e); app.replaceChildren(h('div', { class: 'card', style: { margin: '40px' } }, h('h2', 'Startup error'), h('pre', String(e.stack || e)))); return; }
     window.addEventListener('hashchange', ERP.render);
     ERP.render();
+    // 9차: ERP 가 실행 중인 PC 에서 — 자동 백업을 켰는데 이틀 넘게 성공하지 못했으면 알린다 (USB 빠짐 · NAS 꺼짐 등)
+    if (DB.mode === 'server' && DB.ping && DB.ping.loopback) fetch('/api/backup').then(r => r.json()).then(b => {
+      if (!(b.dir || b.google) || !b.lastTry) return;
+      if (!b.lastOk || Date.now() - Date.parse(b.lastOk) > 2 * 86400000) ERP.toast(L('자동 백업이 이틀 넘게 되지 않았습니다 — 설정 → 사내망 접속 · 자동 백업에서 확인하세요', 'Sao lưu tự động đã hơn 2 ngày không thành công — kiểm tra ở Cài đặt → Mạng nội bộ · Sao lưu') + (b.lastError ? ' (' + b.lastError + ')' : ''), 'bad');
+    }).catch(() => { /* ignore */ });
   }
   ERP.boot = boot;
   window.addEventListener('DOMContentLoaded', boot);

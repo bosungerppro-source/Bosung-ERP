@@ -172,7 +172,8 @@
     const bSnap = h('button', { class: 'btn' }, L('드라이브에 백업 복사본', 'Sao lưu sang Drive'));
     // Code.gs 2판부터: 글자 · 날짜 열을 텍스트 형식으로 써서 0 으로 시작하는 코드 · 523034E200 같은 코드가 숫자로 바뀌지 않는다
     const oldScript = () => say(L('⚠ 구글 Apps Script 가 옛 버전입니다. 설치 폴더의 google/Code.gs 를 다시 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요 (코드 · 날짜가 숫자로 바뀌는 문제 수정).', '⚠ Apps Script là bản cũ. Hãy dán lại google/Code.gs và triển khai phiên bản mới (sửa lỗi mã bị đổi thành số).'));
-    bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); if (!(j.ver >= 2)) oldScript(); });
+    const noBackup = () => say(L('ⓘ 구글 드라이브 자동 백업을 쓰려면 google/Code.gs 3판을 다시 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn sao lưu tự động lên Google Drive, hãy dán lại google/Code.gs bản 3 và triển khai phiên bản mới.'));
+    bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); if (!(j.ver >= 2)) oldScript(); else if (!(j.ver >= 3)) noBackup(); });
     bPush.onclick = busy(bPush, async () => { const n = names(); if (!n.length) return; const pj = await gcall({ action: 'ping' }); if (!(pj.ver >= 2)) oldScript(); say(L('업로드 시작', 'Bắt đầu đẩy')); await gpush(n, prog); say('✓ ' + L('완료', 'Xong')); });
     bPull.onclick = busy(bPull, async () => { const n = names(); if (!n.length) return; if (!(await ERP.confirm(L('선택한 표의 현재 데이터를 구글 시트 내용으로 교체합니다. 계속할까요?', 'Dữ liệu các bảng đã chọn sẽ bị thay bằng nội dung Google Sheet. Tiếp tục?')))) return; await gpull(n, prog); say('✓ ' + L('완료', 'Xong')); ERP.toast(L('구글 시트 데이터를 가져왔습니다', 'Đã lấy dữ liệu từ Google Sheet'), 'ok'); });
     bSnap.onclick = busy(bSnap, async () => { const j = await gcall({ action: 'snapshot' }); say('✓ Drive: ' + j.name + ' ' + j.url); });
@@ -189,9 +190,11 @@
 
   // ---------------- backup ----------------
   function backupTab(host) {
-    const fi = h('input', { type: 'file', accept: '.json', style: { display: 'none' }, onchange: async (e) => { const f = e.target.files[0]; if (!f) return; try { const o = JSON.parse(await f.text()); if (!o.tables) throw new Error('invalid'); if (!(await ERP.confirm(L('현재 데이터를 백업 파일 내용으로 교체합니다. 계속할까요?', 'Dữ liệu hiện tại sẽ bị thay bằng file sao lưu. Tiếp tục?')))) return; await DB.restore(o); ERP.toast(L('복원했습니다', 'Đã khôi phục'), 'ok'); ERP.render(); } catch (err) { ERP.toast(L('올바른 백업 파일이 아닙니다', 'File sao lưu không hợp lệ'), 'bad'); } } });
+    // .json.gz = 구글 드라이브 자동 백업 압축본 (9차)
+    const readText = (f) => /\.gz$/i.test(f.name) ? new Response(f.stream().pipeThrough(new DecompressionStream('gzip'))).text() : f.text();
+    const fi = h('input', { type: 'file', accept: '.json,.gz', style: { display: 'none' }, onchange: async (e) => { const f = e.target.files[0]; if (!f) return; try { const o = JSON.parse(await readText(f)); if (!o.tables) throw new Error('invalid'); if (!(await ERP.confirm(L('현재 데이터를 백업 파일 내용으로 교체합니다. 계속할까요?', 'Dữ liệu hiện tại sẽ bị thay bằng file sao lưu. Tiếp tục?')))) return; await DB.restore(o); ERP.toast(L('복원했습니다', 'Đã khôi phục'), 'ok'); ERP.render(); } catch (err) { ERP.toast(L('올바른 백업 파일이 아닙니다', 'File sao lưu không hợp lệ'), 'bad'); } } });
     host.append(h('div', { class: 'card' }, h('h3', L('JSON 백업 / 복원', 'Sao lưu / khôi phục JSON')),
-      h('p', { class: 'help' }, L('모든 표를 하나의 파일로 저장합니다. 설치형은 데이터 폴더에 매일 자동 백업(14일 보관)도 만들어집니다.', 'Lưu toàn bộ bảng vào một file. Bản cài đặt tự sao lưu hằng ngày (giữ 14 ngày) trong thư mục dữ liệu.')),
+      h('p', { class: 'help' }, L('모든 표를 하나의 파일로 저장합니다. 설치형은 데이터 폴더에 매일 자동 백업(14일 보관)도 만들어집니다. PC 가 고장 나도 남도록 설정 → "사내망 접속 · 자동 백업" 에서 USB · NAS · 구글 드라이브에 매일 자동 백업을 켜세요. 복원은 .json 과 구글 드라이브의 .json.gz 를 모두 받습니다.', 'Lưu toàn bộ bảng vào một file. Bản cài đặt tự sao lưu hằng ngày (giữ 14 ngày) trong thư mục dữ liệu. Để không mất dữ liệu khi hỏng máy, hãy bật sao lưu tự động hằng ngày ra USB · NAS · Google Drive ở Cài đặt → "Mạng nội bộ · Sao lưu tự động". Khôi phục nhận cả .json và .json.gz từ Google Drive.')),
       h('div', { class: 'toolbar' }, h('button', { class: 'btn primary', onclick: () => ERP.download('ERP_backup_' + F.today() + '.json', new Blob([JSON.stringify(DB.snapshot())], { type: 'application/json' })) }, L('백업 파일 내려받기', 'Tải file sao lưu')), h('button', { class: 'btn', onclick: () => fi.click() }, L('백업에서 복원', 'Khôi phục từ file')), fi)));
   }
 
@@ -235,6 +238,53 @@
           ERP.toast(L('예시 데이터를 지웠습니다', 'Đã xóa dữ liệu mẫu'), 'ok'); ERP.render();
         } }] });
     }
+    // 9차: 사내망 PIN · PC 밖 자동 백업 (설치형 서버 모드). 바꾸기는 ERP 가 실행 중인 PC 에서만 (서버도 막음)
+    function lanCard() {
+      const box = h('div', { class: 'card', id: 'lanCard' }, h('h3', L('사내망 접속 · 자동 백업', 'Mạng nội bộ · Sao lưu tự động')), h('p', { class: 'help' }, '…'));
+      Promise.all([fetch('/api/info').then(r => r.json()), fetch('/api/backup').then(r => r.json())]).then(([i, b]) => fill(i, b)).catch(e => { box.lastChild.textContent = String(e.message || e); });
+      const pad = (x) => String(x).padStart(2, '0');
+      const when = (s) => { if (!s) return '–'; const d = new Date(s); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+      const mb = (n) => n ? (n / 1048576).toFixed(1) + ' MB' : '';
+      const put = (url, body) => fetch(url, { method: url.endsWith('/run') ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
+      function fill(i, b) {
+        const own = !!i.loopback;
+        const pin = h('input', { class: 'inp', type: 'password', inputmode: 'numeric', maxlength: '12', autocomplete: 'new-password', placeholder: L('숫자 4~12자리', '4~12 chữ số'), style: { width: '150px' } });
+        const setPin = async (v) => { try { await put('/api/lan/pin', { pin: v }); ERP.toast(v ? L('PIN 을 저장했습니다. 다른 PC 는 새 PIN 을 넣어야 합니다.', 'Đã lưu mã PIN. Máy khác phải nhập mã PIN mới.') : L('PIN 을 지웠습니다. 다른 PC 에서는 들어올 수 없습니다.', 'Đã xóa mã PIN. Máy khác không vào được.'), 'ok'); } catch (e) { ERP.toast(e.message, 'bad'); } ERP.refresh(); };
+        const pinRow = own
+          ? h('div', { class: 'toolbar' }, ERP.chip(i.hasPin ? 'ok' : 'warn', i.hasPin ? L('정해짐', 'Đã đặt') : L('없음', 'Chưa có')), pin,
+            h('button', { class: 'btn', onclick: () => { const v = pin.value.trim(); if (!/^\d{4,12}$/.test(v)) { ERP.toast(L('PIN 은 숫자 4~12자리입니다', 'Mã PIN gồm 4~12 chữ số'), 'warn'); return; } setPin(v); } }, i.hasPin ? L('PIN 바꾸기', 'Đổi PIN') : L('PIN 정하기', 'Đặt PIN')),
+            i.hasPin ? h('button', { class: 'btn', onclick: async () => { if (await ERP.confirm(L('PIN 을 지우면 다른 PC 에서 들어올 수 없습니다. 지울까요?', 'Xóa mã PIN thì máy khác không vào được. Xóa?'))) setPin(''); } }, L('지우기', 'Xóa')) : null)
+          : h('div', { class: 'toolbar' }, ERP.chip('ok', L('PIN 으로 들어옴', 'Đã vào bằng PIN')), h('button', { class: 'btn', onclick: () => DB.logout() }, L('이 브라우저 로그아웃', 'Đăng xuất trình duyệt này')));
+        const dir = h('input', { class: 'inp', value: b.dir || '', disabled: !own, placeholder: L('예: E:\\ERP백업 · \\\\NAS\\공유\\ERP · 구글 드라이브 폴더', 'VD: E:\\SaoLuuERP · \\\\NAS\\share\\ERP · thư mục Google Drive'), style: { flex: '1 1 260px', minWidth: '220px' } });
+        const keep = h('input', { class: 'inp', type: 'number', min: '3', max: '365', value: b.keep || 30, disabled: !own, style: { width: '80px' } });
+        const gchk = h('input', { type: 'checkbox', checked: !!b.google, disabled: !own || (!DB.meta.gUrl && !b.google) });
+        const cfgNow = () => ({ dir: dir.value.trim(), keep: Number(keep.value) || 30, google: gchk.checked });
+        const same = () => (cfgNow().dir || null) === (b.dir || null) && cfgNow().keep === (b.keep || 30) && cfgNow().google === !!b.google;
+        const saveCfg = async () => { try { await put('/api/backup', cfgNow()); ERP.toast(L('백업 설정을 저장했습니다', 'Đã lưu cài đặt sao lưu'), 'ok'); return true; } catch (e) { ERP.toast(L('백업 설정 실패: ', 'Lỗi cài đặt sao lưu: ') + e.message, 'bad'); return false; } };
+        const runNow = async (ev) => {
+          const btn = ev.currentTarget; if (own && !same() && !(await saveCfg())) return;
+          btn.disabled = true; btn.textContent = L('백업 중…', 'Đang sao lưu…');
+          try { const j = await put('/api/backup/run', {}); if (j.error) ERP.toast(L('백업 실패: ', 'Sao lưu thất bại: ') + j.error, 'bad'); else ERP.toast(L('백업했습니다', 'Đã sao lưu') + (j.file ? ': ' + j.file : '') + (j.drive ? ' · Google Drive' : ''), 'ok'); } catch (e) { ERP.toast(e.message, 'bad'); }
+          ERP.refresh();
+        };
+        const on = !!(b.dir || b.google); const failed = b.lastError && (!b.lastOk || b.lastTry > b.lastOk);
+        box.replaceChildren(h('h3', L('사내망 접속 · 자동 백업', 'Mạng nội bộ · Sao lưu tự động')),
+          h('div', { class: 'field' }, h('span', L('사내망 접속', 'Truy cập mạng nội bộ')), h('div', ERP.chip(i.lanOn ? 'ok' : 'neutral', i.lanOn ? L('켜짐', 'Bật') : L('꺼짐', 'Tắt')), ' ',
+            h('small', { class: 'muted' }, i.lanOn ? (i.lan || []).join('  ') : L('켜기: 프로그램 메뉴 ERP → 사내망 접속 켜기', 'Bật: menu ERP → Bật truy cập LAN')))),
+          h('div', { class: 'field' }, h('span', L('사내망 PIN', 'Mã PIN mạng nội bộ')), pinRow),
+          h('p', { class: 'help' }, L('다른 PC 의 브라우저는 처음 한 번 PIN 을 넣으면 7일 동안 기억합니다. ERP 가 실행 중인 PC 는 PIN 없이 씁니다. PIN 을 바꾸면 다른 PC 는 다시 넣어야 합니다.', 'Trình duyệt máy khác nhập PIN một lần và được nhớ 7 ngày. Máy đang chạy ERP không cần PIN. Đổi PIN thì máy khác phải nhập lại.')),
+          h('div', { class: 'field' }, h('span', L('매일 자동 백업 폴더', 'Thư mục sao lưu hằng ngày')), h('div', { class: 'toolbar' }, dir, h('label', { class: 'nowrap' }, L('보관 ', 'Giữ '), keep, L(' 일', ' ngày')))),
+          h('label', { class: 'nowrap', style: { display: 'block', margin: '6px 0' } }, gchk, ' ', L('구글 드라이브에도 매일 압축본 저장 (구글 연동 설정 · Code.gs 3판 필요)', 'Lưu thêm bản nén lên Google Drive mỗi ngày (cần kết nối Google · Code.gs bản 3)')),
+          h('p', { class: 'help' }, on
+            ? [L('마지막 성공: ', 'Lần thành công cuối: ') + when(b.lastOk), b.lastFile ? ' · ' + b.lastFile : '', b.lastSize ? ' · ' + mb(b.lastSize) : '', b.lastDrive ? ' · Google Drive' : '',
+              failed ? h('div', { class: 'warn-text' }, L('마지막 시도 실패 (', 'Lần thử cuối thất bại (') + when(b.lastTry) + '): ' + b.lastError) : null]
+            : L('아직 백업 위치가 없습니다. PC 가 고장 나도 자료가 남도록 USB · NAS · 구글 드라이브 동기화 폴더를 지정하세요. ERP 가 켜져 있는 동안 하루에 한 번 저장합니다.', 'Chưa có nơi sao lưu. Hãy chọn USB · NAS · thư mục đồng bộ Google Drive để dữ liệu không mất khi hỏng máy. ERP sao lưu mỗi ngày một lần khi đang chạy.')),
+          own ? h('div', { class: 'toolbar' }, h('button', { class: 'btn', onclick: async () => { if (await saveCfg()) ERP.refresh(); } }, L('백업 설정 저장', 'Lưu cài đặt sao lưu')), h('button', { class: 'btn primary', disabled: !on && !cfgNow().dir, onclick: runNow }, L('지금 백업', 'Sao lưu ngay')))
+            : h('p', { class: 'help' }, L('백업 설정은 ERP 가 실행 중인 PC 에서 바꿉니다.', 'Cài đặt sao lưu được đổi trên máy đang chạy ERP.')));
+        dir.addEventListener('input', () => { const bt = box.querySelector('.btn.primary'); if (bt) bt.disabled = !on && !dir.value.trim(); });
+      }
+      return box;
+    }
     root.append(h('div', { class: 'grid2' },
       h('div', { class: 'card' }, h('h3', L('일반', 'Chung')),
         h('div', { class: 'field' }, h('span', L('언어', 'Ngôn ngữ')), h('div', { class: 'toolbar' }, h('button', { class: 'btn' + (ERP.lang === 'ko' ? ' primary' : ''), onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: 'btn' + (ERP.lang === 'vi' ? ' primary' : ''), onclick: () => ERP.setLang('vi') }, 'Tiếng Việt'))),
@@ -247,6 +297,7 @@
           h('button', { class: 'btn', onclick: async () => { if (!(await ERP.confirm(L('현재 데이터를 지우고 샘플(첨부 엑셀) 데이터로 되돌립니다.', 'Xóa dữ liệu hiện tại và nạp lại dữ liệu mẫu (từ Excel đính kèm).')))) return; await DB.loadSeed(); ERP.toast(L('샘플 데이터로 초기화했습니다', 'Đã nạp lại dữ liệu mẫu'), 'ok'); ERP.render(); } }, L('샘플 데이터로 초기화', 'Nạp lại dữ liệu mẫu')),
           h('button', { class: 'btn danger', onclick: async () => { if (!(await ERP.confirm(L('모든 데이터를 삭제합니다 (빈 상태에서 엑셀로 새로 시작). 먼저 백업하세요.', 'Xóa TOÀN BỘ dữ liệu (bắt đầu mới từ Excel). Hãy sao lưu trước.')))) return; await DB.wipe(); ERP.toast(L('모두 삭제했습니다', 'Đã xóa hết'), 'ok'); ERP.render(); } }, L('전체 삭제 (빈 상태)', 'Xóa toàn bộ')))),
       stockCard(),
+      DB.mode === 'server' ? lanCard() : null,
       h('div', { class: 'card' }, h('h3', L('정보', 'Thông tin')), h('p', { class: 'help' }, 'ColorPencil ERP v' + ERP.v + ' · ' + L('색연필 제조 수주 · 생산 · 재고 · 원부자재 관리', 'Quản lý đơn hàng · sản xuất · kho · NVL ngành bút chì màu')),
         h('p', { class: 'help' }, L('마스터 데이터(품목·BOM·배합·거래처·설비·안전재고)는 화면에서 직접 수정하거나 엑셀로 업로드하여 언제든 변경할 수 있습니다.', 'Dữ liệu gốc (mã hàng, BOM, công thức, đối tác, máy, tồn an toàn) có thể sửa trực tiếp trên màn hình hoặc tải Excel bất kỳ lúc nào.')))));
   } };

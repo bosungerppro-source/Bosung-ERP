@@ -12,6 +12,7 @@
     "test:assistant": "node tools/selftest_assistant.js",
     "test:v7": "node tools/selftest_v7.js",
     "test:v8": "node tools/selftest_v8.js",
+    "test:v9": "node tools/selftest_v9.js",
     "seed:v6": "node tools/build_seed_v6.js"
   },
   "keywords": [],
