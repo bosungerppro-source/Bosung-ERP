@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const server = require('../server.js');
@@ -19,6 +19,8 @@ else {
       appDir: path.join(__dirname, '..', 'app'),
       host: cfg.lan ? '0.0.0.0' : '127.0.0.1',
       port: cfg.port || 3210,
+      // AI · 구글 호출은 Chromium 네트워크(net.fetch)로 → Windows 의 회사 프록시 · 인증서 설정을 그대로 따른다
+      fetch: (url, init) => net.fetch(url, init),
     });
     buildMenu(cfg);
     win = new BrowserWindow({ width: 1480, height: 920, minWidth: 1100, minHeight: 700, backgroundColor: '#F2F3F5',

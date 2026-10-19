@@ -113,7 +113,7 @@ const GOOGLE_HOSTS = /(^|\.)script\.google\.com$|(^|\.)googleusercontent\.com$/;
 const googleUrlOk = (url, re) => { try { const u = new URL(url); return re ? re.test(u.hostname) : (u.protocol === 'https:' && GOOGLE_HOSTS.test(u.hostname)); } catch (e) { return false; } };
 
 /** 매일 자동 백업: 지정한 폴더(USB · NAS · 구글 드라이브 동기화 폴더)에 전체 JSON + (선택) 구글 드라이브에 압축본 */
-function createBackup(dataDir, store, googleHosts) {
+function createBackup(dataDir, store, googleHosts, doFetch) {
   const file = path.join(dataDir, 'backup.json');
   const cfg = () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return {}; } };
   const save = (c) => fs.writeFileSync(file, JSON.stringify(c, null, 1));
@@ -139,7 +139,7 @@ function createBackup(dataDir, store, googleHosts) {
       else {
         try {
           const b64 = zlib.gzipSync(json).toString('base64');
-          const r = await fetch(g.gUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: AbortSignal.timeout(180000),
+          const r = await doFetch(g.gUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: AbortSignal.timeout(180000),
             body: JSON.stringify({ token: g.gToken, action: 'backup', name: name + '.gz', b64, keep: keepOf(c) }) });
           const j = await r.json().catch(() => ({}));
           if (j.ok) res.drive = j.url || j.name;
@@ -165,6 +165,31 @@ function createBackup(dataDir, store, googleHosts) {
     /** 스케줄러: 오늘 성공한 백업이 없고, 마지막 시도가 30분 넘게 지났으면 실행 */
     due() { const c = cfg(); if (!c.dir && !c.google) return false; if (c.lastOk && c.lastOk.slice(0, 10) === today()) return false; return !c.lastTry || Date.now() - Date.parse(c.lastTry) > 30 * 60000; },
   };
+}
+
+// ---- AI 중계 (9차): 정해진 필드만 넘기고 모델 · 길이는 서버 설정으로 — 다른 PC 브라우저가 비싼 모델이나 서버 도구(웹 검색 등)를 쓰지 못하게 ----
+const AI_MAX_TOKENS = 16000, AI_DAILY_DEFAULT = 400, AI_MODEL = 'claude-sonnet-5-5';
+// 안전 정책으로 거절되면 Anthropic 이 알맞은 다른 모델로 다시 답하는 fallbacks: "default" (Claude API, 베타 헤더 필요)
+const AI_FALLBACK_MODELS = /^claude-(sonnet-5-5|opus-5-5|opus-5|fable-5-1|fable-5)$/, AI_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+function aiBody(b, model) {
+  if (!b || !Array.isArray(b.messages) || !b.messages.length) return { error: 'messages required' };
+  const out = { model, max_tokens: Math.min(AI_MAX_TOKENS, Math.max(1, Math.floor(Number(b.max_tokens) || AI_MAX_TOKENS))), messages: b.messages };
+  if (typeof b.system === 'string') out.system = b.system;
+  else if (Array.isArray(b.system)) {
+    if (!b.system.every(x => x && x.type === 'text' && typeof x.text === 'string')) return { error: 'system: text blocks only' };
+    out.system = b.system.map(x => (x.cache_control ? { type: 'text', text: x.text, cache_control: { type: 'ephemeral' } } : { type: 'text', text: x.text }));
+  }
+  if (b.tools !== undefined) {
+    if (!Array.isArray(b.tools) || b.tools.length > 32) return { error: 'tools: array (max 32)' };
+    for (const t of b.tools) if (!t || typeof t.name !== 'string' || !t.input_schema || typeof t.input_schema !== 'object' || (t.type !== undefined && t.type !== 'custom')) return { error: 'only custom tools are allowed: ' + String((t && (t.type || t.name)) || '?') };
+    out.tools = b.tools.map(t => { const x = { name: t.name, input_schema: t.input_schema }; if (typeof t.description === 'string') x.description = t.description; if (t.strict === true) x.strict = true; return x; });
+  }
+  if (b.tool_choice && ['auto', 'none'].includes(b.tool_choice.type)) out.tool_choice = { type: b.tool_choice.type };
+  if (b.output_config && ['low', 'medium', 'high'].includes(b.output_config.effort)) out.output_config = { effort: b.output_config.effort };
+  if (b.cache_control) out.cache_control = { type: 'ephemeral' };
+  if (b.fallbacks === 'default' && AI_FALLBACK_MODELS.test(model)) out.fallbacks = 'default';
+  if (b.thinking && b.thinking.type === 'adaptive') out.thinking = { type: 'adaptive' };
+  return { body: out };
 }
 
 function readBody(req, limit) {
@@ -199,11 +224,13 @@ function start(opts) {
   const dataDir = opts.dataDir || process.env.ERP_DATA || path.join(__dirname, 'data');
   const host = opts.host || process.env.ERP_HOST || '127.0.0.1';
   let port = Number(opts.port || process.env.ERP_PORT || 3210);
+  // 바깥 요청(Anthropic · 구글): 설치형은 Electron 의 net.fetch (회사 프록시 · 인증서를 따름), 그 밖에는 Node fetch
+  const doFetch = (u, init) => (opts.fetch || global.fetch)(u, init);
   // 이 PC 이름 · IP 말고 다른 이름으로 들어와야 하면 (회사 DNS 이름 등): ERP_ALLOW_HOSTS=erp.bosung.local,erp2
   const extraHosts = String(opts.allowHosts || process.env.ERP_ALLOW_HOSTS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   const store = createStore(dataDir);
   const auth = createAuth(dataDir);
-  const backup = createBackup(dataDir, store, opts.googleHosts);
+  const backup = createBackup(dataDir, store, opts.googleHosts, doFetch);
 
   /** 다른 웹사이트(DNS rebinding · 다른 출처의 요청)는 막는다: Host 는 이 PC 이름, Origin 이 있으면 같은 곳, 쓰기 요청은 JSON 만 */
   function guard(req, isApi) {
@@ -284,32 +311,51 @@ function start(opts) {
     }
     if (p === '/api/backup/run' && req.method === 'POST') return send(200, await backup.run());
     // ---- AI assistant: API key is kept in <data>/ai.json and never sent to the browser ----
-    const aiFile = path.join(dataDir, 'ai.json');
+    const aiFile = path.join(dataDir, 'ai.json'), usageFile = path.join(dataDir, 'ai_usage.json');
     const aiCfg = () => { try { return JSON.parse(fs.readFileSync(aiFile, 'utf8')); } catch (e) { return {}; } };
+    const usage = () => { try { return JSON.parse(fs.readFileSync(usageFile, 'utf8')); } catch (e) { return {}; } };
+    const limitOf = (c) => (c.dailyLimit === undefined || c.dailyLimit === null ? AI_DAILY_DEFAULT : Math.max(0, Math.floor(Number(c.dailyLimit) || 0)));
     // the key is shown only as its last 4 characters; it can be changed only from the PC that runs the ERP (not from LAN browsers)
     const keyTail = (c) => (c.key ? c.key.slice(-4) : (process.env.ANTHROPIC_API_KEY ? 'env' : ''));
-    if (p === '/api/ai/config' && req.method === 'GET') { const c = aiCfg(); return send(200, { hasKey: !!(c.key || process.env.ANTHROPIC_API_KEY), model: c.model || 'claude-sonnet-5-5', keyTail: keyTail(c) }); }
+    const cfgOut = (c) => ({ hasKey: !!(c.key || process.env.ANTHROPIC_API_KEY), model: c.model || AI_MODEL, keyTail: keyTail(c), dailyLimit: limitOf(c), today: usage()[today()] || { requests: 0 }, canEdit: loop });
+    /** 하루 사용량 (호출 수 · 토큰). 120일 보관 */
+    const addUsage = (j) => {
+      const u = usage(), d = today(), x = u[d] || (u[d] = { requests: 0, input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, refusals: 0 });
+      const us = (j && j.usage) || {}; x.requests++; x.input_tokens += us.input_tokens || 0; x.output_tokens += us.output_tokens || 0;
+      x.cache_read += us.cache_read_input_tokens || 0; x.cache_write += us.cache_creation_input_tokens || 0; if (j && j.stop_reason === 'refusal') x.refusals++;
+      Object.keys(u).sort().slice(0, -120).forEach(k => { delete u[k]; });
+      fs.writeFileSync(usageFile, JSON.stringify(u));
+    };
+    if (p === '/api/ai/config' && req.method === 'GET') return send(200, cfgOut(aiCfg()));
     if (p === '/api/ai/config' && req.method === 'PUT') {
       if (!loop) return send(403, { error: 'The API key can only be changed on the PC that runs the ERP. / Chỉ đổi API key trên máy đang chạy ERP.' });
       const b = JSON.parse(await readBody(req, 1e5)); const c = aiCfg();
       if (typeof b.key === 'string') { if (b.key.trim()) c.key = b.key.trim(); else delete c.key; }
       if (b.model) c.model = String(b.model).trim();
+      if (b.dailyLimit !== undefined && b.dailyLimit !== null && b.dailyLimit !== '') c.dailyLimit = Math.max(0, Math.floor(Number(b.dailyLimit) || 0));
       fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(aiFile, JSON.stringify(c), { mode: 0o600 });
-      return send(200, { ok: true, hasKey: !!(c.key || process.env.ANTHROPIC_API_KEY), model: c.model || 'claude-sonnet-5-5', keyTail: keyTail(c) });
+      return send(200, Object.assign({ ok: true }, cfgOut(c)));
     }
     if (p === '/api/ai/messages' && req.method === 'POST') {
       const c = aiCfg(); const key = c.key || process.env.ANTHROPIC_API_KEY;
       if (!key) return send(400, { error: { message: 'NO_KEY' } });
-      const b = JSON.parse(await readBody(req, 20e6)); b.model = b.model || c.model || 'claude-sonnet-5-5';
+      const lim = limitOf(c); if (lim > 0 && ((usage()[today()] || {}).requests || 0) >= lim) return send(429, { error: { type: 'daily_limit', message: 'DAILY_LIMIT ' + lim } });
+      let b; try { b = JSON.parse(await readBody(req, 20e6)); } catch (e) { return send(400, { error: { message: 'bad request body' } }); }
+      const a = aiBody(b, c.model || AI_MODEL); if (a.error) return send(400, { error: { message: a.error } });
+      const headers = { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' };
+      if (a.body.fallbacks) headers['anthropic-beta'] = AI_FALLBACK_BETA;
       try {
-        const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(b), signal: AbortSignal.timeout(120000) });
-        const text = await r.text(); res.writeHead(r.status, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(text);
+        const r = await doFetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(a.body), signal: AbortSignal.timeout(235000) });
+        const text = await r.text(); let j = null; try { j = JSON.parse(text); } catch (e) { /* not json */ }
+        try { addUsage(j); } catch (e) { console.error('ai usage', e.message); }
+        const h = { 'Content-Type': 'application/json; charset=utf-8' }; const ra = r.headers && r.headers.get ? r.headers.get('retry-after') : null; if (ra) h['Retry-After'] = ra;
+        res.writeHead(r.status, h); return res.end(text);
       } catch (e) { return send(e.name === 'TimeoutError' ? 504 : 502, { error: { message: (e.name === 'TimeoutError' ? 'Timeout: ' : 'Network: ') + e.message } }); }
     }
     if (p === '/api/gproxy' && req.method === 'POST') {
       const { url, body } = JSON.parse(await readBody(req, 100e6));
       if (!googleUrlOk(url, opts.googleHosts)) return send(400, { error: 'only Google Apps Script URLs are allowed' });
-      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: typeof body === 'string' ? body : JSON.stringify(body), redirect: 'follow' });
+      const r = await doFetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: typeof body === 'string' ? body : JSON.stringify(body), redirect: 'follow' });
       const text = await r.text();
       res.writeHead(r.status, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(text);
@@ -334,7 +380,7 @@ function start(opts) {
   });
 }
 
-module.exports = { start };
+module.exports = { start, aiBody };
 if (require.main === module) {
   start({}).then(i => console.log('ERP server running at ' + i.url + '  (data: ' + i.dataDir + ')'));
 }

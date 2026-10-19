@@ -44,9 +44,9 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 ### 5. 기술 구조 (빌드 도구 없음)
 - Vanilla JS SPA (`app/`), 전역 `window.ERP`, DOM 빌더 `h()`, Chart.js 4, SheetJS.
 - `ERP.db`: 메모리 테이블, 저장은 서버모드(JSON 파일) 또는 IndexedDB. 행마다 `_id`.
-- `server.js`: 의존성 없는 로컬 서버 (정적파일, `/api/*`, Google Apps Script 중계 `/api/gproxy`, 일일 백업 14일, LAN 옵션).
+- `server.js`: 의존성 없는 로컬 서버 (정적파일, `/api/*`, Google Apps Script 중계 `/api/gproxy`, 일일 백업 14일, LAN 옵션). 9차: 표마다 저장 번호(409 → 화면이 행 단위로 합침) · 설정 항목별 저장(PATCH) · Host/Origin/JSON 검사 · 사내망 PIN · PC 밖 자동 백업 · AI 중계 허용 목록 · 하루 한도.
 - `electron/main.js`: 서버를 내장해 창으로 표시. 설치 파일은 electron-builder(dir) + NSIS(`build/installer.nsi`).
-- `google/Code.gs`: Apps Script 웹앱 (ping/list/put/get/snapshot, 토큰 보호).
+- `google/Code.gs`: Apps Script 웹앱 (ping/list/put/get/snapshot/backup, 토큰 보호, 3판 = ping `ver: 3`).
 
 ### 6. 확장할 때 지켜야 할 것
 - 새 표는 `app/js/schema.js` 의 `ERP.TABLES` 에 컬럼(ko/vi/type)을 추가하면 목록·폼·엑셀 내보내기·구글 동기화에 자동 반영된다.
@@ -54,7 +54,9 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - 새 화면은 `app/js/p_*.js` 에서 `ERP.pages.<id> = {ko, vi, render(root)}` 로 등록하고 `main.js` 의 NAV 에 추가한다.
 - 모든 문자열은 `L()` 로 양국어 제공(`L(ko, '')` = 베트남어에서 빈 글자, `L(ko)` = 한국어 대체). 숫자/날짜 포맷은 `ERP.fmt`.
 - 사용자 입력 · 엑셀에서 날짜 · 숫자를 읽을 때는 `ERP.fmt.parseDate` · `ERP.fmt.parseNum` (8차). 진행 중 PO 는 `ERP.calc.isOpen` (완료 · 취소 · 보류 제외).
-- 변경 후: `npm run test:v8` (8차 데이터 정확성, 현장 엑셀 `seed/factory`) → `npm run test:v7` (재고·위젯·화면, ECOUNT 엑셀은 `seed/ecount`; 이전 버전 업그레이드까지 보려면 `ERP_PREV=<이전 소스 폴더>`, 예: `git worktree add /tmp/prev v1.2.0`) → `npm run test:assistant` (비서·화면·서버) → `npm run demo` → `npm run dist`. 현장 엑셀 파서는 `npm test -- <엑셀폴더> [all]`.
+- 표를 바꿀 때는 `DB.add / addMany / update / remove / replace / upsert / touch` (직접 `DB.t[n]` 을 바꾸면 반드시 `DB.touch(n)`) — 여러 PC 저장 합치기가 행 `_id` 와 저장 번호에 기대므로 (9차). 서버 쓰기 API 는 JSON 만, 바깥 요청은 `doFetch`.
+- AI 대화 기록은 뒤에 붙이기만 한다 (중간 수정 · 삭제, 대화 중 시스템 프롬프트 · 도구 변경 금지 → 바뀐 것은 `role: "system"` 메시지) (9차).
+- 변경 후: `npm run test:v9` (9차 여러 PC · 보안 · 백업) → `npm run test:v8` (8차 데이터 정확성, 현장 엑셀 `seed/factory`) → `npm run test:v7` (재고·위젯·화면, ECOUNT 엑셀은 `seed/ecount`; 이전 버전 업그레이드까지 보려면 `ERP_PREV=<이전 소스 폴더>`, 예: `git worktree add /tmp/prev v1.2.0`) → `npm run test:assistant` (비서·화면·서버) → `npm run demo` → `npm run dist`. 현장 엑셀 파서는 `npm test -- <엑셀폴더> [all]`.
 
 ### 7. 다음 개선 아이디어 (요청 시)
 사용자/권한(역할별 화면), 작업지시서·LOT 추적, 설비 가동 실시간 입력(태블릿), 바코드 입출고, 원가 계산, 인쇄 양식(PDF), 자동 업데이트.
@@ -156,3 +158,14 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **원료 연결**: 사출 원료는 사용자 연결(code_map raw)이 이름 매칭보다 먼저, 양품 0 이어도 원료 차감.
 - **캐시**: 생산 반영 · 재고 캐시 키에 기준일 · 공정 단위 포함.
 - 시험: `npm run test:v8` 72개 + `npm run test:v7` 149개(ERP_PREV) + `npm run test:assistant` 240개.
+
+### 2-8. 9차: 여러 PC 동시 사용 · 보안 · 자동 백업 · AI 비서 (v1.4.0, 2026-10-19)
+자세한 문제 · 결정 · 검증은 `docs/PROMPT_v9_MULTIPC_AI.md`, 작업 기록은 `docs/history/v9_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **저장 충돌**: 서버 `versions.json` 의 표별 저장 번호. 화면 `DB.sver` · `DB._base`(행 지문) → `PUT /api/t/:name` + `X-Base-Ver`, 409 면 `merge3` 로 합쳐 다시 (둘 다 고친 행 = 나중 PC, 지움 ↔ 고침 = 고친 행). 설정은 `PATCH /api/meta {set, del}`. 불러오기 `DB.poll()` 20초 · 창 포커스, 화면은 `ERP.onRemote` → 조용할 때 `ERP.refresh()`(스크롤 유지).
+- **저장 안정성**: 실패하면 다시 시도(2초 → 1분), `DB.flush()` 는 보내는 중인 저장 · 설정까지 기다림. `DB.pending` = 아직 저장 안 된 표 수.
+- **보안**: Host = 이 PC 이름 · IP · localhost(+ `ERP_ALLOW_HOSTS`), Origin 같은 곳, 쓰기는 JSON 만. 사내망 PIN(`lan.json`, pbkdf2, 쿠키 7일, 5번 틀리면 잠금) — loopback 은 면제, PIN 없으면 다른 PC 불가. PIN · AI 키 · 백업 설정은 loopback 에서만.
+- **자동 백업**: `backup.json` (dir · keep · google) → 하루 한 번 `ERP_backup_YYYY-MM-DD.json` + (선택) Code.gs 3판 `backup`(gzip). 복원은 .json · .json.gz.
+- **AI 비서**: 대화는 뒤에 붙이기만 (시스템 프롬프트 대화 시작 때 고정, 바뀐 날짜 · 언어 · 설정 = `role: "system"` 메시지, 30만 자 넘으면 요약으로 새 대화). `max_tokens` 16000 · effort low/medium · 캐시 · `fallbacks: "default"`(받는 모델만) · 429/529 retry-after · refusal / max_tokens 는 기록에 안 남김 · 도구 오류 `is_error` · 마지막 호출 `tool_choice: none` · 도구 결과는 `<목록>_total/_truncated`. 중계(`aiBody`): 모델 = 서버 설정, 정해진 필드만, 서버 도구 거절, 하루 한도(기본 400) · 사용량 `ai_usage.json`. 데모 키는 메모리에만. 설치형은 `net.fetch`.
+- 시험: `npm run test:v9` 87개 + `npm run test:assistant` 289개 + `npm run test:v8` 72개 + `npm run test:v7` 149개(ERP_PREV).

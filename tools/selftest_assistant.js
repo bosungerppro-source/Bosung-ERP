@@ -37,7 +37,7 @@ const mkTmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'erp-assis
 function req(port, method, p, body, opts) {
   return new Promise((resolve, reject) => {
     const r = http.request(Object.assign({ host: '127.0.0.1', port, path: p, method, headers: body !== undefined ? { 'content-type': 'application/json' } : {} }, opts || {}), (res) => {
-      let d = ''; res.on('data', c => { d += c; }); res.on('end', () => { let j = null; try { j = JSON.parse(d); } catch (e) { /* not json */ } resolve({ status: res.statusCode, text: d, json: j }); });
+      let d = ''; res.on('data', c => { d += c; }); res.on('end', () => { let j = null; try { j = JSON.parse(d); } catch (e) { /* not json */ } resolve({ status: res.statusCode, text: d, json: j, headers: res.headers }); });
     });
     r.on('error', reject); if (body !== undefined) r.write(typeof body === 'string' ? body : JSON.stringify(body)); r.end();
   });
@@ -51,11 +51,12 @@ global.fetch = async (url, init) => {
     const s = upstream.script.shift();
     if (!s) return new Response(JSON.stringify({ type: 'error', error: { message: 'no scripted reply' } }), { status: 500, headers: { 'content-type': 'application/json' } });
     if (s instanceof Error) throw s;
-    return new Response(JSON.stringify(s.body), { status: s.status || 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify(s.body), { status: s.status || 200, headers: Object.assign({ 'content-type': 'application/json' }, s.headers || {}) });
   }
   return realFetch(url, init);
 };
 const textReply = (text) => ({ body: { id: 'msg_x', type: 'message', role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' } });
+const sysText = (sy) => (typeof sy === 'string' ? sy : (sy || []).map(b => b.text).join('\n'));   // 9차: system 은 캐시 표시를 단 text 블록 배열
 const toolReply = (name, input, id) => ({ body: { id: 'msg_t', type: 'message', role: 'assistant', content: [{ type: 'text', text: '조회합니다' }, { type: 'tool_use', id: id || 'toolu_1', name, input: input || {} }], stop_reason: 'tool_use' } });
 
 let portSeq = 3900 + Math.floor(Math.random() * 300);
@@ -74,6 +75,12 @@ async function openApp(url, errors) {
 
 // ---------- the question table ----------
 const TABLE = [
+  // 9차: 예전에 잘못 알아듣던 질문 (ép lõi = 리필 성형 ≠ lỗi 불량 · 생산 지연 PO = 납기 · 끝난 PO · 품번+재고 · 모자란 · 품질/폐기/파손 · 어느 설비가 · 설비 사용 · 보류/취소 PO)
+  ['ép lõi hôm qua bao nhiêu', 'production', 'vi'], ['sản lượng ép lõi tuần này', 'production', 'vi'], ['ep loi hom qua', 'production'], ['lỗi ép lõi tuần này', 'qd', 'vi'],
+  ['생산 지연 PO', 'deadline', 'ko'], ['생산 지연', 'deadline', 'ko'], ['PO nào đã làm xong', 'orders', 'vi'], ['đã làm xong chưa', 'orders', 'vi'], ['어제 포장 완료 수량', 'production', 'ko'],
+  ['52-0712-0-009 재고', 'material', 'ko'], ['52-0712-0-009', 'orders'], ['모자란 자재', 'low_stock', 'ko'], ['chất lượng tuần này', 'qd', 'vi'], ['phế phẩm tháng này', 'qd', 'vi'], ['hàng hỏng hôm qua', 'qd', 'vi'],
+  ['máy nào dừng nhiều nhất', 'qd', 'vi'], ['sử dụng máy', 'production', 'vi'], ['tình hình sử dụng máy tuần này', 'production', 'vi'], ['설비 가동 현황', 'production', 'ko'],
+  ['PO tạm ngưng', 'orders', 'vi'], ['보류된 수주', 'orders', 'ko'], ['취소된 PO', 'orders', 'ko'], ['dừng máy hôm qua', 'qd', 'vi'],
   // Korean
   ['오늘 브리핑', 'briefing', 'ko'], ['오늘 현황 요약해줘', 'briefing', 'ko'], ['전체 현황', 'briefing', 'ko'], ['현황', 'briefing', 'ko'],
   ['납기 위험 PO', 'deadline', 'ko'], ['납기 경과 PO', 'deadline', 'ko'], ['지연된 수주', 'deadline', 'ko'], ['7일 내 납기', 'deadline', 'ko'], ['납기 임박한 수주', 'deadline', 'ko'], ['오래된 지연 PO', 'deadline', 'ko'],
@@ -135,15 +142,47 @@ const TABLE = [
     ok('프록시: Anthropic 주소·키·버전 헤더', c0.url === 'https://api.anthropic.com/v1/messages' && c0.headers['x-api-key'] === KEY && c0.headers['anthropic-version'] === '2023-06-01', c0);
     ok('프록시: 설정된 모델 사용', c0.body && c0.body.model === 'claude-test-model', c0.body);
     upstream.script = [{ status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } }];
-    r = await req(S.port, 'POST', '/api/ai/messages', { messages: [] });
+    const one = { messages: [{ role: 'user', content: 'x' }] };
+    r = await req(S.port, 'POST', '/api/ai/messages', one);
     ok('프록시: 401 그대로 전달', r.status === 401 && /invalid x-api-key/.test(r.text), r.text);
     const te = new Error('The operation was aborted due to timeout'); te.name = 'TimeoutError'; upstream.script = [te];
-    r = await req(S.port, 'POST', '/api/ai/messages', { messages: [] });
+    r = await req(S.port, 'POST', '/api/ai/messages', one);
     ok('프록시: 시간 초과 → 504 Timeout', r.status === 504 && /Timeout/.test(r.text), r.text);
     upstream.script = [new Error('fetch failed')];
-    r = await req(S.port, 'POST', '/api/ai/messages', { messages: [] });
+    r = await req(S.port, 'POST', '/api/ai/messages', one);
     ok('프록시: 네트워크 오류 → 502 Network', r.status === 502 && /Network/.test(r.text), r.text);
     ok('프록시 오류 응답에 키가 없음', !r.text.includes('TESTKEY'));
+
+    // 9차: 중계는 정해진 필드만 넘기고 모델 · 길이는 서버 설정으로, 서버 도구는 거절, retry-after 전달, 하루 사용량 · 한도
+    upstream.calls.length = 0; upstream.script = [textReply('ok1')];
+    r = await req(S.port, 'POST', '/api/ai/messages', { model: 'claude-fable-5-1', max_tokens: 999999, stream: true, temperature: 0.2, metadata: { user_id: 'x' }, messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ name: 'overview', description: 'd', input_schema: { type: 'object', properties: {} }, cache_control: { type: 'ephemeral' } }], tool_choice: { type: 'any' }, output_config: { effort: 'max', format: { type: 'json_schema' } }, fallbacks: 'default', cache_control: { type: 'ephemeral', ttl: '1h' } });
+    let ub = (upstream.calls[0] || {}).body || {};
+    ok('중계: 모델은 서버 설정 · max_tokens 16000 이하 · 모르는 필드 버림', r.status === 200 && ub.model === 'claude-test-model' && ub.max_tokens === 16000 && !('stream' in ub) && !('temperature' in ub) && !('metadata' in ub) && !('tool_choice' in ub) && !('output_config' in ub), ub);
+    ok('중계: fallbacks 는 받는 모델일 때만 (베타 헤더도)', !('fallbacks' in ub) && !(upstream.calls[0].headers || {})['anthropic-beta'] && ub.cache_control && ub.cache_control.type === 'ephemeral' && !ub.cache_control.ttl, { fb: ub.fallbacks, h: upstream.calls[0].headers });
+    await req(S.port, 'PUT', '/api/ai/config', { model: 'claude-sonnet-5-5' });
+    upstream.calls.length = 0; upstream.script = [textReply('ok2')];
+    await req(S.port, 'POST', '/api/ai/messages', { messages: [{ role: 'user', content: 'hi' }], output_config: { effort: 'low' }, fallbacks: 'default', tool_choice: { type: 'none' } });
+    ub = (upstream.calls[0] || {}).body || {};
+    ok('중계: claude-sonnet-5-5 → fallbacks "default" + server-side-fallback-2026-07-01 헤더 · effort low · tool_choice none', ub.fallbacks === 'default' && upstream.calls[0].headers['anthropic-beta'] === 'server-side-fallback-2026-07-01' && ub.output_config.effort === 'low' && ub.tool_choice.type === 'none', { ub, h: upstream.calls[0].headers });
+    upstream.calls.length = 0;
+    r = await req(S.port, 'POST', '/api/ai/messages', { messages: [{ role: 'user', content: 'hi' }], tools: [{ type: 'web_search_20260209', name: 'web_search' }] });
+    ok('중계: 서버 도구(웹 검색 등)는 거절 · Anthropic 호출 없음', r.status === 400 && /custom tools/.test(r.text) && upstream.calls.length === 0, r.text);
+    upstream.script = [{ status: 429, headers: { 'retry-after': '7' }, body: { type: 'error', error: { type: 'rate_limit_error', message: 'rate limited' } } }];
+    r = await req(S.port, 'POST', '/api/ai/messages', one);
+    ok('중계: 429 의 retry-after 전달', r.status === 429 && r.headers['retry-after'] === '7', r.headers);
+    let cf = (await req(S.port, 'GET', '/api/ai/config')).json; const used0 = cf.today.requests;
+    upstream.script = [{ body: { id: 'm', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'u' }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 50, cache_creation_input_tokens: 5 } } }];
+    await req(S.port, 'POST', '/api/ai/messages', one);
+    cf = (await req(S.port, 'GET', '/api/ai/config')).json;
+    ok('하루 사용량 기록 (호출 · 입력 · 출력 · 캐시)', cf.today.requests === used0 + 1 && cf.today.input_tokens >= 100 && cf.today.output_tokens >= 20 && cf.today.cache_read >= 50 && cf.dailyLimit === 400, cf);
+    await req(S.port, 'PUT', '/api/ai/config', { dailyLimit: used0 + 2 });
+    upstream.script = [textReply('last')]; const okLast = (await req(S.port, 'POST', '/api/ai/messages', one)).status;
+    upstream.calls.length = 0; r = await req(S.port, 'POST', '/api/ai/messages', one);
+    ok('하루 한도를 넘으면 429 DAILY_LIMIT · Anthropic 호출 없음', okLast === 200 && r.status === 429 && /DAILY_LIMIT/.test(r.text) && upstream.calls.length === 0, r.text);
+    await req(S.port, 'PUT', '/api/ai/config', { dailyLimit: 0, model: 'claude-test-model' });
+    upstream.script = [textReply('free')]; ok('한도 0 = 제한 없음', (await req(S.port, 'POST', '/api/ai/messages', one)).status === 200);
+    ok('사용량 파일에 키가 없음', !fs.readFileSync(path.join(dataDir, 'ai_usage.json'), 'utf8').includes('TESTKEY'));
 
     // another machine on the LAN must not be able to read or change the key (simulated with a different loopback source address)
     let lan; try { lan = await req(S.port, 'PUT', '/api/ai/config', { key: 'sk-ant-evil' }, { localAddress: '127.0.0.2' }); } catch (e) { lan = null; }
@@ -390,7 +429,7 @@ const TABLE = [
       };
       const steps = []; out.a = await A.ask('현황 알려줘', (n) => steps.push(n));
       out.aSteps = steps; out.aCalls = calls.length; out.aOpen = seenResult && seenResult.open_po; out.aHist = A.history.length;
-      out.sys = calls[0].system; out.toolNames = calls[0].tools.map(t => t.name); out.maxTokens = calls[0].max_tokens;
+      out.sys = (typeof calls[0].system === 'string' ? calls[0].system : calls[0].system.map(b => b.text).join('\n')); out.toolNames = calls[0].tools.map(t => t.name); out.maxTokens = calls[0].max_tokens; out.effort = calls[0].output_config && calls[0].output_config.effort;
       out.toolIdMatch = calls[1].messages[calls[1].messages.length - 1].content[0].tool_use_id;
       out.firstIsUser = calls[0].messages[0].role === 'user';
       out.today = ERP.fmt.today();
@@ -410,10 +449,10 @@ const TABLE = [
       A._call = async (body) => { calls.push(1); if (calls.length === 1) return { content: [{ type: 'tool_use', id: 'x1', name: 'delete_everything', input: {} }, { type: 'tool_use', id: 'x2', name: 'get_po', input: null }], stop_reason: 'tool_use' }; tr = body.messages[body.messages.length - 1].content.map(c => c.content); return { content: [{ type: 'text', text: '완료' }], stop_reason: 'end_turn' }; };
       out.d = { text: await A.ask('이상한 도구'), results: tr };
 
-      // (e) history stays short and starts with a plain user message
-      A.history.length = 0; for (let i = 0; i < 40; i++) A.history.push({ role: i % 2 ? 'assistant' : 'user', content: 'm' + i });
+      // (e) 9차: history is append-only — earlier turns are never cut off (that would invalidate thinking blocks); long chats start a new conversation instead (5b)
       A._call = async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
-      await A.ask('끝'); out.e = { len: A.history.length, first: A.history[0].role + ':' + typeof A.history[0].content };
+      A.history.length = 0; await A.ask('시작'); for (let i = 0; i < 40; i++) A.history.push({ role: i % 2 ? 'user' : 'assistant', content: i % 2 ? 'm' + i : [{ type: 'text', text: 'm' + i }] });
+      await A.ask('끝'); out.e = { len: A.history.length, first: A.history[0].role + ':' + typeof A.history[0].content, firstText: A.history[0].content };
 
       // (f) AI switched off → built-in mode, API never called
       A.history.length = 0; calls.length = 0; ERP.db.meta.aiOff = true;
@@ -435,14 +474,95 @@ const TABLE = [
     ok('시스템 프롬프트: 자세히 스타일 + 우리 공장 지침', /more detail — tables/.test(r.sys) && /COMPANY-SPECIFIC INSTRUCTIONS[\s\S]*서리/.test(r.sys));
     ok('시스템 프롬프트: 표(Markdown) + 표 밑 ※ 코멘트 형식', /Markdown table/.test(r.sys) && /starting with "※"/.test(r.sys), r.sys.slice(0, 200));
     ok('시스템 프롬프트: 60일 기준·MRP 경고 규칙', /60 days/.test(r.sys) && /NO_COMPONENTS/.test(r.sys) && /never say "no shortage"/.test(r.sys));
-    ok('자세히 스타일이면 응답 한도가 큼', r.maxTokens === 2500, r.maxTokens);
-    ok('중간 오류 → 내장 모드로 답하고 이유를 알림', r.b.via === 'local' && r.b.has && /사용 한도|요청이 많/.test(r.b.note) && r.b.hist === 0 && r.b.calls === 2, r.b);
+    ok('응답 한도 16000 · 자세히 스타일은 effort medium', r.maxTokens === 16000 && r.effort === 'medium', [r.maxTokens, r.effort]);
+    ok('중간 오류(429)는 한 번 다시 시도 → 그래도 실패하면 내장 모드로 답하고 이유를 알림', r.b.via === 'local' && r.b.has && /사용 한도|요청이 많/.test(r.b.note) && r.b.hist === 0 && r.b.calls === 3, r.b);
     ok('무한 도구 호출은 8회에서 중단하고 기록을 되돌림', r.c && r.c.calls === 8 && r.c.hist === 0 && /너무 길어/.test(r.c.msg), r.c);
     ok('모르는 도구·잘못된 입력도 오류 문구로 돌려주고 계속 진행', r.d.text === '완료' && /unknown tool/.test(r.d.results[0]) && r.d.results.length === 2, r.d);
-    ok('대화 기록은 짧게 유지하고 일반 질문으로 시작', r.e.len <= 33 && r.e.first === 'user:string', r.e);
+    ok('대화 기록은 앞을 잘라내지 않음 (뒤에 붙이기만)', r.e.len === 44 && r.e.first === 'user:string' && r.e.firstText === '시작', r.e);
     ok('AI 사용 안 함이면 API 호출 없이 내장 모드', r.f.via === 'local' && r.f.calls === 0 && r.f.useAI === false, r.f);
     ok('키 없으면 내장 모드', r.g.via === 'local' && r.g.useAI === false, r.g);
     await page.reload(); await page.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.getElementById('aiFab'), null, { timeout: 60000 });
+  }
+
+  // =====================================================================================================
+  section('5b. 9차 AI 대화: 기록은 뒤에 붙이기만 · 생각 블록 그대로 · 거절/잘림 · 다시 시도 · 새 대화 · 결과 줄이기');
+  {
+    const r = await ev(async () => {
+      const A = ERP.ai, out = {}, snap = (b) => JSON.parse(JSON.stringify(b));
+      A.hasKey = true; A.model = 'claude-sonnet-5-5'; A.history.length = 0; A.opts = { fallbacks: true, effort: true, cache: true, sysMsg: true };
+      ERP.db.meta.aiStyle = 'short';
+      const isResult = (m) => m.role === 'user' && Array.isArray(m.content) && m.content[0] && m.content[0].type === 'tool_result';
+      // 질문마다: 생각 블록 + 도구 호출 → 생각 블록 + 답
+      const calls = []; let n = 0;
+      A._call = async (body) => { calls.push(snap(body)); n++; const last = body.messages[body.messages.length - 1];
+        if (isResult(last)) return { content: [{ type: 'thinking', thinking: '', signature: 'sig-b' + n }, { type: 'text', text: 'answer ' + n }], stop_reason: 'end_turn' };
+        return { content: [{ type: 'thinking', thinking: '', signature: 'sig-a' + n }, { type: 'tool_use', id: 'tu' + n, name: 'overview', input: {} }], stop_reason: 'tool_use' }; };
+      const origToday = ERP.fmt.today;
+      for (let i = 0; i < 10; i++) { if (i === 5) ERP.lang = 'vi'; if (i === 7) ERP.fmt.today = () => '2099-01-02'; await A.ask('질문 ' + i); }
+      ERP.fmt.today = origToday; ERP.lang = 'ko';
+      out.n = calls.length; out.hist = A.history.length;
+      out.sysSame = calls.every(c => JSON.stringify(c.system) === JSON.stringify(calls[0].system));
+      out.toolsSame = calls.every(c => JSON.stringify(c.tools) === JSON.stringify(calls[0].tools));
+      out.prefix = calls.every((c, k) => k === 0 || JSON.stringify(calls[k - 1].messages) === JSON.stringify(c.messages.slice(0, calls[k - 1].messages.length)));
+      out.thinkingBack = calls[1].messages.some(m => m.role === 'assistant' && JSON.stringify(m.content).includes('sig-a1')) && calls[19].messages.some(m => m.role === 'assistant' && JSON.stringify(m.content).includes('sig-b2'));
+      const lastMsgs = calls[calls.length - 1].messages;
+      out.sysMsgs = lastMsgs.filter(m => m.role === 'system').map(m => m.content);
+      out.sysPlaced = lastMsgs.every((m, i) => m.role !== 'system' || (lastMsgs[i - 1].role === 'user' && typeof lastMsgs[i - 1].content === 'string'));
+      out.sysFrozen = /Korean/.test(calls[calls.length - 1].system[0].text) && !/2099/.test(calls[calls.length - 1].system[0].text);
+      const c0 = calls[0]; out.fields = { max: c0.max_tokens, effort: c0.output_config && c0.output_config.effort, cache: !!c0.cache_control, sysCache: !!(c0.system[0] && c0.system[0].cache_control), fb: c0.fallbacks, tc: c0.tool_choice };
+      // 거절 · 잘림 → 이번 질문은 기록에 남기지 않고 이유 + 내장 답변
+      const before = A.history.length;
+      A._call = async () => ({ content: [], stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber' } });
+      const rr = await A.respond('오늘 브리핑'); out.refusal = { via: rr.via, note: rr.note, kept: A.history.length === before, has: /■ 오늘 브리핑/.test(rr.text) };
+      A._call = async () => ({ content: [{ type: 'text', text: 'partial…' }], stop_reason: 'max_tokens' });
+      const rm = await A.respond('오늘 브리핑'); out.maxTok = { via: rm.via, note: rm.note, kept: A.history.length === before };
+      // 도구 오류는 is_error
+      A._call = async (body) => { const last = body.messages[body.messages.length - 1]; if (isResult(last)) { out.isErr = last.content.map(c => !!c.is_error); return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }; }
+        return { content: [{ type: 'tool_use', id: 'e1', name: 'nope', input: {} }, { type: 'tool_use', id: 'e2', name: 'overview', input: {} }, { type: 'tool_use', id: 'e3', name: 'production_summary', input: { from: 'x' } }], stop_reason: 'tool_use' }; };
+      await A.ask('도구 오류');
+      // 마지막(8번째) 호출은 tool_choice none
+      const tc = []; A._call = async (body) => { tc.push(body.tool_choice ? body.tool_choice.type : ''); return { content: [{ type: 'tool_use', id: 'z' + tc.length, name: 'overview', input: {} }], stop_reason: 'tool_use' }; };
+      const h0 = A.history.length; try { await A.ask('무한2'); } catch (e) { out.tc = { calls: tc.length, last: tc[tc.length - 1], before: tc.slice(0, -1).every(x => !x), kept: A.history.length === h0 }; }
+      // 429 → retry-after 만큼 기다렸다가 한 번 더
+      let k429 = 0; const t0 = Date.now();
+      A._call = async () => { k429++; if (k429 === 1) { const e = new Error('rate limited'); e.status = 429; e.retryAfter = 1; throw e; } return { content: [{ type: 'text', text: 'after wait' }], stop_reason: 'end_turn' }; };
+      out.retry = { text: await A.ask('재시도'), calls: k429, waited: Date.now() - t0 };
+      // fallbacks 를 받지 않으면(400) 끄고 다시 보내고, 다음부터 보내지 않음
+      const seen = []; A._call = async (body) => { seen.push('fallbacks' in body); if ('fallbacks' in body) { const e = new Error('fallbacks: Extra inputs are not permitted'); e.status = 400; throw e; } return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }; };
+      await A.ask('폴백'); await A.ask('다시'); out.fb = { seen, opt: A.opts.fallbacks }; A.opts.fallbacks = true;
+      // 대화 중 system 메시지를 받지 않는 모델 → 질문 뒤 <system-reminder> 로
+      A.history.length = 0; const seen2 = [];
+      A._call = async (body) => { seen2.push(snap(body.messages)); if (body.messages.some(m => m.role === 'system')) { const e = new Error("role 'system' is not supported on this model"); e.status = 400; throw e; } return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }; };
+      await A.ask('첫 질문'); ERP.lang = 'vi'; await A.ask('câu hỏi 2'); ERP.lang = 'ko';
+      const lastSeen = seen2[seen2.length - 1]; out.sysFallback = { opt: A.opts.sysMsg, reminder: JSON.stringify(lastSeen).includes('<system-reminder>') && JSON.stringify(lastSeen).includes('Vietnamese'), noSys: !lastSeen.some(m => m.role === 'system') };
+      A.opts.sysMsg = true;
+      // 너무 긴 대화 → 앞을 자르지 않고 요약 한 줄로 새 대화
+      A.history.length = 0; let lastBody = null; A._call = async (body) => { lastBody = snap(body); return { content: [{ type: 'text', text: '답 ' + body.messages.length }], stop_reason: 'end_turn' }; };
+      const saveMax = A.MAX_HISTORY_CHARS; A.MAX_HISTORY_CHARS = 600;
+      await A.ask('첫 번째 질문 ' + 'x'.repeat(300)); await A.ask('두 번째 질문 ' + 'y'.repeat(300)); await A.ask('세 번째');
+      const m0 = lastBody.messages[0].content;
+      out.newConv = { len: lastBody.messages.length, head: m0.slice(0, 22), hasQ: m0.includes('[Question]\n세 번째'), hasPrev: m0.includes('두 번째 질문'), hist: A.history.length };
+      A.MAX_HISTORY_CHARS = saveMax;
+      // 큰 도구 결과: JSON 을 자르지 않고 목록을 줄이며 _total · _truncated 표시
+      const big = { total: 500, rows: Array.from({ length: 500 }, (_, i) => ({ code: 'C' + i, name: 'name ' + i, qty: i })) };
+      const fs0 = A._fitResult(big, 12000); const fo = JSON.parse(fs0);
+      out.fit = { len: fs0.length, rows: fo.rows.length, total: fo.rows_total, trunc: fo.rows_truncated };
+      A.history.length = 0;
+      return out;
+    });
+    ok('10번 질문 + 언어 · 날짜 바뀜: 매 요청 시스템 프롬프트 · 도구 그대로, 앞 대화는 그대로 두고 뒤에만 붙임', r.n === 20 && r.sysSame && r.toolsSame && r.prefix && r.hist === 42, r);
+    ok('생각(thinking) 블록을 바꾸지 않고 다시 보냄', r.thinkingBack, r);
+    ok('언어 · 날짜가 바뀌면 질문 바로 뒤 system 메시지로 알림 (시스템 프롬프트는 고정)', r.sysMsgs.length === 2 && /Vietnamese/.test(r.sysMsgs[0]) && /2099-01-02/.test(r.sysMsgs[1]) && r.sysPlaced && r.sysFrozen, r.sysMsgs);
+    ok('요청: max_tokens 16000 · effort low(간단히) · 캐시(시스템 + 대화 끝) · fallbacks default · tool_choice 없음', r.fields.max === 16000 && r.fields.effort === 'low' && r.fields.cache && r.fields.sysCache && r.fields.fb === 'default' && !r.fields.tc, r.fields);
+    ok('거절(refusal) → 기록에 남기지 않음 · 이유(안전 정책 · 분류) + 내장 답변', r.refusal.via === 'local' && r.refusal.kept && r.refusal.has && /안전 정책/.test(r.refusal.note) && /cyber/.test(r.refusal.note), r.refusal);
+    ok('잘림(max_tokens) → 기록에 남기지 않음 · 이유', r.maxTok.via === 'local' && r.maxTok.kept && /너무 길어/.test(r.maxTok.note), r.maxTok);
+    eq('도구 오류(모르는 도구 · 잘못된 입력)는 is_error', r.isErr, [true, false, true]);
+    ok('8번째 호출은 tool_choice none (도구 없이 답하게) · 실패하면 그 질문만 되돌림', r.tc && r.tc.calls === 8 && r.tc.last === 'none' && r.tc.before && r.tc.kept, r.tc);
+    ok('429 → retry-after(1초) 기다렸다가 한 번 더', r.retry.text === 'after wait' && r.retry.calls === 2 && r.retry.waited >= 950, r.retry);
+    ok('fallbacks 를 받지 않으면 끄고 다시 · 다음부터 안 보냄', JSON.stringify(r.fb.seen) === '[true,false,false]' && r.fb.opt === false, r.fb);
+    ok('system 메시지를 받지 않는 모델 → <system-reminder> 로 바꿔 보냄', r.sysFallback.opt === false && r.sysFallback.reminder && r.sysFallback.noSys, r.sysFallback);
+    ok('긴 대화 → 앞을 자르지 않고 요약 한 줄로 새 대화', r.newConv.len === 1 && r.newConv.head.startsWith('[Earlier in this chat') && r.newConv.hasQ && r.newConv.hasPrev && r.newConv.hist === 2, r.newConv);
+    ok('큰 도구 결과: 목록을 줄이고 _total · _truncated (올바른 JSON)', r.fit.len <= 12000 && r.fit.rows < 500 && r.fit.total === 500 && r.fit.trunc === true, r.fit);
   }
 
   // =====================================================================================================
@@ -458,6 +578,12 @@ const TABLE = [
     ok('키는 서버 data/ai.json 에만 있음', JSON.parse(fs.readFileSync(path.join(dataDir, 'ai.json'), 'utf8')).key === KEY);
     ok('키가 meta.json·테이블 파일에 없음', !fs.readFileSync(path.join(dataDir, 'meta.json'), 'utf8').includes('E2E-KEY'));
     const head = await page.locator('#aiPanel .ah').innerText(); ok('헤더가 AI 모드 표시', /AI · /.test(head), head);
+    // 9차: 프로그램을 다시 열어도 AI 모드 (예전: 서버 모드를 알기 전에 키 설정을 읽어 꺼져 있었음)
+    await page.reload(); await page.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.getElementById('aiFab'), null, { timeout: 60000 });
+    await page.waitForFunction(() => ERP.ai.hasKey !== null, null, { timeout: 10000 }).catch(() => {});
+    const re = await ev(() => ({ hasKey: ERP.ai.hasKey, use: ERP.ai.useAI(), fab: document.getElementById('aiFab').textContent }));
+    ok('다시 열어도 AI 모드 (키 설정을 데이터를 불러온 뒤 읽음)', re.hasKey === true && re.use === true, re);
+    await page.click('#aiFab'); await page.waitForSelector('#aiPanel.on');
 
     upstream.calls.length = 0; upstream.script = [toolReply('briefing', {}, 'toolu_b1'), textReply('STUB-ANSWER 오늘은 PO가 많습니다')];
     await ev(() => ERP.ai.transcript.length = 0); await page.click('#aiPanel .ah button[title="대화 초기화"]');
@@ -467,7 +593,7 @@ const TABLE = [
     eq('Anthropic 호출 2번 (도구 호출 + 최종 답변)', upstream.calls.length, 2);
     const c1 = upstream.calls[0], c2 = upstream.calls[1];
     ok('서버가 저장된 키로 호출', c1.headers['x-api-key'] === KEY && c1.headers['anthropic-version'] === '2023-06-01', c1.headers);
-    ok('시스템 프롬프트에 비서 이름·지침 포함', /Your name is "소미"/.test(c1.body.system) && /서리/.test(c1.body.system));
+    ok('시스템 프롬프트에 비서 이름·지침 포함', /Your name is "소미"/.test(sysText(c1.body.system)) && /서리/.test(sysText(c1.body.system)));
     ok('도구 정의 9개 전송', c1.body.tools.length === 9);
     const tr = c2.body.messages[c2.body.messages.length - 1].content[0];
     ok('두 번째 호출에 briefing 결과가 실림', tr.type === 'tool_result' && tr.tool_use_id === 'toolu_b1' && JSON.parse(tr.content).orders && JSON.parse(tr.content).materials, short(tr.content));
@@ -484,6 +610,17 @@ const TABLE = [
     ok('키 삭제 → 내장 모드', await ev(() => !ERP.ai.useAI() && !ERP.ai.hasKey));
     ok('서버 ai.json 에서 키 삭제됨', !JSON.parse(fs.readFileSync(path.join(dataDir, 'ai.json'), 'utf8')).key);
     await page.click('#aiPanel .set .toolbar button:has-text("닫기")');
+    // 9차: 사내망의 다른 PC 브라우저 — 키 · 모델 · 한도 칸은 잠기고, 내 비서 설정 저장은 오류 없이 된다 (키 설정 요청을 보내지 않음)
+    await ev(async () => { ERP.db.ping.loopback = false; ERP.aiMount(); if (!document.querySelector('#aiPanel.on')) await ERP.ai.open(); });
+    await page.waitForSelector('#aiPanel.on'); await page.click('#aiPanel .ah button[title="내 비서 설정"]');
+    const puts = []; const onReq = (q) => { if (/\/api\/ai\/config/.test(q.url()) && q.method() === 'PUT') puts.push(q.url()); }; page.on('request', onReq);
+    const lanUi = await ev(() => { const set = document.querySelector('#aiPanel .set'); return { keyDis: set.querySelector('input[type=password]').disabled, note: /ERP 가 실행 중인 PC 에서만/.test(set.innerText), del: Array.from(set.querySelectorAll('button')).some(b => /키 삭제/.test(b.textContent)) }; });
+    await page.locator('#aiPanel .set input.inp').first().fill('랜 비서');
+    await page.click('#aiPanel .set .toolbar button:has-text("저장")'); await sleep(500); page.off('request', onReq);
+    const lanSaved = await ev(() => ({ name: ERP.db.setting('aiName'), cfg: document.querySelector('#aiPanel').classList.contains('cfg') }));
+    ok('다른 PC 브라우저: 키 칸 잠김 · 안내 · 키 삭제 버튼 없음', lanUi.keyDis && lanUi.note && !lanUi.del, lanUi);
+    ok('다른 PC 브라우저: 내 비서 설정은 저장 (키 설정 요청 없음 · 오류 없음)', lanSaved.name === '랜 비서' && !lanSaved.cfg && puts.length === 0, { lanSaved, puts });
+    await ev(() => { ERP.db.ping.loopback = true; ERP.db.meta.aiName = '소미'; ERP.db.saveMeta(); ERP.aiMount(); });
   }
 
   // =====================================================================================================
@@ -533,12 +670,14 @@ const TABLE = [
     await D.page.click('#aiPanel .ah button[title="내 비서 설정"]');
     await D.page.locator('#aiPanel .set input.inp[type=password]').fill('sk-ant-demo-KEY-9999');
     await D.page.click('#aiPanel .set .toolbar button:has-text("저장")'); await sleep(400);
-    ok('데모: 키는 이 브라우저(localStorage)에 저장 · AI 모드', await dev(() => ERP.ai.useAI() && ERP.ai.keyTail === '9999'));
+    ok('데모: 키는 이 창의 메모리에만 (localStorage 에 없음) · AI 모드', await dev(() => ERP.ai.useAI() && ERP.ai.keyTail === '9999' && !JSON.stringify(Object.assign({}, localStorage)).includes('demo-KEY')));
     await D.page.fill('#aiPanel .af textarea', '현황'); await D.page.press('#aiPanel .af textarea', 'Enter');
     await D.page.waitForFunction(() => Array.from(document.querySelectorAll('#aiPanel .b.a')).some(e => e.textContent.includes('DEMO-STUB OK')), null, { timeout: 20000 });
     const s0 = seen[0] || {};
     ok('데모: 브라우저에서 직접 호출 (키·버전·브라우저 직접 접근 헤더)', s0.headers && s0.headers['x-api-key'] === 'sk-ant-demo-KEY-9999' && s0.headers['anthropic-version'] === '2023-06-01' && s0.headers['anthropic-dangerous-direct-browser-access'] === 'true', s0.headers);
     ok('데모: 모델과 도구 전달', s0.body && s0.body.model && s0.body.tools && s0.body.tools.length === 9, s0.body && s0.body.model);
+    await D.page.reload(); await D.page.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.getElementById('aiFab'), null, { timeout: 60000 }); await sleep(300);
+    ok('데모: 새로 고치면 키는 없어짐 (내장 모드)', await dev(() => !ERP.ai.hasKey && !ERP.ai.useAI()));
     ok('데모 실행 중 오류 없음', !derr.length, derr);
     await D.browser.close();
   }

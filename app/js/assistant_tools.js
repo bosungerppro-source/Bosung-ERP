@@ -94,10 +94,11 @@
     get_po(a) {
       const g = findPo(a.po_no);
       if (!g) { const q = String(a.po_no || '').trim().toLowerCase(); const near = q ? C.poGroups().filter(x => String(x.po_no).toLowerCase().includes(q)).slice(0, 5).map(x => x.po_no) : []; return { error: 'PO not found: ' + a.po_no, similar_po_numbers: near }; }
-      const pack = DB.rows('prod_log').filter(r => r.process === 'PCK' && String(r.po_no) === String(g.po_no)).sort((x, y) => String(y.date).localeCompare(String(x.date))).slice(0, 12).map(r => ({ date: r.date, code: r.code, qty_sets: C.num(r.ok_qty) }));
+      const packAll = DB.rows('prod_log').filter(r => r.process === 'PCK' && String(r.po_no) === String(g.po_no)).sort((x, y) => String(y.date).localeCompare(String(x.date)));
+      const pack = packAll.slice(0, 12).map(r => ({ date: r.date, code: r.code, qty_sets: C.num(r.ok_qty) }));
       return { po: poRow(g), customer: clean(g.p.customer), country: clean(g.p.country), order_date: g.p.date, condition: g.p.condition, note: g.p.mark,
         lines: g.lines.map(o => ({ item_no: o.p.item_no, kind: o.p.kind, sets: Math.round(o.sets), packed_sets: Math.round(o.packed), remaining_sets: Math.max(0, Math.round(o.sets - o.packed)), progress_pct: Math.round(o.prog * 100), due: o.p.due, status: o.st })),
-        packing_not_matching_any_line: g.orphan || undefined, recent_packing: pack };
+        packing_not_matching_any_line: g.orphan || undefined, recent_packing: pack, recent_packing_total: packAll.length > pack.length ? packAll.length : undefined };
     },
 
     material_stock(a) {
@@ -123,10 +124,11 @@
       const rows = C.rowsBetween(from, to, proc); const by = new Map();
       rows.forEach(r => { const k = (a.by_day ? r.date + '|' : '') + r.process; let o = by.get(k); if (!o) by.set(k, o = { date: a.by_day ? r.date : undefined, process: r.process, rows: [] }); o.rows.push(r); });
       const order = procOrder();
-      const output = Array.from(by.values()).map(o => { const g = C.agg(o.rows); const e = { process: o.process, name: ERP.procName(o.process), good_pcs: Math.round(g.ea), ng_qty: Math.round(g.ng), ng_rate_pct: g.ngRate === null ? null : r1(g.ngRate * 100), report_rows: g.n };
+      const output = Array.from(by.values()).map(o => { const g = C.agg(o.rows); const e = { process: o.process, name: ERP.procName(o.process), good_pcs: Math.round(g.ea), ng_qty: Math.round(g.ng), ng_rate_pct: g.ngRate === null ? null : r1(g.ngRate * 100), report_rows: g.n, machines: g.machines.size || undefined };
         if (procIsSet(o.process)) e.good_sets = Math.round(g.ok); if (o.date) e.date = o.date; return e; })
         .sort((x, y) => String(x.date || '').localeCompare(String(y.date || '')) || (order.indexOf(x.process) - order.indexOf(y.process)));
-      return { from, to, process: proc || 'all', report_rows: rows.length, days_with_reports: new Set(rows.map(r => r.date)).size, latest_report_date_in_data: C.latestProdDate(), output: output.slice(0, 120) };
+      return { from, to, process: proc || 'all', report_rows: rows.length, days_with_reports: new Set(rows.map(r => r.date)).size, latest_report_date_in_data: C.latestProdDate(), output: output.slice(0, 120),
+        output_total: output.length > 120 ? output.length : undefined, output_truncated: output.length > 120 || undefined };
     },
 
     quality_downtime(a) {

@@ -93,19 +93,23 @@
     // NOTE: Korean patterns run on the raw text, so they must not contain ASCII word boundaries (\b treats Vietnamese letters such as "ượ" as non-word
     // characters: "lượng" would match \bng\b). Latin-letter words (po, ng, mrp) are matched only on the diacritic-folded text (second pattern).
     orders: [/수주|오더|주문서|고객\s*주문/, /don hang|\bpo\b|dang mo|\borders?\b/],
-    lowStock: [/안전\s*재고|재고\s*(부족|미달|없|바닥|적)|부족한?\s*(자재|원료|원부자재|재고)|미달|바닥|모자라/, /ton an toan|thieu|het hang|sap het|low stock|shortage|below safety/],
+    lowStock: [/안전\s*재고|재고\s*(부족|미달|없|바닥|적)|부족한?\s*(자재|원료|원부자재|재고)|미달|바닥|모자[라란랄르]/, /ton an toan|thieu|het hang|sap het|low stock|shortage|below safety/],
     stock: [/재고|잔량|남은|얼마나\s*있/, /\bton\b|ton kho|con bao nhieu|stock|inventory/],
     reorder: [/발주|구매\s*(요청|필요)|사야|구입|주문해야/, /dat hang|can mua|mua them|reorder|purchase/],
     prod: [/생산|실적|생산량|만든|제조|output/, /san xuat|san luong|ket qua|production|output|da lam/],
-    quality: [/불량|품질|엔지|결함/, /\bloi\b|hang loi|ty le loi|\bng\b|defect|reject|quality/],
-    downtime: [/정지|다운|고장|멈춤|멈춘|비가동|가동\s*중단/, /dung may|hong may|may (hong|dung|ngung|bi hong)|ngung|downtime|breakdown|stoppage/],
+    quality: [/불량|품질|엔지|결함|폐기|파손/, /\bloi\b|hang loi|ty le loi|\bng\b|chat luong|phe pham|hang hong|hang hu|hu hong|defect|reject|scrap|quality/],
+    downtime: [/정지|다운|고장|멈춤|멈춘|비가동|가동\s*중단/, /(?<!su )dung may|hong may|may (hong|dung|ngung|bi hong)|may nao (bi )?(dung|hong|ngung)|ngung|downtime|breakdown|stoppage/],
+    // 설비 사용 · 가동 현황 ("sử dụng máy") 은 정지가 아니라 생산 실적 (공정별 가동 설비 수 포함)
+    machUse: [/설비\s*(사용|가동|활용)|가동\s*(률|현황|대수)|돌아간\s*설비/, /su dung may|cong suat may|may (dang )?chay|van hanh may|utilization|machine usage/],
     mrp: [/소요량|필요\s*(자재|원료|원부자재)|자재\s*(소요|필요)|원료\s*(소요|필요)/, /nhu cau (nvl|vat tu|nguyen)|\bmrp\b|can bao nhieu|vat tu can|material requirement/],
     help: [/도움말|도와|뭘\s*(할|물어)|무엇을|기능|사용법/, /giup|lam duoc gi|huong dan|\bhelp\b|what can you/],
     greet: [/^(안녕|하이|반가|헬로)/, /^(xin chao|chao|hello|hi|hey)\b/],
     thanks: [/고마|감사/, /cam on|thanks|thank you/],
     generic: [/현황|요약|상황|상태/, /tinh hinh|tom tat|status|summary/],
-    done: [/완료|끝난|마감/, /hoan thanh|\bdone\b|completed/],
+    done: [/완료|끝난|끝났|마감|다\s*만든/, /hoan thanh|hoan tat|\bdone\b|completed|finished|lam xong|da xong|xong roi|\bxong\b/],
     inprod: [/생산\s*중/, /dang san xuat|in production/],
+    hold: [/보류|홀드/, /\bhold\b|tam dung|tam ngung|on hold/],
+    cancel: [/취소된|취소\s*(된|한)?\s*(po|수주|주문)/, /\bhuy\b|da huy|cancel(l)?ed/],
   };
   const NOISE = new RegExp('^(' + ['알려줘', '알려', '알려주세요', '주세요', '줘', '좀', '현재', '지금', '얼마', '몇', '있어', '있나', '뭐', '뭐야', '어때', '어떻게', '해줘', '보여줘', '보여', '재고', '자재', '원료', '원부자재', '현황', '상태', '수량', '잔량', '남은', '조회', '검색', '확인', '찾아줘', '찾아', '그리고', '및', '는', '은', '이', '가', '을', '를', '의', '에', '도', '요', '인가', '인지', '얼마나', '며칠', '정도', '전체', '모든', '전부', '목록', '리스트', '알려줄래', '궁금해', '궁금',
     'list', 'show', 'tell', 'me', 'the', 'a', 'of', 'is', 'are', 'how', 'many', 'much', 'what', 'stock', 'inventory', 'status', 'check', 'please', 'of', 'in', 'for',
@@ -113,11 +117,16 @@
   const restTokens = (q) => q.toks.map(cleanTok).filter(t => t.length >= 2 && !/^\d+$/.test(t) && !NOISE.test(fold(t)) && !NOISE.test(t) && !/^\d{4}[-./]\d/.test(t))
     .map(t => (HANGUL.test(t) ? t.replace(/(은|는|이|가|을|를|의|에|도|만|으로|로|이랑|랑|과|와|에서|부터)$/, (m, p, off) => (off >= 2 ? '' : m)) : t)).filter(t => t.length >= 2);
 
+  /** 'ép lõi'(리필 성형) · 'lõi'(심)와 'lỗi'(불량)는 성조를 빼면 둘 다 'loi' → 불량으로 알아듣지 않게 바꾼 글 */
+  function coreFix(raw, f) { let x = f.replace(/\bep loi\b/g, 'ep_core'); if (/lõi/i.test(raw) && !/lỗi/i.test(raw)) x = x.replace(/\bloi\b/g, 'core'); return x; }
+  const QTY_ASK = /몇|얼마|수량|bao nhieu|so luong|how many|how much/;
+
   // ---------- intent ----------
   function parse(text) {
     const raw = String(text || '').trim(), low = raw.toLowerCase(), f = fold(raw), toks = tokens(raw);
     const q = { raw, low, f, toks, lang: detectLang(raw), period: parsePeriod(raw, low, f), process: parseProcess(low, f), k: {} };
-    Object.keys(KW).forEach(k => { q.k[k] = KW[k][0].test(low) || KW[k][1].test(f); });
+    const fq = coreFix(raw, f);
+    Object.keys(KW).forEach(k => { q.k[k] = KW[k][0].test(low) || KW[k][1].test(k === 'quality' ? fq : f); });
     q.po = findPoToken(toks); q.item = findItemToken(toks); q.matCode = findMatCode(toks); q.customer = findCustomer(low); q.rest = restTokens(q);
     q.intent = decide(q);
     return q;
@@ -126,15 +135,25 @@
     const k = q.k;
     if (!q.raw) return { name: 'help' };
     if (q.po) return k.mrp ? { name: 'mrp', po: q.po } : { name: 'po', po: q.po };
-    if (q.item) return k.mrp ? { name: 'mrp', item: q.item } : { name: 'orders', query: q.item, status: 'all', title: 'item' };
+    if (q.item) {
+      if (k.mrp) return { name: 'mrp', item: q.item };
+      if ((k.stock || k.lowStock) && q.matCode) return { name: 'material', query: q.matCode };   // 품번 + 재고 = 그 품목의 재고 (수주 목록이 아님)
+      return { name: 'orders', query: q.item, status: 'all', title: 'item' };
+    }
     if (q.matCode) return { name: 'material', query: q.matCode };
     if (k.brief) return { name: 'briefing' };
+    // 보류 · 취소 PO ("PO tạm ngưng", "보류된 수주") — '멈춤(ngưng)' 이 있어도 설비 정지가 아님
+    if ((k.hold || k.cancel) && (k.orders || !k.downtime)) return { name: 'orders', query: q.customer || '', status: k.cancel && !k.hold ? 'cancel' : 'hold', title: 'list' };
     if (k.quality || k.downtime) return { name: 'qd', focus: k.downtime && !k.quality ? 'stop' : (k.quality && !k.downtime ? 'ng' : 'both') };
     if (k.reorder && !k.orders) return { name: 'reorder' };
     if (k.mrp) return { name: 'mrp_ask' };
+    // 끝난 PO ("PO nào đã làm xong", "đã làm xong chưa", "완료된 수주") → 완료 목록. 공정 · 수량을 물으면 생산 실적
+    if (k.done && (k.orders || (!q.process && !QTY_ASK.test(q.low) && !QTY_ASK.test(q.f)))) return { name: 'orders', query: q.customer || '', status: 'done', title: 'list' };
+    // 지연 · 임박 · 오래된 PO 는 '생산' 이란 말이 있어도 납기 질문 ("생산 지연 PO") — 공정을 콕 집어 묻지 않을 때
+    if ((k.late || k.soon || k.stale) && !q.process) return { name: 'deadline', view: k.stale ? 'stale' : (k.late && !k.soon ? 'late' : (k.soon && !k.late ? 'soon' : 'both')), customer: q.customer };
     // a process name on its own ("포장 어제", "đóng gói tuần này") is a production question too
     const procOnly = q.process && !k.orders && !q.customer && !k.stock && !k.lowStock && !k.reorder && !k.late && !k.soon && !k.stale && !k.deadline;
-    if ((k.prod || procOnly) && !(k.inprod && (k.orders || q.customer))) return { name: 'production' };
+    if ((k.prod || procOnly || k.machUse) && !(k.inprod && (k.orders || q.customer))) return { name: 'production' };
     if (k.late || k.soon || k.stale || (k.deadline && !k.stock)) return { name: 'deadline', view: k.stale ? 'stale' : (k.late && !k.soon ? 'late' : (k.soon && !k.late ? 'soon' : 'both')), customer: q.customer };
     if (k.lowStock) return { name: 'low_stock' };
     if (k.stock && q.rest.length) return { name: 'material', query: q.rest.join(' '), parts: q.rest };
@@ -325,12 +344,12 @@
     if (fallback) X.push(B.p(fallback));
     X.push(B.h(s('생산 실적', 'Sản lượng') + ' · ' + range + (res.process !== 'all' ? ' · ' + c.pname(res.process) : '')));
     if (!res.output.length) { X.push(B.p(s(`이 기간의 생산일보가 없습니다. 최근 입력된 일보는 ${res.latest_report_date_in_data || '–'} 입니다.`, `Không có báo cáo trong kỳ này. Báo cáo gần nhất: ${res.latest_report_date_in_data || '–'}.`))); return X; }
-    const hasSet = res.output.some(x => x.good_sets !== undefined);
+    const hasSet = res.output.some(x => x.good_sets !== undefined), hasMach = res.output.some(x => x.machines);
     const top = res.output.slice().sort((a, b) => b.good_pcs - a.good_pcs)[0]; const ng = res.output.filter(x => x.ng_rate_pct !== null && x.ng_rate_pct >= 3);
-    X.push(B.table([{ l: s('공정', 'Công đoạn') }, { l: s('양품 pcs', 'Đạt (pcs)'), num: 1 }].concat(hasSet ? [{ l: 'set', num: 1 }] : []).concat([{ l: s('불량률', 'Tỷ lệ lỗi'), num: 1 }]), res.output, {
+    X.push(B.table([{ l: s('공정', 'Công đoạn') }, { l: s('양품 pcs', 'Đạt (pcs)'), num: 1 }].concat(hasSet ? [{ l: 'set', num: 1 }] : []).concat([{ l: s('불량률', 'Tỷ lệ lỗi'), num: 1 }]).concat(hasMach ? [{ l: s('가동 설비', 'Máy chạy'), num: 1 }] : []), res.output, {
       cmt: s(`일보 ${c.n(res.report_rows)}행 · 입력된 날 ${res.days_with_reports}일` + (hasSet ? ' · 포장은 set과 pcs 환산을 함께 표시' : '') + (ng.length ? ' · 불량률 3% 이상: ' + ng.map(x => c.pname(x.process)).join(', ') : '') + '.', `${c.n(res.report_rows)} dòng báo cáo · ${res.days_with_reports} ngày có dữ liệu` + (hasSet ? ' · đóng gói hiển thị cả set và pcs' : '') + (ng.length ? ' · lỗi ≥3%: ' + ng.map(x => c.pname(x.process)).join(', ') : '') + '.'),
-      line: (x) => '  · ' + c.pname(x.process) + ' ' + c.n(x.good_pcs) + ' pcs' + (x.good_sets !== undefined ? ' · ' + c.n(x.good_sets) + ' set' : '') + (x.ng_rate_pct !== null ? s(` · 불량률 ${x.ng_rate_pct}%`, ` · tỷ lệ lỗi ${x.ng_rate_pct}%`) : ''),
-      cell: (x) => [{ v: c.pname(x.process), b: 1, tone: x === top ? 'ok' : '' }, c.n(x.good_pcs)].concat(hasSet ? [x.good_sets !== undefined ? c.n(x.good_sets) : ''] : []).concat([x.ng_rate_pct !== null ? { v: x.ng_rate_pct + '%', tone: x.ng_rate_pct >= 3 ? 'bad' : '' } : '–']) }));
+      line: (x) => '  · ' + c.pname(x.process) + ' ' + c.n(x.good_pcs) + ' pcs' + (x.good_sets !== undefined ? ' · ' + c.n(x.good_sets) + ' set' : '') + (x.ng_rate_pct !== null ? s(` · 불량률 ${x.ng_rate_pct}%`, ` · tỷ lệ lỗi ${x.ng_rate_pct}%`) : '') + (x.machines ? s(` · 설비 ${x.machines}대`, ` · ${x.machines} máy`) : ''),
+      cell: (x) => [{ v: c.pname(x.process), b: 1, tone: x === top ? 'ok' : '' }, c.n(x.good_pcs)].concat(hasSet ? [x.good_sets !== undefined ? c.n(x.good_sets) : ''] : []).concat([x.ng_rate_pct !== null ? { v: x.ng_rate_pct + '%', tone: x.ng_rate_pct >= 3 ? 'bad' : '' } : '–']).concat(hasMach ? [x.machines ? c.n(x.machines) : '–'] : []) }));
     return X;
   }
   function fmtQD(res, focus, c) {
@@ -378,7 +397,7 @@
       X.push(B.sec(s(`소요 항목 ${c.n(res.rows_total)}개 중 부족 ${c.n(res.shortage_count)}개`, `${c.n(res.rows_total)} mục, thiếu ${c.n(res.shortage_count)} mục`) + (kinds ? ' (' + kinds + ')' : '')));
       const shown = res.rows.slice(0, 15);
       X.push(B.table([{ l: s('코드', 'Mã') }, { l: s('품명', 'Tên') }, { l: s('필요', 'Cần'), num: 1 }, { l: s('재고', 'Tồn'), num: 1 }, { l: s('부족', 'Thiếu'), num: 1 }, { l: s('단위', 'ĐV') }], shown, { more: moreTxt(res.shortage_count, shown.length, c),
-        cmt: res.shortage_count ? s(`부족한 ${c.n(res.shortage_count)}개를 먼저 확인하세요. 표는 부족 수량이 큰 순서입니다.`, `Hãy kiểm tra ${c.n(res.shortage_count)} mục thiếu trước; bảng xếp theo lượng thiếu.`) : s('계산된 항목은 모두 재고로 충분합니다.', 'Các mục đã tính đều đủ tồn.'),
+        cmt: res.shortage_count ? s(`부족한 ${c.n(res.shortage_count)}개를 먼저 확인하세요. 표는 부족 수량이 큰 순서입니다.`, `Hãy kiểm tra ${c.n(res.shortage_count)} mục thiếu trước; bảng xếp theo lượng thiếu.`) : ((res.unknown_items.length || res.stock_unknown_count) ? s('계산된 항목에는 부족이 없습니다. 다만 ⚠ 표시한 항목은 계산하지 못했으니 "모두 충분"이 아닙니다.', 'Các mục đã tính không thiếu. Nhưng các mục ⚠ chưa tính được nên KHÔNG phải "đủ hết".') : s('계산된 항목은 모두 재고로 충분합니다.', 'Các mục đã tính đều đủ tồn.')),
         line: (r) => '▸ ' + r.code + ' ' + (r.name || '') + ': ' + s('필요 ', 'cần ') + c.n(r.need, 1) + ' / ' + s('재고 ', 'tồn ') + (r.stock === null ? '?' : c.n(r.stock, 1)) + ' ' + r.unit + (r.short ? s(' → 부족 ', ' → thiếu ') + c.n(r.short, 1) : ''),
         cell: (r) => [{ v: r.code, b: 1 }, String(r.name || '').slice(0, 26), c.n(r.need, 1), r.stock === null ? '?' : c.n(r.stock, 1), r.short ? { v: c.n(r.short, 1), tone: 'bad', b: 1 } : '·', r.unit] }));
       if (res.stock_unknown_count) X.push(B.note(s(`⚠ 재고 마스터와 연결되지 않은 원료 ${c.n(res.stock_unknown_count)}개는 부족 여부를 알 수 없습니다.`, `⚠ ${c.n(res.stock_unknown_count)} NL chưa khớp danh mục kho nên chưa biết có thiếu hay không.`)));
@@ -421,7 +440,7 @@
       case 'mrp_ask': X = P(s('자재 소요량은 PO 번호나 품번이 필요합니다. 예: "5100356783 자재 소요량"', 'Cần số PO hoặc mã hàng để tính nhu cầu NVL. Ví dụ: "nhu cầu NVL của PO 5100356783"')); break;
       case 'orders': {
         const r = T.find_orders({ query: I.query, status: I.status, limit: 12 });
-        const t = I.title === 'item' ? s('품번 ', 'Mã hàng ') + I.query : (I.query ? I.query + ' · ' : '') + ({ open: s('진행 중 PO', 'PO đang mở'), prod: s('생산 중 PO', 'PO đang sản xuất'), done: s('완료 PO', 'PO hoàn thành'), all: s('PO', 'PO') }[I.status] || 'PO');
+        const t = I.title === 'item' ? s('품번 ', 'Mã hàng ') + I.query : (I.query ? I.query + ' · ' : '') + ({ open: s('진행 중 PO', 'PO đang mở'), prod: s('생산 중 PO', 'PO đang sản xuất'), done: s('완료 PO', 'PO hoàn thành'), hold: s('보류 PO', 'PO tạm dừng'), cancel: s('취소 PO', 'PO đã hủy'), all: s('PO', 'PO') }[I.status] || 'PO');
         X = fmtOrders(r, t, c); if (I.status === 'open' && !I.query) staleNote(r.context.stale_late, c, r.context.late).forEach(x => X.push(B.note(x)));
         actions = [pages.orders]; if (r.rows[0]) actions.unshift(act(c, r.rows[0].po_no + ' 열기', 'Mở ' + r.rows[0].po_no, openPo(r.rows[0].po_no))); break; }
       case 'deadline': {
