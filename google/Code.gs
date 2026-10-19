@@ -17,7 +17,7 @@ function doPost(e) {
     if (req.token !== TOKEN) return out_({ ok: false, error: 'bad token' });
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     switch (req.action) {
-      case 'ping': return out_({ ok: true, sheet: ss.getName(), url: ss.getUrl() });
+      case 'ping': return out_({ ok: true, ver: 2, sheet: ss.getName(), url: ss.getUrl() });
       case 'list': return out_({ ok: true, tables: list_(ss) });
       case 'put': return out_(put_(ss, req));
       case 'get': return out_(get_(ss, req));
@@ -35,7 +35,8 @@ function list_(ss) {
   return ss.getSheets().map(function (s) { return { name: s.getName(), rows: Math.max(0, s.getLastRow() - 1) }; });
 }
 
-// put: {table, cols:[keys], rows:[[...]], first:true|false}   first=true clears the sheet before writing
+// put: {table, cols:[keys], types:['t'|'n'|'d'|...], rows:[[...]], first:true|false}   first=true clears the sheet before writing
+// 2판: 숫자(n) · 참거짓(b) 이 아닌 열은 일반 텍스트(@) 형식으로 먼저 바꾼 뒤 쓴다 → 0414210300 · 523034E200 · 2026-6 같은 코드가 숫자 · 날짜로 바뀌지 않는다
 function put_(ss, req) {
   var s = sheet_(ss, req.table);
   if (req.first) { s.clear(); s.getRange(1, 1, 1, req.cols.length).setValues([req.cols]).setFontWeight('bold'); s.setFrozenRows(1); }
@@ -44,7 +45,11 @@ function put_(ss, req) {
     var start = s.getLastRow() + 1;
     if (s.getMaxRows() < start + rows.length) s.insertRowsAfter(s.getMaxRows(), start + rows.length - s.getMaxRows());
     if (s.getMaxColumns() < req.cols.length) s.insertColumnsAfter(s.getMaxColumns(), req.cols.length - s.getMaxColumns());
-    s.getRange(start, 1, rows.length, req.cols.length).setValues(rows);
+    var types = req.types || [];
+    var fmt = req.cols.map(function (c, i) { return types[i] === 'n' || types[i] === 'b' ? 'General' : '@'; });
+    var rg = s.getRange(start, 1, rows.length, req.cols.length);
+    rg.setNumberFormats(rows.map(function () { return fmt; }));
+    rg.setValues(rows);
   }
   return { ok: true, written: rows.length };
 }

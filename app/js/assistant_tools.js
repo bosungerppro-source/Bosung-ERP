@@ -14,7 +14,7 @@
   const clampLim = (n, d) => Math.min(Math.max(parseInt(n, 10) || d, 1), 60);
   const validDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(new Date(s + 'T00:00:00'));
   const ddOf = (g) => (Number.isFinite(g.dday) ? g.dday : null);
-  const isOpen = (g) => g.st !== 'done';
+  const isOpen = (g) => ERP.calc.isOpen(g);   // 완료 · 취소 · 보류가 아님
   const isRecentLate = (g) => isOpen(g) && g.st === 'late' && ddOf(g) !== null && ddOf(g) >= -STALE_DAYS;
   const isStale = (g) => isOpen(g) && g.st === 'late' && ddOf(g) !== null && ddOf(g) < -STALE_DAYS;
   const hasValidDue = (g) => !!g.p.due && /^\d{4}-\d{2}-\d{2}/.test(String(g.p.due));
@@ -158,7 +158,7 @@
       let lines = Array.isArray(a.lines) ? a.lines.map(l => ({ code: String(l.code || '').trim(), qty: +l.qty, unit: l.unit || 'set' })).filter(l => l.code && l.qty > 0) : [];
       if (a.po_no) {
         const g = findPo(a.po_no); if (!g) return { error: 'PO not found: ' + a.po_no };
-        lines = g.lines.filter(o => o.st !== 'done').map(o => ({ code: String(o.p.item_no || '').trim(), qty: Math.max(0, Math.round(o.sets - o.packed)), unit: 'set' })).filter(l => l.code && l.qty > 0);
+        lines = g.lines.filter(o => ERP.calc.isOpen(o)).map(o => ({ code: String(o.p.item_no || '').trim(), qty: Math.max(0, Math.round(o.sets - o.packed)), unit: 'set' })).filter(l => l.code && l.qty > 0);
       }
       if (!lines.length) return { error: 'no lines to calculate (give lines[] or a po_no that still has unpacked quantity)' };
       const res = ERP.mrp(lines, { netSemi: true }); const onlyShort = a.only_short !== false;

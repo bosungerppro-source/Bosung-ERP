@@ -51,13 +51,21 @@
     for (let i = ix.dates.length - 1; i >= 0; i--) if (ix.dates[i] <= lim) return ix.dates[i];
     return ix.dates[ix.dates.length - 1] || lim;
   };
+  /** 설비 하나를 가리키는 키: 공정 + 설비 종류 + 번호. 번호는 종류마다 1번부터라서 (Mini 1번 ≠ Regular 1번) 종류를 함께 본다.
+      종류 = 설비명에서 Assy · M/C 등을 뺀 것, 설비명이 없으면(누적 시트) 품목군 */
+  const machType = (r) => {
+    let t = String(r.machine || '').toUpperCase().replace(/ASS'?Y|M\/C|\bMC\b|MACHINE/g, ' ').replace(/[^A-Z0-9-]+/g, ' ').trim();
+    if (!t || /^V\d$/.test(t)) t = String(r.division || '').toUpperCase().trim();
+    return t;
+  };
+  C.machKey = (r) => (r.process || '') + ':' + machType(r) + '#' + String(r.machine_no === undefined || r.machine_no === null ? '' : r.machine_no).trim();
   /** aggregate rows → {ok, ng, plan, ea, stop, rows, machines:Set, workers} */
   C.agg = function (rows) {
     const a = { ok: 0, ng: 0, plan: 0, ea: 0, ngEa: 0, stop: 0, work: 0, n: rows.length, machines: new Set(), planN: 0, okForPlan: 0 };
     rows.forEach(r => {
       const q = C.qty(r); a.ea += q; a.ok += num(r.ok_qty); a.ng += num(r.ng_qty); a.stop += num(r.stop_min); a.work += num(r.work_min);
       if (r.plan_qty) { a.plan += num(r.plan_qty); a.okForPlan += num(r.ok_qty); a.planN++; }
-      if (r.machine_no !== undefined && r.machine_no !== null) a.machines.add(r.process + ':' + r.machine_no);
+      if (r.machine_no !== undefined && r.machine_no !== null) a.machines.add(C.machKey(r));
     });
     a.ngRate = (a.ea + a.ng) > 0 ? a.ng / (a.ea + a.ng) : null;
     a.achieve = a.plan > 0 ? a.okForPlan / a.plan : null;
@@ -79,6 +87,16 @@
   };
 
   // ---------- orders ----------
+  /** PO 줄의 Condition 칸 → 'cancel' · 'hold' · '' (공장 엑셀: Cancle / cancle / Di hold) */
+  C.poCond = function (p) {
+    const raw = String((p && p.condition) || '').toLowerCase(); if (!raw.trim()) return '';
+    const fold = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').replace(/đ/g, 'd');
+    if (/취소/.test(raw) || /cancel|cancle|\bhuy\b/.test(fold)) return 'cancel';
+    if (/보류/.test(raw) || /\bhold\b|tam dung|tam ngung/.test(fold)) return 'hold';
+    return '';
+  };
+  /** 진행 중(완료 · 취소 · 보류가 아님) */
+  C.isOpen = (o) => o.st !== 'done' && o.st !== 'cancel' && o.st !== 'hold';
   // One PO number may hold several item (품번) lines. Each line = one row of table `po`.
   // Packing progress is matched per (PO no + item code); packing rows whose code matches no line are
   // attributed to the PO only when it has a single line, otherwise reported as `orphan`.
@@ -101,8 +119,9 @@
           const prog = sets > 0 ? packed / sets : (num(p.rate) || 0);
           let st = 'wait';
           if (sets > 0 && prog >= 0.999) st = 'done'; else if (p.due && p.due < today) st = 'late'; else if (packed > 0) st = 'prod';
+          const cond = C.poCond(p); if (cond) st = cond;   // 취소 · 보류 표시가 이긴다 (진행 · 지연 · 완료로 세지 않는다)
           const dd = p.due ? F.diffDays(p.due, today) : null;
-          out.push({ p, sets, packed, live: lv, prog, st, dday: dd, soon: st !== 'done' && dd !== null && dd >= 0 && dd <= 7, n: lines.length, orphan: lines.length > 1 ? orphan : 0 });
+          out.push({ p, sets, packed, live: lv, prog, st, dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, n: lines.length, orphan: lines.length > 1 ? orphan : 0 });
         });
       });
       return out;
@@ -114,14 +133,17 @@
       const m = new Map(); C.orders().forEach(o => { const k = String(o.p.po_no); let a = m.get(k); if (!a) m.set(k, a = []); a.push(o); });
       const today = F.today(); const out = [];
       m.forEach((lines, po) => {
-        const first = lines[0].p; const sets = lines.reduce((a, o) => a + o.sets, 0); const packed = lines.reduce((a, o) => a + Math.min(o.packed, o.sets || o.packed), 0);
-        const pcs = lines.reduce((a, o) => a + num(o.p.pcs), 0);
-        const openL = lines.filter(o => o.st !== 'done'); const dues = (openL.length ? openL : lines).map(o => o.p.due).filter(Boolean).sort();
-        const due = dues[0] || first.due; const done = openL.length === 0;
-        let st = 'wait'; if (done) st = 'done'; else if (openL.some(o => o.st === 'late')) st = 'late'; else if (lines.some(o => o.packed > 0)) st = 'prod';
+        const first = lines[0].p;
+        // 취소 · 보류 줄은 PO 진행 · 수량에서 뺀다 (모든 줄이 취소 · 보류면 PO 도 취소 · 보류)
+        const act = lines.filter(o => o.st !== 'cancel' && o.st !== 'hold'); const use = act.length ? act : lines;
+        const sets = use.reduce((a, o) => a + o.sets, 0); const packed = use.reduce((a, o) => a + Math.min(o.packed, o.sets || o.packed), 0);
+        const pcs = use.reduce((a, o) => a + num(o.p.pcs), 0);
+        const openL = act.filter(o => o.st !== 'done'); const dues = (openL.length ? openL : use).map(o => o.p.due).filter(Boolean).sort();
+        const due = dues[0] || first.due; const done = act.length > 0 && openL.length === 0;
+        let st = 'wait'; if (!act.length) st = lines.some(o => o.st === 'hold') ? 'hold' : 'cancel'; else if (done) st = 'done'; else if (openL.some(o => o.st === 'late')) st = 'late'; else if (act.some(o => o.packed > 0)) st = 'prod';
         const dd = due ? F.diffDays(due, today) : null; const items = Array.from(new Set(lines.map(o => o.p.item_no).filter(Boolean)));
         const rep = Object.assign({}, first, { item_no: items.length > 1 ? items[0] + L(' 외 ' + (items.length - 1), ' +' + (items.length - 1)) : items[0], due, pcs });
-        out.push({ p: rep, po_no: po, lines, n: lines.length, items, sets, packed, prog: sets > 0 ? packed / sets : 0, st, dday: dd, soon: !done && dd !== null && dd >= 0 && dd <= 7, orphan: lines[0].orphan });
+        out.push({ p: rep, po_no: po, lines, n: lines.length, items, sets, packed, prog: sets > 0 ? packed / sets : 0, st, dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, orphan: lines[0].orphan });
       });
       return out;
     });

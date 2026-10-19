@@ -101,7 +101,7 @@
     const save = () => DB.setSetting('mrpLines', lines);
     const wrap = h('div');
     function importPO() {
-      const open = C.orders().filter(o => o.st !== 'done' && o.p.item_no && (o.sets - o.packed) > 0).sort((a, b) => (a.p.due || '9').localeCompare(b.p.due || '9')).slice(0, 150);
+      const open = C.orders().filter(o => C.isOpen(o) && o.p.item_no && (o.sets - o.packed) > 0).sort((a, b) => (a.p.due || '9').localeCompare(b.p.due || '9')).slice(0, 150);
       const boxes = open.map(o => h('label', { style: { display: 'flex', gap: '8px', padding: '4px 0' } }, h('input', { type: 'checkbox' }), h('span', h('b', o.p.po_no), ' ' + [o.p.customer, o.p.item_no].join(' · ') + ' · ' + F.n(o.sets - o.packed) + ' set · ' + F.d(o.p.due))));
       ERP.modal({ title: L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở'), width: '760px', body: h('div', { style: { maxHeight: '55vh', overflow: 'auto' } }, open.length ? boxes : h('div', { class: 'empty' }, L('미포장 수주가 없습니다', 'Không có PO chưa đóng gói'))),
         buttons: [{ label: L('취소', 'Hủy') }, { label: L('선택 추가 (미포장 set)', 'Thêm mục đã chọn (set còn lại)'), kind: 'primary', onClick: () => {
@@ -113,7 +113,7 @@
       const ta = h('textarea', { class: 'inp', style: { width: '100%', height: '200px', fontFamily: 'monospace' }, placeholder: '52-9724-A\t240\tset\nBM01002\t5000\tpcs' });
       ERP.modal({ title: L('엑셀에서 붙여넣기', 'Dán từ Excel'), width: '640px', body: h('div', h('p', { class: 'help' }, L('열 순서: 품번 · 수량 · 단위(set 또는 pcs; 생략 시 pcs)', 'Thứ tự cột: mã · số lượng · đơn vị (set hoặc pcs; mặc định pcs)')), ta),
         buttons: [{ label: L('취소', 'Hủy') }, { label: L('추가', 'Thêm'), kind: 'primary', onClick: () => {
-          const add = ta.value.split(/\r?\n/).map(x => x.split('\t')).filter(c => c[0] && c[0].trim()).map(c => ({ code: c[0].trim(), qty: Number(String(c[1] || '').replace(/,/g, '')) || 0, unit: /set/i.test(c[2] || '') ? 'set' : /ea/i.test(c[2] || '') ? 'ea' : 'pcs' }));
+          const add = ta.value.split(/\r?\n/).map(x => x.split('\t')).filter(c => c[0] && c[0].trim()).map(c => ({ code: c[0].trim(), qty: ERP.fmt.parseNum(c[1]) || 0, unit: /set/i.test(c[2] || '') ? 'set' : /ea/i.test(c[2] || '') ? 'ea' : 'pcs' }));
           if (lines.length === 1 && !lines[0].code) lines.length = 0; lines.push(...add); save(); draw(); } }] });
     }
     function draw() {
@@ -162,12 +162,19 @@
       const lp = linesByParent(); const existing = parentCode ? (lp.get(parentCode) || []) : [];
       const it = parentCode ? DB.rows('items').find(x => x.code === parentCode) : null;
       const m = { code: parentCode || '', name: it ? it.name : '', type: it ? it.type : 'SEMI', unit: it ? (it.unit || 'pcs') : 'pcs', kids: existing.length ? existing.map(k => ({ child: k.child, qty: k.qty === undefined ? 1 : k.qty, loss: k.loss || 0 })) : [{ child: '', qty: 1, loss: 0 }, { child: '', qty: 1, loss: 0 }] };
-      const body = h('div'); 
+      const body = h('div');
+      // 새 조합인데 이미 구성이 있는 품목을 고르면 그 구성을 불러와 고치게 한다 (저장할 때 기존 줄을 바꾸므로 중복되지 않는다)
+      let loadedFrom = '';
+      function loadExisting() {
+        if (parentCode || !m.code || loadedFrom === m.code) return; const ex = linesByParent().get(m.code) || []; if (!ex.length) return;
+        loadedFrom = m.code; m.kids = ex.map(k => ({ child: k.child, qty: k.qty === undefined ? 1 : k.qty, loss: k.loss || 0 }));
+        ERP.toast(L('이미 구성이 있는 품목입니다 — 기존 구성(' + ex.length + '줄)을 불러왔습니다. 저장하면 이 구성으로 바뀝니다.', 'Mã đã có cấu thành — đã tải ' + ex.length + ' dòng. Lưu sẽ thay cấu thành này.'), 'warn');
+      }
       function drawM() {
         const tree = []; (function walk(code, mult, d) { if (d > 6) return; (linesByParent().get(code) || []).forEach(k => { const q = mult * C.num(k.qty || 1); tree.push({ d, code: k.child, qty: q }); walk(k.child, q, d + 1); }); })(m.code, 1, 0);
         body.replaceChildren(dlCodes('dl_bomc'),
           h('div', { class: 'form-grid' },
-            h('div', { class: 'field' }, h('label', L('결과 품목 코드 (3번)', 'Mã thành phẩm (cha)'), h('span', { class: 'req' }, ' *')), h('input', { class: 'inp', list: 'dl_bomc', value: m.code, disabled: !!parentCode, onchange: (e) => { m.code = e.target.value.trim(); if (!m.name) m.name = nameOf(m.code); drawM(); } })),
+            h('div', { class: 'field' }, h('label', L('결과 품목 코드 (3번)', 'Mã thành phẩm (cha)'), h('span', { class: 'req' }, ' *')), h('input', { class: 'inp', list: 'dl_bomc', value: m.code, disabled: !!parentCode, onchange: (e) => { m.code = e.target.value.trim(); loadExisting(); if (!m.name) m.name = nameOf(m.code); drawM(); } })),
             h('div', { class: 'field' }, h('label', L('품명', 'Tên')), h('input', { class: 'inp', value: m.name, onchange: (e) => { m.name = e.target.value; } })),
             h('div', { class: 'field' }, h('label', L('유형', 'Loại')), h('select', { class: 'inp', onchange: (e) => { m.type = e.target.value; } }, ERP.ITEM_TYPES.map(t => h('option', { value: t.v, selected: m.type === t.v }, L(t.ko, t.vi))))),
             h('div', { class: 'field' }, h('label', L('단위', 'Đơn vị')), h('input', { class: 'inp', value: m.unit, onchange: (e) => { m.unit = e.target.value; } }))),
@@ -184,7 +191,7 @@
         buttons: [{ label: L('취소', 'Hủy') }].concat(parentCode ? [{ label: L('구성 삭제', 'Xóa cấu thành'), kind: 'danger', onClick: async () => { DB.remove('bom_lines', existing.map(x => x._id)); ERP.render(); } }] : []).concat([{ label: L('저장', 'Lưu'), kind: 'primary', onClick: () => {
           const kids = m.kids.filter(k => k.child && k.qty); if (!m.code || !kids.length) { ERP.toast(L('결과 품목과 구성품을 입력하세요', 'Nhập thành phẩm và thành phần'), 'warn'); return false; }
           if (kids.some(k => k.child === m.code)) { ERP.toast(L('자기 자신을 구성품으로 쓸 수 없습니다', 'Không dùng chính nó làm thành phần'), 'warn'); return false; }
-          DB.remove('bom_lines', existing.map(x => x._id));
+          DB.remove('bom_lines', (linesByParent().get(m.code) || []).map(x => x._id));   // 이 품목의 기존 구성(자동 포함)을 바꾼다
           DB.addMany('bom_lines', kids.map(k => ({ parent: m.code, child: k.child, qty: k.qty, loss: k.loss || undefined })));
           const upsertItem = (code, o) => { const e = DB.rows('items').find(x => x.code === code); if (e) { if (e.src === 'ecount') { if (o.type) e.type = o.type; } else Object.assign(e, o); DB.touch('items'); } else DB.add('items', Object.assign({ code, src: 'local' }, o)); };
           upsertItem(m.code, { name: m.name || undefined, type: m.type, unit: m.unit });
@@ -224,7 +231,7 @@
     const roles = st.kind === 'stp' ? INV.STP_ROLES : INV.ASM_ROLES;
     const usedRoles = roles.filter(R => rows.some(x => x.parts.some(p => p.role === R.role)));
     const ps = 80; const pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page >= pages) st.page = pages - 1; const slice = rows.slice(st.page * ps, st.page * ps + ps);
-    const bulk = scope.filter(x => !x.existing && (x.conf === 'high' || x.conf === 'part'));
+    const bulk = scope.filter(x => !x.existing && x.conf === 'high');   // 모든 부품이 확실한 품번만 (노랑이 섞인 품번은 행에서 골라 적용)
     const exLines = DB.memo('bom.lines', ['bom_lines'], () => { const m = new Map(); DB.rows('bom_lines').forEach(l => { let a = m.get(l.parent); if (!a) m.set(l.parent, a = []); a.push(l); }); return m; });
     const TONE = { high: '#0E7A5F', review: '#C77700', none: '#B3261E' };
     const cell = (x, p) => {
@@ -249,7 +256,7 @@
         h('label', { class: 'search' }, h('input', { type: 'search', placeholder: L('품목코드 · 이름 · 부품코드', 'Mã · tên · mã linh kiện'), value: st.q, onchange: (e) => { st.q = e.target.value; st.page = 0; ERP.render(); } })),
         h('span', { class: 'sp' }),
         h('button', { class: 'btn primary', disabled: !bulk.length, onclick: async () => {
-          if (!(await ERP.confirm(L('초록(확실) 부품만으로 조립품 ' + bulk.length + '개의 BOM을 만듭니다. 노랑·빨강 부품은 넣지 않습니다 (나중에 선택해 "적용"). 계속할까요?', 'Tạo BOM cho ' + bulk.length + ' sản phẩm chỉ với linh kiện màu xanh. Tiếp tục?')))) return;
+          if (!(await ERP.confirm(L('모든 부품이 초록(확실)인 조립품 ' + bulk.length + '개의 BOM을 만듭니다. 노랑 부품이 있는 품번은 행에서 골라 "적용"하세요. 계속할까요?', 'Tạo BOM cho ' + bulk.length + ' sản phẩm có toàn bộ linh kiện màu xanh. Tiếp tục?')))) return;
           const r = INV.applyAsm(bulk.map(x => x.parent), { onlyHigh: true }); ERP.toast(L('BOM ' + r.done + '개 적용 · 부품 ' + r.lines + '줄', 'Đã áp dụng ' + r.done + ' BOM · ' + r.lines + ' dòng'), 'ok'); ERP.render(); } }, L('확실한 부품만 모두 적용 (', 'Áp dụng tất cả phần chắc chắn (') + F.n(bulk.length) + ')')),
       h('div', { class: 'toolbar', style: { gap: '6px' } }, Object.keys(STL).filter(k => cnt[k]).map(k => ERP.chip(STL[k][1], STL[k][0] + ' ' + F.n(cnt[k])))),
       rows.length ? h('div', { class: 'tbl-wrap', style: { maxHeight: '60vh' } }, h('table', { class: 'tbl' },
@@ -257,7 +264,9 @@
         h('tbody', slice.map(x => { const ex = exLines.get(x.parent) || []; const stt = statusOf(x);
           return h('tr', h('td', h('b', x.parent)), h('td', (x.name || '').slice(0, 26)), h('td', x.line || ''), usedRoles.map(R => cell(x, x.parts.find(p => p.role === R.role))),
             h('td', ERP.chip(STL[stt][1], STL[stt][0]), ex.length ? h('div', { style: { fontSize: '11.5px', marginTop: '3px' } }, ex.map(l => l.child).join(' + ')) : null),
-            h('td', { class: 'nowrap' }, !x.existing || x.auto ? h('button', { class: 'btn sm primary', onclick: () => { const pick = {}; Object.keys(st.pick).forEach(k => { if (k.indexOf(x.parent + '|') === 0) pick[k] = st.pick[k]; }); const r = INV.applyAsm([x.parent], { pick, force: false }); if (r.done) ERP.toast(L('BOM 적용: ', 'Đã áp dụng: ') + x.parent, 'ok'); else ERP.toast(L('넣을 부품이 없습니다', 'Không có linh kiện'), 'warn'); ERP.render(); } }, x.existing ? L('다시 적용', 'Áp dụng lại') : L('적용', 'Áp dụng')) : null,
+            h('td', { class: 'nowrap' }, !x.existing || x.auto ? h('button', { class: 'btn sm primary', onclick: () => { const pick = {}; Object.keys(st.pick).forEach(k => { if (k.indexOf(x.parent + '|') === 0) pick[k] = st.pick[k]; });
+              const open = x.parts.filter(p => p.conf === 'review' && pick[x.parent + '|' + p.role] === undefined); if (open.length) { ERP.toast(L('노랑 부품을 골라 주세요: ', 'Hãy chọn linh kiện màu vàng: ') + open.map(p => INV.roleName(p.role, x.stp)).join(', '), 'warn'); return; }
+              const r = INV.applyAsm([x.parent], { pick, force: false, onlyHigh: true }); if (r.done) ERP.toast(L('BOM 적용: ', 'Đã áp dụng: ') + x.parent, 'ok'); else ERP.toast(L('넣을 부품이 없습니다', 'Không có linh kiện'), 'warn'); ERP.render(); } }, x.existing ? L('다시 적용', 'Áp dụng lại') : L('적용', 'Áp dụng')) : null,
               ' ', h('button', { class: 'btn sm', onclick: () => editor(x.parent) }, L('편집', 'Sửa')))); }))))
         : h('div', { class: 'empty' }, L('조건에 맞는 품목이 없습니다.', 'Không có mã phù hợp.')),
       rows.length > ps ? h('div', { class: 'pager' }, h('span', F.n(rows.length) + L('개', ' mã')), h('span', { style: { display: 'inline-flex', gap: '8px', alignItems: 'center' } }, h('button', { class: 'btn', disabled: st.page === 0, onclick: () => { st.page--; ERP.render(); } }, '‹'), (st.page + 1) + ' / ' + pages, h('button', { class: 'btn', disabled: st.page >= pages - 1, onclick: () => { st.page++; ERP.render(); } }, '›'))) : null,

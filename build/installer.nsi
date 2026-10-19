@@ -1,7 +1,7 @@
-; ColorPencil ERP - Windows installer (NSIS 3, Unicode). Compile: makensis -DVERSION=1.2.0 build/installer.nsi
+; ColorPencil ERP - Windows installer (NSIS 3, Unicode). Compile: makensis -DVERSION=1.3.0 build/installer.nsi
 Unicode true
 !ifndef VERSION
-  !define VERSION "1.2.0"
+  !define VERSION "1.3.0"
 !endif
 !define APPNAME "ColorPencil ERP"
 !define EXENAME "ColorPencil ERP.exe"

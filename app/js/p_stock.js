@@ -70,7 +70,7 @@
     DB.rows('bom_lines').forEach(l => { if (String(l.child) === key) used.push(L('BOM: ', 'BOM: ') + l.parent + ' (' + F.n(l.qty, 3) + ')'); });
     let bomParts = 0; DB.rows('bom').forEach(b => { if ([b.nose_code, b.refill_code, b.barrel_code, b.holder, b.spoon].some(x => String(x || '') === key)) bomParts++; });
     if (bomParts) used.push(L('예시 BOM(색상별) 부품으로 ', 'Linh kiện trong BOM mẫu: ') + bomParts + L('곳', ' chỗ'));
-    const po = C.orders().filter(o => String(o.p.item_no || '') === key && o.st !== 'done');
+    const po = C.orders().filter(o => String(o.p.item_no || '') === key && C.isOpen(o));
     const poBox = po.length ? h('div', h('h3', L('진행 중 수주 (이 품번)', 'PO đang mở (mã này)')), ERP.simpleTable([{ label: 'PO', render: o => o.p.po_no }, { label: L('거래처', 'Khách'), render: o => o.p.customer || '' }, { label: L('주문 set', 'Đặt (set)'), num: 1, render: o => F.n(o.sets) }, { label: L('포장 set', 'Đã đóng'), num: 1, render: o => F.n(o.packed) }, { label: L('남은 set', 'Còn lại'), num: 1, render: o => h('b', F.n(Math.max(0, o.sets - o.packed))) }, { label: L('납기', 'Hạn'), render: o => F.d(o.p.due) }], po.slice(0, 20), { maxH: '200px' }),
       s && s.sets !== null && s.sets !== undefined ? h('p', { class: 'help' }, L('완제품 재고 ', 'Tồn thành phẩm ') + F.n(s.sets) + L(' set · 남은 수주 ', ' set · PO còn lại ') + F.n(po.reduce((a, o) => a + Math.max(0, o.sets - o.packed), 0)) + ' set') : null) : null;
     ERP.modal({ title: key + ' · ' + ((m && m.name) || (s && s.name) || ''), width: '1100px', body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } }, info, kpis,
@@ -253,6 +253,11 @@
             h('td', h('button', { class: 'btn sm primary', onclick: () => { if (!x.it) return; const patch = {}; if (+a.value > 0) patch.set_per_ct = +a.value; if (+b.value > 0) patch.pcs_per_set = +b.value; if (!Object.keys(patch).length) { ERP.toast(L('숫자를 입력하세요', 'Nhập số'), 'warn'); return; } DB.update('items', x.it._id, patch); ERP.toast(L('저장했습니다', 'Đã lưu'), 'ok'); ERP.render(); } }, L('저장', 'Lưu')))); })));
       return h('div', h('p', { class: 'help' }, L('완제품 단위가 CT(박스)이면 포장 일보의 set 수를 CT로 바꾸려면 "CT당 set"이 필요합니다.', 'Thành phẩm đơn vị CT cần "set / CT" để đổi số set trong báo cáo đóng gói.')), h('div', { class: 'entry-wrap' }, tbl));
     }));
+    // 4-2) packing BOM taken from a similar item (same series) — the colour list may differ
+    const sm = Array.from((d.similar || new Map()).entries()).map(([k, v]) => ({ code: k, alt: v }));
+    if (sm.length) host.append(section(L('포장 BOM 을 비슷한 품번으로 대신 사용 (확인 필요)', 'Dùng BOM đóng gói của mã gần giống (cần kiểm tra)'), sm.length, 'warn', () => h('div',
+      h('p', { class: 'help' }, L('같은 품번의 색상 구성(BOM)이 없어 앞부분이 같은 품번의 구성으로 색연필을 차감했습니다. 색상 수가 다르면 차감이 틀립니다 — 제품 · BOM 에서 이 품번의 구성을 넣으세요.', 'Không có BOM màu đúng mã nên đã dùng BOM của mã cùng dòng. Nếu số màu khác thì trừ sai — hãy thêm BOM cho mã này.')),
+      ERP.simpleTable([{ label: L('포장 품번', 'Mã đóng gói'), render: x => h('b', x.code) }, { label: L('대신 쓴 BOM', 'BOM đã dùng'), render: x => x.alt }], sm.slice(0, 200), { maxH: '260px' }))));
     // 5) mappings already made
     const maps = DB.rows('code_map');
     host.append(h('details', { class: 'card', style: { marginBottom: '12px', padding: '12px 16px' } }, h('summary', { style: { cursor: 'pointer', fontWeight: 700 } }, ERP.chip('info', F.n(maps.length)), ' ', L('연결한 코드 목록', 'Danh sách mã đã liên kết')),
@@ -282,6 +287,10 @@
       const q = num(r.qty); if (!q) return { bad: L('수량 입력', 'Nhập SL'), it };
       if (r.kind === 'MOVE' && r.from === r.to) return { bad: L('출발=도착', 'Từ = Đến'), it };
       if (r.kind !== 'ADJ' && q < 0) return { bad: L('수량은 + 로 입력 (조정만 −)', 'SL phải dương (trừ điều chỉnh)'), it };
+      // 기초재고 기준일 당일 · 이전 날짜는 기초재고에 들어 있다고 보므로 재고에 더하지 않는다 → 저장은 되지만 경고
+      const t = { kind: r.kind, from_scope: r.from || undefined, to_scope: r.to || undefined, qty: q };
+      const od = INV.opening().date; const stale = INV.effects(t).filter(([sc]) => od[sc] && (r.date || F.today()) <= od[sc]).map(([sc]) => od[sc]);
+      if (stale.length) return { ok: true, it, warn: L('기초재고 기준일(' + stale[0] + ') 이전 · 당일이라 재고에 반영되지 않음', 'Trước/đúng ngày tồn đầu (' + stale[0] + ') — không cộng vào tồn') };
       return { ok: true, it };
     }
     function projected() {   // stock after the pending rows, to warn about negatives
@@ -308,7 +317,7 @@
           cell(r, 'partner', h('input', { value: r.partner || '', onchange: (e) => { r.partner = e.target.value; } })),
           cell(r, 'ref', h('input', { value: r.ref || '', style: { width: '100px' }, onchange: (e) => { r.ref = e.target.value; } })),
           cell(r, 'note', h('input', { value: r.note || '', onchange: (e) => { r.note = e.target.value; } })),
-          h('td', c.bad ? ERP.chip('bad', c.bad) : (c.ok ? ERP.chip('ok', '✓') : '')),
+          h('td', c.bad ? ERP.chip('bad', c.bad) : c.warn ? ERP.chip('warn', c.warn) : (c.ok ? ERP.chip('ok', '✓') : '')),
           h('td', h('button', { class: 'icon-btn', title: L('줄 삭제', 'Xóa dòng'), onclick: () => { st.rows.splice(i, 1); draw(); } }, '×')));
       });
       // Enter = next input
@@ -336,10 +345,14 @@
           rows.push(Object.fromEntries(Object.entries({ date, doc_no: doc, kind: r.kind, from_scope: (r.kind === 'OUT' || r.kind === 'MOVE') ? (r.from || 'WH') : undefined, to_scope: r.kind === 'OUT' ? undefined : (r.to || 'WH'), code: c.it.code, name: c.it.name, qty: num(r.qty), unit: INV.unitShow(c.it.unit), partner: r.partner || undefined, ref: r.ref || undefined, note: r.note || undefined, src: 'manual' }).filter(([, v]) => v !== undefined && v !== ''))); });
         DB.addMany('stock_tx', rows);
         ERP.toast(L(rows.length + '줄 저장 · 전표 ', 'Đã lưu ' + rows.length + ' dòng · phiếu ') + Array.from(docs.values()).join(', '), 'ok');
-        const last = st.rows[st.rows.length - 1] || {}; st.rows = [{ date: last.date || F.today(), kind: last.kind || 'IN', from: last.from, to: last.to }]; ERP.render();
+        // 저장한 줄만 빼고, 검사에 걸린 줄은 고칠 수 있게 입력표에 남긴다
+        const saved = new Set(ok.map(x => x[0])); const left = st.rows.filter(r => !saved.has(r) && !check(r).empty);
+        const last = st.rows[st.rows.length - 1] || {}; st.rows = left.concat([{ date: last.date || F.today(), kind: last.kind || 'IN', from: last.from, to: last.to }]); ERP.render();
       };
-      const neg = projected();
-      if (neg.length) ERP.confirm(L('저장하면 마이너스가 되는 품목이 ' + neg.length + '개 있습니다.\n' + neg.slice(0, 8).join('\n') + '\n그래도 저장할까요?', neg.length + ' mã sẽ bị âm:\n' + neg.slice(0, 8).join('\n') + '\nVẫn lưu?')).then(y => { if (y) run(); }); else run();
+      const neg = projected(); const stale = ok.filter(x => x[1].warn).length;
+      const ask = []; if (neg.length) ask.push(L('저장하면 마이너스가 되는 품목이 ' + neg.length + '개 있습니다.\n' + neg.slice(0, 8).join('\n'), neg.length + ' mã sẽ bị âm:\n' + neg.slice(0, 8).join('\n')));
+      if (stale) ask.push(L(stale + '줄은 기초재고 기준일 이전 · 당일이라 재고에 반영되지 않습니다.', stale + ' dòng trước/đúng ngày tồn đầu — không cộng vào tồn.'));
+      if (ask.length) ERP.confirm(ask.join('\n\n') + L('\n그래도 저장할까요?', '\nVẫn lưu?')).then(y => { if (y) run(); }); else run();
     }
     function pasteDialog() {
       const ta = h('textarea', { class: 'inp', style: { width: '100%', minHeight: '220px', fontFamily: 'monospace', fontSize: '12px' }, placeholder: L('일자 · 구분 · 출발 · 도착 · 품목코드 · 수량 · 거래처 · 비고 (엑셀에서 복사, 탭으로 구분)', 'Ngày · Loại · Từ · Đến · Mã hàng · SL · Đối tác · Ghi chú (copy từ Excel)') });
@@ -348,8 +361,8 @@
           const lines = ta.value.split(/\r?\n/).map(x => x.split('\t')).filter(c => c.some(x => x.trim())); const base = st.rows[st.rows.length - 1] || { date: F.today(), kind: 'IN', to: 'WH' }; let n = 0;
           lines.forEach(c => {
             let r;
-            if (c.length <= 3) { const qty = parseFloat(String(c[1] || '').replace(/,/g, '')); if (!c[0] || isNaN(qty)) return; r = { date: base.date, kind: base.kind, from: base.from, to: base.to, code: c[0].trim(), qty, note: (c[2] || '').trim() }; }
-            else { const qty = parseFloat(String(c[5] || '').replace(/,/g, '')); if (!c[4] || isNaN(qty)) return; const k = INV.kindOf(c[1]) || base.kind; r = { date: /^\d{4}-\d\d-\d\d$/.test((c[0] || '').trim()) ? c[0].trim() : base.date, kind: k, from: INV.scopeOf(c[2]) || '', to: INV.scopeOf(c[3]) || '', code: c[4].trim(), qty, partner: (c[6] || '').trim(), note: (c[7] || '').trim() }; }
+            if (c.length <= 3) { const qty = F.parseNum(c[1]); if (!c[0] || qty === null) return; r = { date: base.date, kind: base.kind, from: base.from, to: base.to, code: c[0].trim(), qty, note: (c[2] || '').trim() }; }
+            else { const qty = F.parseNum(c[5]); if (!c[4] || qty === null) return; const k = INV.kindOf(c[1]) || base.kind; r = { date: F.parseDate((c[0] || '').trim()) || base.date, kind: k, from: INV.scopeOf(c[2]) || '', to: INV.scopeOf(c[3]) || '', code: c[4].trim(), qty, partner: (c[6] || '').trim(), note: (c[7] || '').trim() }; }
             const it = INV.item(r.code); if (!it) { const hits = INV.search(r.code, 2); if (hits.length === 1) r.code = hits[0].code; }
             defaults(r); st.rows.push(r); n++;
           });
@@ -551,7 +564,7 @@
       const out = X.write(wb, { bookType: 'xlsx', type: 'array' }); ERP.download('ERP_data_check_' + F.today() + '.xlsx', new Blob([out], { type: 'application/octet-stream' }));
     }
     function suggestDialog() {
-      const date = F.today(); const rows = INV.suggestMoves(date);
+      const date = INV.suggestDate(); const rows = INV.suggestMoves(date);   // 기준일 당일이면 다음 날 (당일 수불은 재고에 더하지 않으므로)
       if (!rows.length) { ERP.toast(L('정리할 품목이 없습니다', 'Không có mã cần xử lý'), 'ok'); return; }
       ERP.modal({ title: L('이동 전표 만들기 (미리보기)', 'Tạo phiếu chuyển kho (xem trước)'), width: '900px', body: h('div', h('p', { class: 'help' }, L(date + ' 날짜로 ' + rows.length + '건의 이동 수불을 만듭니다. 저장 뒤에도 "수불 내역"에서 지울 수 있습니다.', 'Tạo ' + rows.length + ' phiếu chuyển ngày ' + date + '. Có thể xóa ở "Nhập xuất tồn".')),
         ERP.simpleTable([{ label: L('품목코드', 'Mã hàng'), render: r => r.code }, { label: L('품명', 'Tên'), render: r => r.name }, { label: L('이동', 'Chuyển'), render: r => ERP.scopeName(r.from_scope) + ' → ' + ERP.scopeName(r.to_scope) }, { label: L('수량', 'SL'), num: 1, render: r => fq(r.qty, r.unit) + ' ' + (r.unit || '') }], rows, { maxH: '50vh' })),

@@ -65,17 +65,19 @@
     label: L('ECOUNT 품목등록', 'ECOUNT · Danh mục mặt hàng'), apply: applyItems, preview: previewItems });
   function diffItems(rows) {
     const idx = new Map(DB.rows('items').map(r => [up(r.code), r])); let added = 0, changed = 0; const seen = new Set(); const samples = [];
+    let local = 0;
     rows.forEach(r => {
       const k = up(r.code); seen.add(k); const e = idx.get(k); if (!e) { added++; return; }
+      if (e.src === 'local') { local++; return; }   // 직접 만든 품목은 ECOUNT 업로드로 바꾸지 않는다
       const d = ITEM_FIELDS.filter(f => !(f === 'safety' && (r.safety === undefined || r.safety === null)) && !same(e[f], r[f]));
       if (d.length || e.missing) { changed++; if (samples.length < 6) samples.push(r.code + (d.length ? ' (' + d.join(', ') + ')' : '')); }
     });
     let missing = 0; DB.rows('items').forEach(r => { if (r.src === 'ecount' && !seen.has(up(r.code)) && !r.missing) missing++; });
-    return { added, changed, missing, samples };
+    return { added, changed, missing, samples, local };
   }
   function previewItems(job) {
     const d = diffItems(job.rows);
-    return { parts: [[L('신규', 'Mới'), d.added, d.added ? 'info' : 'neutral'], [L('변경', 'Thay đổi'), d.changed, d.changed ? 'warn' : 'neutral'], [L('이번 파일에 없음 (숨김 후보)', 'Không có trong file (đề xuất ẩn)'), d.missing, d.missing ? 'warn' : 'neutral']],
+    return { parts: [[L('신규', 'Mới'), d.added, d.added ? 'info' : 'neutral'], [L('변경', 'Thay đổi'), d.changed, d.changed ? 'warn' : 'neutral'], [L('이번 파일에 없음 (숨김 후보)', 'Không có trong file (đề xuất ẩn)'), d.missing, d.missing ? 'warn' : 'neutral']].concat(d.local ? [[L('직접 만든 품목과 같은 코드 (바꾸지 않음)', 'Trùng mã hàng tự tạo (không đổi)'), d.local, 'warn']] : []),
       detail: d.samples.length ? L('변경 예: ', 'VD thay đổi: ') + d.samples.join(' · ') : '' };
   }
   function applyItems(job) {
@@ -83,6 +85,7 @@
     let added = 0, changed = 0, missing = 0;
     job.rows.forEach(r => {
       const k = up(r.code); seen.add(k); const e = idx.get(k);
+      if (e && e.src === 'local') return;   // 직접 만든 품목(사용자 정의 BOM 등)은 그대로
       if (e) {
         let diff = false;
         ITEM_FIELDS.forEach(f => {
@@ -192,6 +195,7 @@
     }
     const all = DB.rows('stock_open'); const keep = all.filter(r => r.scope !== job.scope); const removed = all.length - keep.length;
     DB.t.stock_open = keep; DB.addMany('stock_open', job.rows.map(r => pick(Object.assign({ date: job.date, scope: job.scope, file: job.file }, r))));
+    DB.meta.openDate = Object.assign({}, DB.meta.openDate, { [job.scope]: job.date }); DB.saveMeta();   // 기준일은 범위마다 하나 (INV.opening)
     // CT·SET 환산 비율 (ECOUNT 가 계산한 Số Set / Số PCS 에서 역산) — 비어 있는 품목만 채운다
     let conv = 0; const IT = INV.items();
     job.rows.forEach(r => {
@@ -219,8 +223,11 @@
       const from = INV.scopeOf(S(r, m.from_scope)), to = INV.scopeOf(S(r, m.to_scope));
       let kind = INV.kindOf(S(r, m.kind)) || (from && to ? 'MOVE' : from ? 'OUT' : 'IN');
       const it = IT.get(code);
-      const o = { date: T(S(r, m.date)) || F.today(), doc_no: clean(T(S(r, m.doc_no))), kind, code: it ? it.code : code, name: it ? it.name : null, qty, unit: it ? INV.unitShow(it.unit) : null, partner: clean(T(S(r, m.partner))), ref: clean(T(S(r, m.ref))), note: clean(T(S(r, m.note))), src: 'xl:tpl' };
-      if (kind === 'IN') o.to_scope = to || 'WH'; else if (kind === 'OUT') o.from_scope = from || 'WH'; else if (kind === 'MOVE') { o.from_scope = from || 'WH'; o.to_scope = to || (o.from_scope === 'WH' ? 'FAC' : 'WH'); } else o.to_scope = to || from || 'WH';
+      const rawDate = S(r, m.date); const date = rawDate === null || rawDate === '' ? F.today() : F.parseDate(rawDate);   // 17/10/2026 같은 글자 날짜도 ISO 로
+      const o = { date: date || T(rawDate), _badDate: date ? undefined : true, doc_no: clean(T(S(r, m.doc_no))), kind, code: it ? it.code : code, name: it ? it.name : null, qty, unit: it ? INV.unitShow(it.unit) : null, partner: clean(T(S(r, m.partner))), ref: clean(T(S(r, m.ref))), note: clean(T(S(r, m.note))), src: 'xl:tpl' };
+      if (kind === 'IN') o.to_scope = to || 'WH'; else if (kind === 'OUT') o.from_scope = from || 'WH';
+      else if (kind === 'MOVE') { o.from_scope = from || (to ? (to === 'WH' ? 'FAC' : 'WH') : 'WH'); o.to_scope = to || (o.from_scope === 'WH' ? 'FAC' : 'WH'); if (!from || !to) o._guess = true; }   // 출발 · 도착 중 빈 칸은 반대 범위로
+      else o.to_scope = to || from || 'WH';
       if (!it) { o._unknown = true; o._cands = INV.search(code, 5).map(x => x.code); }
       rows.push(pick(o));
     }
@@ -264,20 +271,22 @@
     return job;
   };
   function previewTx(job) {
-    const by = {}; let unk = 0; job.rows.forEach(r => { if (!r.code || r._unknown) unk++; else by[r.kind] = (by[r.kind] || 0) + 1; });
+    const by = {}; let unk = 0, bad = 0, guess = 0; job.rows.forEach(r => { if (r._badDate) bad++; else if (!r.code || r._unknown) unk++; else by[r.kind] = (by[r.kind] || 0) + 1; if (r._guess) guess++; });
     const parts = Object.keys(by).map(k => [ERP.txKindName(k), by[k], 'info']);
     if (unk) parts.push([L('코드 확인 필요 (건너뜀)', 'Cần xác nhận mã (bỏ qua)'), unk, 'warn']);
+    if (bad) parts.push([L('날짜를 읽지 못함 (건너뜀): ', 'Không đọc được ngày (bỏ qua): ') + Array.from(new Set(job.rows.filter(r => r._badDate).map(r => r.date))).slice(0, 3).join(', '), bad, 'bad']);
+    if (guess) parts.push([L('이동: 출발 · 도착 중 빈 칸을 반대 범위로 채움', 'Chuyển: ô trống Từ/Đến được điền phạm vi ngược lại'), guess, 'neutral']);
     const ds = job.rows.map(r => r.date).filter(Boolean).sort(); const od = INV.openDates();
     const before = job.rows.filter(r => od.first && r.date && r.date <= od.first).length;
     return { parts, detail: (ds.length ? F.d(ds[0]) + (ds[0] !== ds[ds.length - 1] ? ' ~ ' + F.d(ds[ds.length - 1]) : '') : '') + (before ? L(' · 기초재고 기준일(' + od.first + ') 이전 ' + before + '건은 재고에 더하지 않습니다', ' · ' + before + ' dòng trước ngày tồn đầu (' + od.first + ') không cộng vào tồn') : ''), unknown: unk };
   }
   function applyTx(job) {
-    const ok = job.rows.filter(r => r.code && !r._unknown && num(r.qty)); const skipped = job.rows.length - ok.length;
+    const ok = job.rows.filter(r => r.code && !r._unknown && !r._badDate && num(r.qty)); const skipped = job.rows.length - ok.length;
     const all = DB.rows('stock_tx'); let keep = all;
     if (job.mode === 'range') { const ds = ok.map(r => r.date).filter(Boolean).sort(); if (ds.length) { const lo = ds[0], hi = ds[ds.length - 1]; keep = all.filter(t => !(t.src === job.srcTag && t.date >= lo && t.date <= hi)); } }
     else if (job.mode === 'slip') { const docs = new Set(ok.map(r => r.doc_no).filter(Boolean)); keep = all.filter(t => !(t.doc_no && docs.has(t.doc_no))); }
     const removed = all.length - keep.length; DB.t.stock_tx = keep;
-    DB.addMany('stock_tx', ok.map(r => { const o = Object.assign({}, r); delete o._orig; delete o._cands; delete o._unknown; if (!o.src) o.src = job.srcTag || 'xl'; return pick(o); }));
+    DB.addMany('stock_tx', ok.map(r => { const o = Object.assign({}, r); delete o._orig; delete o._cands; delete o._unknown; delete o._badDate; delete o._guess; if (!o.src) o.src = job.srcTag || 'xl'; return pick(o); }));
     return { added: ok.length, removed, skipped };
   }
   /** modal: choose item codes for rows that could not be matched */

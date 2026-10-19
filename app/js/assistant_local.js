@@ -289,7 +289,7 @@
   function fmtPo(r, c) {
     const { s } = c, p = r.po, X = [];
     X.push(B.h(`PO ${p.po_no} — ${r.customer || '–'}${r.country ? ' (' + r.country + ')' : ''}`));
-    const st = { done: s('완료', 'Hoàn thành'), late: s('납기 경과', 'Quá hạn'), prod: s('생산 중', 'Đang SX'), wait: s('대기', 'Chờ') }[p.status] || p.status;
+    const st = { done: s('완료', 'Hoàn thành'), late: s('납기 경과', 'Quá hạn'), prod: s('생산 중', 'Đang SX'), wait: s('대기', 'Chờ'), cancel: s('취소', 'Hủy'), hold: s('보류', 'Tạm dừng') }[p.status] || p.status;
     const kv = [[s('상태', 'Trạng thái'), { v: st, tone: p.status === 'late' ? 'bad' : p.status === 'done' ? 'ok' : '' }], [s('진행', 'Tiến độ'), p.progress_pct + '% (' + c.n(p.packed_sets) + ' / ' + c.n(p.sets) + ' set)'], [s('남은 수량', 'Còn lại'), c.n(Math.max(0, (p.sets || 0) - (p.packed_sets || 0))) + ' set'], [s('납기', 'Hạn giao'), (p.due || '–') + (p.days_to_due !== null && p.days_to_due !== undefined ? ' (' + c.dd(p.days_to_due) + ')' : '')]];
     X.push(B.table([{ l: s('항목', 'Mục') }, { l: s('값', 'Giá trị') }], kv, { cell: (x) => [{ v: x[0], b: 1 }, x[1]], line: (x) => x[0] + ' ' + cellTxt(x[1]) }));
     if (p.stale) X.push(B.note(s(`납기가 ${U.STALE_DAYS}일 넘게 지난 건입니다 (대시보드 기준 밖). 이미 출하됐다면 마감 처리를 확인하세요.`, `Quá hạn hơn ${U.STALE_DAYS} ngày (ngoài tiêu chí Tổng quan). Nếu đã giao, hãy kiểm tra việc đóng đơn.`)));

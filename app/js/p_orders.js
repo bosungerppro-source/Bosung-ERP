@@ -21,6 +21,7 @@
     const exist = poNo ? DB.rows('po').filter(p => String(p.po_no) === String(poNo)) : [];
     const head0 = exist[0] || {};
     const H = { po_no: poNo || '', customer: head0.customer || '', country: head0.country || '', market: head0.market || '', date: head0.date || F.today(), due: head0.due || '', condition: head0.condition || '', mark: head0.mark || '' };
+    const H0 = Object.assign({}, H);   // 열었을 때 값 — 기존 줄에는 사용자가 바꾼 머리글 칸만 반영한다 (줄마다 다른 수주일 · 납기를 지키기 위해)
     const lines = exist.length ? exist.map(p => ({ _id: p._id, item_no: p.item_no || '', kind: p.kind || '', color: p.color || '', sets: p.sets, pcs: p.pcs, cs: p.cs })) : [{ item_no: '', kind: '', sets: '', pcs: '' }];
     // item -> {kind, colors}: most frequent combination in past POs first, then item_bom (the master has duplicate rows)
     const ibom = (() => {
@@ -63,11 +64,21 @@
         if (!poNo && DB.rows('po').some(p => String(p.po_no) === H.po_no)) { ERP.toast(L('이미 있는 PO 번호입니다. 목록에서 선택해 "수주 편집"으로 품번을 추가하세요.', 'PO đã tồn tại. Hãy chọn trong danh sách rồi Sửa PO để thêm mã.'), 'warn'); return false; }
         const dup = ls.map(l => l.item_no).filter((v, i, a) => a.indexOf(v) !== i); if (dup.length) ERP.toast(L('같은 품번이 중복 입력되었습니다: ', 'Trùng mã hàng: ') + dup[0], 'warn');
         const keep = new Set(ls.filter(l => l._id).map(l => l._id)); DB.remove('po', exist.filter(x => !keep.has(x._id)).map(x => x._id));
-        const clean = (l) => { const o = Object.assign({}, H, { item_no: l.item_no, kind: l.kind || undefined, color: l.color || undefined, sets: l.sets === '' ? undefined : l.sets, pcs: l.pcs === '' ? undefined : l.pcs, cs: l.cs === '' ? undefined : l.cs }); Object.keys(o).forEach(k => { if (o[k] === '' || o[k] === undefined) delete o[k]; }); return o; };
-        ls.filter(l => l._id).forEach(l => { const r = DB.rows('po').find(x => x._id === l._id); if (r) { const o = clean(l); ['customer', 'country', 'market', 'due', 'condition', 'mark', 'kind', 'sets', 'pcs', 'cs'].forEach(k => { if (o[k] === undefined) delete r[k]; }); Object.assign(r, o); } });
+        const lineOf = (l) => ({ item_no: l.item_no, kind: l.kind || undefined, color: l.color || undefined, sets: l.sets === '' ? undefined : l.sets, pcs: l.pcs === '' ? undefined : l.pcs, cs: l.cs === '' ? undefined : l.cs });
+        const clean = (l) => { const o = Object.assign({}, H, lineOf(l)); Object.keys(o).forEach(k => { if (o[k] === '' || o[k] === undefined) delete o[k]; }); return o; };
+        const changed = Object.keys(H).filter(k => k !== 'po_no' && String(H[k]) !== String(H0[k]));
+        ls.filter(l => l._id).forEach(l => { const r = DB.rows('po').find(x => x._id === l._id); if (!r) return;
+          const o = lineOf(l); changed.forEach(k => { o[k] = H[k]; });
+          Object.keys(o).forEach(k => { if (o[k] === '' || o[k] === undefined) { if (k !== 'item_no') delete r[k]; delete o[k]; } }); Object.assign(r, o); delete r._ex; });
         DB.touch('po'); DB.addMany('po', ls.filter(l => !l._id).map(clean));
         if (ERP.state.ord) ERP.state.ord.sel = H.po_no; ERP.toast(L('저장했습니다 (' + ls.length + '개 품번)', 'Đã lưu (' + ls.length + ' mã)'), 'ok'); ERP.render(); } }]) });
   }
+
+  /** "자재 소요량 계산 (전체 품번)": 진행 중인 품번 줄의 남은 수량만 (완료 · 취소 · 보류 줄은 뺀다) */
+  ERP.poMrpLines = function (poNo) {
+    const g = C.poGroups().find(x => String(x.po_no) === String(poNo)); if (!g) return [];
+    return g.lines.filter(l => l.p.item_no && C.isOpen(l) && l.sets - l.packed > 0).map(l => ({ code: bomFor(l.p.item_no).key || l.p.item_no, qty: Math.round(l.sets - l.packed), unit: 'set' }));
+  };
 
   ERP.pages.orders = { ko: '수주 관리', vi: 'Quản lý đơn hàng', render(root) {
     const st = ERP.state.ord = ERP.state.ord || { tab: 'open', sel: null, view: 'po' };
@@ -75,12 +86,12 @@
     const lineAll = C.orders(); const byId = new Map(lineAll.map(o => [o.p._id, o]));
     const all = C.poGroups(); const byPo = new Map(all.map(g => [g.po_no, g]));
     const today = F.today();
-    const open = all.filter(o => o.st !== 'done');
+    const open = all.filter(o => C.isOpen(o));
     const late = open.filter(o => o.st === 'late' && o.dday >= -90);
     const soon = open.filter(o => o.soon);
     const mStart = today.slice(0, 8) + '01';
     const newThisMonth = DB.rows('po').filter(p => p.date >= mStart && p.date <= today);
-    const counts = { open: open.length, wait: all.filter(o => o.st === 'wait').length, prod: all.filter(o => o.st === 'prod').length, late: all.filter(o => o.st === 'late').length, done: all.filter(o => o.st === 'done').length, all: all.length };
+    const counts = { open: open.length, wait: all.filter(o => o.st === 'wait').length, prod: all.filter(o => o.st === 'prod').length, late: all.filter(o => o.st === 'late').length, done: all.filter(o => o.st === 'done').length, cancel: all.filter(o => o.st === 'cancel' || o.st === 'hold').length, all: all.length };
     const multi = all.filter(g => g.n > 1).length;
 
     root.appendChild(ERP.pageHead([L('수주 관리', 'Quản lý đơn hàng (PO)'), ERP.sampleChip ? ERP.sampleChip('po') : null], L('PO 번호 단위로 관리 · 한 PO에 여러 품번 가능 · 포장일보의 PO 번호+품번으로 품번별 진행률 자동 집계', 'Quản lý theo số PO · 1 PO nhiều mã hàng · tiến độ từng mã tự tính từ báo cáo đóng gói (số PO + mã)'),
@@ -130,10 +141,10 @@
     drawMonthly(); root.appendChild(mHost);
 
     // list + detail
-    const tabs = [['open', L('진행 중', 'Đang mở')], ['wait', L('대기', 'Chờ')], ['prod', L('생산 중', 'Đang SX')], ['late', L('납기 경과', 'Quá hạn')], ['done', L('완료', 'Xong')], ['all', L('전체', 'Tất cả')]];
+    const tabs = [['open', L('진행 중', 'Đang mở')], ['wait', L('대기', 'Chờ')], ['prod', L('생산 중', 'Đang SX')], ['late', L('납기 경과', 'Quá hạn')], ['done', L('완료', 'Xong')], ['cancel', L('취소 · 보류', 'Hủy · tạm dừng')], ['all', L('전체', 'Tất cả')]];
     const aside = h('aside', { class: 'card detail' });
     const gridHost = h('div');
-    const match = (o) => st.tab === 'all' ? true : st.tab === 'open' ? o.st !== 'done' : o.st === st.tab;
+    const match = (o) => st.tab === 'all' ? true : st.tab === 'open' ? C.isOpen(o) : st.tab === 'cancel' ? (o.st === 'cancel' || o.st === 'hold') : o.st === st.tab;
     const progCell = (o) => h('div', { style: { minWidth: '110px' } }, ERP.bar(o.prog * 100, o.st === 'late' ? 'bad' : o.st === 'done' ? 'ok' : 'info'), h('small', { class: 'muted' }, F.n(o.prog * 100, 0) + '% · ' + F.n(Math.min(o.packed, o.sets || o.packed)) + '/' + F.n(o.sets)));
     function drawGrid() {
       let g;
@@ -172,7 +183,7 @@
           o.orphan > 0 ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 품번이 일치하지 않는 포장 실적 ' + F.n(o.orphan) + ' set 이 있습니다. 포장일보의 코드를 PO 품번과 같게 입력하세요.', '⚠ Có ' + F.n(o.orphan) + ' set đóng gói không khớp mã hàng nào của PO. Hãy nhập mã trùng với mã hàng của PO.')) : null),
         h('div', h('h3', L('포장 실적 (생산일보)', 'Kết quả đóng gói (báo cáo ngày)')), packs.length ? ERP.simpleTable([{ label: L('일자', 'Ngày'), render: r => F.md(r.date) }, { label: L('품번', 'Mã hàng'), render: r => h('span', { style: codes.has(String(r.code)) ? null : { color: '#C77700' } }, r.code || '') }, { label: L('설비', 'Máy'), render: r => r.machine_no || '' }, { label: 'set', num: 1, render: r => F.n(r.ok_qty) }], packs.slice(0, 10), { maxH: '220px' }) : h('div', { class: 'sub' }, L('이 PO 번호의 포장일보가 아직 없습니다. (포장일보에 PO 번호 + 품번 입력)', 'Chưa có báo cáo đóng gói cho PO này. (nhập số PO + mã hàng)'))),
         h('div', { class: 'actions' },
-          h('button', { class: 'btn primary', onclick: () => ERP.goto('bom', { tab: 'mrp', lines: lineIds.filter(l => l.p.item_no).map(l => ({ code: bomFor(l.p.item_no).key || l.p.item_no, qty: Math.max(0, Math.round(l.sets - l.packed)) || Math.round(l.sets), unit: 'set' })) }) }, L('자재 소요량 계산 (전체 품번)', 'Tính nhu cầu NVL (tất cả mã)')),
+          h('button', { class: 'btn primary', onclick: () => ERP.goto('bom', { tab: 'mrp', lines: ERP.poMrpLines(o.po_no) }) }, L('자재 소요량 계산 (전체 품번)', 'Tính nhu cầu NVL (tất cả mã)')),
           h('button', { class: 'btn', onclick: () => poEditor(o.po_no) }, L('수주 편집 · 품번 추가', 'Sửa PO · thêm mã'))));
     }
     const viewSw = h('div', { class: 'seg' }, [['po', L('PO별 보기', 'Theo PO')], ['line', L('품번 라인별 보기', 'Theo dòng mã hàng')]].map(o => h('button', { class: 'btn sm' + (st.view === o[0] ? ' primary' : ''), onclick: () => { st.view = o[0]; ERP.render(); } }, o[1])));

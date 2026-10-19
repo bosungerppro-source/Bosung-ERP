@@ -43,6 +43,13 @@
   };
   const norm = (s) => String(s === null || s === undefined ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').normalize('NFC').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^a-z0-9가-힣]+/g, '');
   XL.norm = norm;
+  /** 파일 이름 속 날짜: 2026-10-08 · 08-10-2026 · 08.10.26 (일-월-년) → ISO, 없으면 null */
+  XL.fileDate = function (name) {
+    const s = String(name || '');
+    let m = s.match(/(?:^|\D)(\d{4})[-.](\d{1,2})[-.](\d{1,2})(?!\d)/); if (m) return ERP.fmt.ymd(+m[1], +m[2], +m[3]);
+    m = s.match(/(?:^|\D)(\d{1,2})[-.](\d{1,2})[-.](\d{4}|\d{2})(?!\d)/); if (m) return ERP.fmt.ymd(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
+    return null;
+  };
   const S = (r, i) => (r && r[i] !== undefined ? r[i] : null);
   const N = (v) => { if (typeof v === 'number') return v; if (typeof v === 'string') { const x = parseFloat(v.replace(/,/g, '')); return isNaN(x) ? null : x; } return null; };
   const T = (v) => (v === null || v === undefined ? null : String(v));
@@ -94,15 +101,17 @@
     });
     save(wb, 'ERP_upload_template.xlsx');
   };
-  XL.dailyTemplate = function () {
+  /** 일보 양식: 공정마다 시트 prod_<공정> (생산일 · 주/야 · 그 공정의 입력 칸). 채워서 올리면 'erp-daily' 인식기가 그 공정의 일보로 읽는다 */
+  XL.dailyTemplateBook = function () {
     const wb = XLSX().utils.book_new();
     ERP.PROC.forEach(p => {
-      const cols = ERP.entryCols(p.id).map(k => ERP.TABLES.prod_log.cols.find(c => c.k === k));
+      const cols = ERP.entryCols(p.id).map(k => ERP.TABLES.prod_log.cols.find(c => c.k === k)).filter(Boolean);
       const hdr = [L('생산일', 'Ngày SX'), L('주/야', 'Ca')].concat(cols.map(c => ERP.colLabel(c)));
-      XLSX().utils.book_append_sheet(wb, XLSX().utils.aoa_to_sheet([hdr, [ERP.fmt.today(), 'D']]), 'prod_' + p.id);
+      XLSX().utils.book_append_sheet(wb, XLSX().utils.aoa_to_sheet([hdr, [ERP.fmt.today(), 'D']]), ('prod_' + p.id).slice(0, 31));
     });
-    save(wb, 'ERP_daily_report_template.xlsx');
+    return wb;
   };
+  XL.dailyTemplate = function () { save(XL.dailyTemplateBook(), 'ERP_daily_report_template.xlsx'); };
 
   // ---------------- generic table import (by header matching) ----------------
   function matchTable(sheetName, M) {
@@ -184,7 +193,7 @@
     for (let i = hi + 2; i < M.length; i++) {
       const r = M[i]; if (!S(r, 0) || !S(r, 5)) { if (++blank > 30) break; continue; } blank = 0;
       const doc = String(S(r, 0)); const inq = (N(S(r, 11)) || 0) || (N(S(r, 12)) || 0); const outq = (N(S(r, 13)) || 0) || (N(S(r, 14)) || 0);
-      rows.push(pick({ doc_no: doc, date: T(S(r, 2) || S(r, 1)), type: (inq || !outq) && !/^PXK/.test(doc) ? 'IN' : (outq ? 'OUT' : 'IN'), partner_code: T(S(r, 3)), partner_name: T(S(r, 4)), item_code: T(S(r, 5)), wh_code: T(S(r, 6)), name: T(S(r, 7)), content: T(S(r, 8)),
+      rows.push(pick({ doc_no: doc, date: ERP.fmt.parseDate(S(r, 2)) || ERP.fmt.parseDate(S(r, 1)) || T(S(r, 2) || S(r, 1)), type: (inq || !outq) && !/^PXK/.test(doc) ? 'IN' : (outq ? 'OUT' : 'IN'), partner_code: T(S(r, 3)), partner_name: T(S(r, 4)), item_code: T(S(r, 5)), wh_code: T(S(r, 6)), name: T(S(r, 7)), content: T(S(r, 8)),
         kg_per_ea: N(S(r, 9)), in_kg: N(S(r, 11)) || 0, in_ea: N(S(r, 12)) || 0, out_kg: N(S(r, 13)) || 0, out_ea: N(S(r, 14)) || 0 }));
     }
     return withTx([{ table: 'inout', rows, mode: 'range', label: L('자재 입출고 장부 (Nhập - xuất)', 'Sổ nhập xuất NVL') }], 'range');
@@ -325,31 +334,99 @@
     if (/Ass\s*\(|Lắp ráp/i.test(head)) return 'ASM';
     return null;
   }
-  const dailyDate = (M) => { for (let i = 0; i < 9 && i < M.length; i++) { const x = M[i].find(v => typeof v === 'string' && isoRe.test(v)); if (x) return x; } return ERP.fmt.today(); };
+  /** 생산일자: 처음 9행의 날짜 칸(ISO) → "생산일자 / Ngày sản xuất" 옆 칸의 글자 날짜 → 못 찾으면 null (화면에서 날짜를 넣게 한다) */
+  const dailyDate = (M) => {
+    for (let i = 0; i < 9 && i < M.length; i++) { const x = M[i].find(v => typeof v === 'string' && isoRe.test(v)); if (x) return x; }
+    for (let i = 0; i < 9 && i < M.length; i++) {
+      const r = M[i]; const li = r.findIndex(v => typeof v === 'string' && /생산일자|ngày sản xuất|ngay san xuat/i.test(v)); if (li < 0) continue;
+      for (let j = li + 1; j < r.length; j++) { const d = ERP.fmt.parseDate(r[j]); if (d) return d; }
+    }
+    return null;
+  };
+  /** "1. 작업장명 / Tên công đoạn" 옆 칸 (예: "Ass ( floor 1 ) / Lắp ráp tầng 1") — 같은 날 다른 층 일보를 구분한다 */
+  const dailyPlace = (M) => {
+    for (let i = 0; i < 9 && i < M.length; i++) {
+      const r = M[i]; const li = r.findIndex(v => typeof v === 'string' && /작업장명|tên công đoạn|ten cong doan/i.test(v)); if (li < 0) continue;
+      for (let j = li + 1; j < r.length; j++) { const v = r[j]; if (typeof v === 'string' && v.trim() && !/생산일자|ngày sản xuất/i.test(v)) return v.replace(/\s+/g, ' ').trim(); }
+    }
+    return '';
+  };
+  /** 조: 시트 이름(Ca ngày / Ca đêm · Day / Night · 주간 / 야간) → 행의 DAY/NIGHT 칸 → 기본 D */
+  const shiftOfName = (n) => { const f = norm(n); if (/cadem|night|야간/.test(f)) return 'N'; if (/cangay|day|주간/.test(f)) return 'D'; return null; };
+  const shiftCell = (v, d) => { const f = norm(v); if (!f) return d; if (/^(d|day|ngay|cangay|주간)$/.test(f)) return 'D'; if (/^(n|night|dem|cadem|야간)$/.test(f)) return 'N'; return d; };
+  /** 일보 품목군: 누적 시트의 같은 코드 → ERP CODE 제품군별로 누적 시트에서 가장 많이 쓴 품목군 → 설비 이름 */
+  const divIndex = () => !ERP.db ? { code: () => null, line: () => null } : ERP.db.memo('xl.divIdx', ['prod_log', 'items'], () => {
+    const byCode = new Map(), byLine = new Map(); const INV = ERP.inv; const IT = INV ? INV.items() : null;
+    const bump = (m, k, d) => { let o = m.get(k); if (!o) m.set(k, o = new Map()); o.set(d, (o.get(d) || 0) + 1); };
+    ERP.db.rows('prod_log').forEach(r => {
+      if (r.source !== 'history' || !r.division || r.code === undefined || r.code === null) return; bump(byCode, String(r.code).toUpperCase(), r.division);
+      const it = IT && IT.get(r.code); const line = it ? INV.info(it).line : ''; if (line) bump(byLine, line, r.division);
+    });
+    const top = (o) => { let best = null, n = -1; o.forEach((v, k) => { if (v > n) { n = v; best = k; } }); return best; };
+    return { code: (c) => { const o = byCode.get(String(c || '').toUpperCase()); return o ? top(o) : null; }, line: (l) => { const o = byLine.get(l); return o ? top(o) : null; } };
+  });
+  const dailyDiv = (code, machine) => {
+    const X = divIndex(); const d1 = X.code(code); if (d1) return d1;
+    const INV = ERP.inv; const it = INV && INV.items().get(code); const d2 = it ? X.line(INV.info(it).line) : null; if (d2) return d2;
+    const m = String(machine || ''); return /mini/i.test(m) ? 'Mini' : /click/i.test(m) ? 'Click pencil' : /pencil/i.test(m) ? 'Pencil' : /regular|dial/i.test(m) ? 'Dial' : null;
+  };
+  const poItemsOf = (po) => { const s = new Set(); if (po && ERP.db) ERP.db.rows('po').forEach(p => { if (String(p.po_no) === String(po) && p.item_no) s.add(norm(p.item_no)); }); return s; };
+  /** 같은 날짜 · 공정의 누적 시트(history) 행이 있는 일보 행 수 (미리보기 안내 · 기본 건너뜀) */
+  XL.overlapOf = (rows) => { if (!ERP.db) return 0; const hist = new Set(); ERP.db.rows('prod_log').forEach(r => { if (r.source === 'history') hist.add(r.date + '|' + r.process); }); return (rows || []).filter(r => r.source !== 'history' && hist.has(r.date + '|' + r.process)).length; };
   const okRow = (r, i) => S(r, i) !== null && String(S(r, i)) !== '0';
   D('daily', (n, M) => !!dailyKind(M), (M, ctx) => {
-    const kind = dailyKind(M); const date = dailyDate(M); const shift = ctx.shift || 'D'; const rows = [];
-    const base = (o) => rows.push(Object.assign({ date, process: kind, shift, source: 'daily-report' }, pick(o)));
+    const kind = dailyKind(M); const date = dailyDate(M) || ''; const shift = ctx.shift || shiftOfName(ctx.sheet) || 'D'; const workplace = dailyPlace(M); const rows = [];
+    const base = (o) => rows.push(Object.assign({ date, process: kind, shift, source: 'daily-report', workplace: workplace || undefined }, pick(o)));
     if (kind === 'PCK') {
-      const hi = findRow(M, r => hasCell(r, /Products name/i), 0, 10);
+      // 열: 0 제품명/고객 품번 · 1 완제품(FG, CT) 코드 · 2 마니라(SG, SET) 코드 · 3 PO · … · 9 실적 set · 10 실적 CT · 11 실적 ea
+      const hi = findRow(M, r => hasCell(r, /Products name/i), 0, 10); const IT = ERP.inv ? ERP.inv.items() : null;
       for (let i = hi + 2; i < M.length; i++) { const r = M[i]; if (!S(r, 0) || String(S(r, 0)) === '0' || !S(r, 3) || N(S(r, 9)) === null) continue;
-        base({ name: T(S(r, 0)), remark: 'retail ' + S(r, 1), code: T(S(r, 2)), po_no: T(S(r, 3)), po_qty: N(S(r, 4)), machine: T(S(r, 5)), machine_no: T(S(r, 6)), plan_qty: N(S(r, 8)), ok_qty: N(S(r, 9)) || 0, ok_ea: N(S(r, 11)), unit: 'set', ng_qty: N(S(r, 12)) || 0, start: T(S(r, 13)), end: T(S(r, 14)), break_min: N(S(r, 15)), work_min: N(S(r, 16)), workers: N(S(r, 17)), stop_min: N(S(r, 18)), stop_reason: T(S(r, 19)), shift: T(S(r, 20)) || shift }); }
+        const c0 = T(S(r, 0)), c1 = T(S(r, 1)), c2 = T(S(r, 2)), po = T(S(r, 3)); const pis = poItemsOf(po);
+        const code = [c1, c0, c2].find(v => v && pis.has(norm(v))) || c1 || c2;          // PO 품번과 같은 값 (누적 시트와 같은 방식 → PO 진행률)
+        const it = [c1, c2].map(v => v && IT && IT.get(v)).find(Boolean);                 // 재고 품목: 완제품(열 1) → 마니라(열 2)
+        base({ name: c0, code, item: it ? it.code : undefined, remark: c2 ? 'SG ' + c2 : undefined, po_no: po, po_qty: N(S(r, 4)), machine: T(S(r, 5)), machine_no: T(S(r, 6)), plan_qty: N(S(r, 8)), ok_qty: N(S(r, 9)) || 0, ok_ct: N(S(r, 10)), ok_ea: N(S(r, 11)), unit: 'set', ng_qty: N(S(r, 12)) || 0, start: T(S(r, 13)), end: T(S(r, 14)), break_min: N(S(r, 15)), work_min: N(S(r, 16)), workers: N(S(r, 17)), stop_min: N(S(r, 18)), stop_reason: T(S(r, 19)), shift: shiftCell(S(r, 20), shift) }); }
     } else if (kind === 'REF') {
       const hi = findRow(M, r => hasCell(r, /^Description$/), 0, 10);
       for (let i = hi + 2; i < M.length; i++) { const r = M[i]; if (!S(r, 1) || !S(r, 4) || N(S(r, 9)) === null) continue;
-        base({ machine: T(S(r, 1)), machine_no: T(S(r, 2)), name: T(S(r, 3)), code: T(S(r, 4)), division: T(S(r, 1)), plan_qty: N(S(r, 6)), ok_qty: N(S(r, 9)) || 0, ng_qty: N(S(r, 11)) || 0, weight_kg: (N(S(r, 7)) || 0) / 1000, start: T(S(r, 12)), end: T(S(r, 13)), break_min: N(S(r, 14)), work_min: N(S(r, 15)), workers: N(S(r, 16)), stop_min: N(S(r, 17)), remark: T(S(r, 18)), shift: T(S(r, 19)) || shift }); }
+        base({ machine: T(S(r, 1)), machine_no: T(S(r, 2)), name: T(S(r, 3)), code: T(S(r, 4)), division: T(S(r, 1)), plan_qty: N(S(r, 6)), ok_qty: N(S(r, 9)) || 0, ng_qty: N(S(r, 11)) || 0, weight_kg: (N(S(r, 7)) || 0) / 1000, start: T(S(r, 12)), end: T(S(r, 13)), break_min: N(S(r, 14)), work_min: N(S(r, 15)), workers: N(S(r, 16)), stop_min: N(S(r, 17)), remark: T(S(r, 18)), shift: shiftCell(S(r, 19), shift) }); }
     } else if (kind === 'WRP') {
       const hi = findRow(M, r => hasCell(r, /Target product/i), 0, 10);
       for (let i = hi + 2; i < M.length; i++) { const r = M[i]; if (!S(r, 1) || !S(r, 5) || N(S(r, 11)) === null) continue;
-        base({ machine: T(S(r, 1)), machine_no: T(S(r, 2)), name: T(S(r, 4)), code: T(S(r, 5)), po_no: T(S(r, 6)), po_qty: N(S(r, 7)), plan_qty: N(S(r, 9)), ok_qty: N(S(r, 11)) || 0, ng_qty: N(S(r, 14)) || 0, work_min: N(S(r, 15)), workers: N(S(r, 16)), stop_min: N(S(r, 17)), remark: T(S(r, 18)), shift: T(S(r, 19)) || shift }); }
+        base({ machine: T(S(r, 1)), machine_no: T(S(r, 2)), name: T(S(r, 4)), code: T(S(r, 5)), po_no: T(S(r, 6)), po_qty: N(S(r, 7)), plan_qty: N(S(r, 9)), ok_qty: N(S(r, 11)) || 0, ok_ct: N(S(r, 13)), ng_qty: N(S(r, 14)) || 0, work_min: N(S(r, 15)), workers: N(S(r, 16)), stop_min: N(S(r, 17)), remark: T(S(r, 18)), shift: shiftCell(S(r, 19), shift) }); }
     } else {
       const hi = findRow(M, r => hasCell(r, /^Code\s*\n?Mã hàng/i) || hasCell(r, /^Code$/), 0, 12);
       for (let i = hi + 2; i < M.length; i++) { const r = M[i]; if (!S(r, 0) || String(S(r, 0)).startsWith('0') || !S(r, 2) || N(S(r, 4)) === null) continue;
-        if (kind === 'ASM') base({ machine: T(S(r, 0)), machine_no: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), ok_qty: N(S(r, 4)) || 0, start: T(S(r, 5)), end: T(S(r, 6)), break_min: N(S(r, 7)), work_min: N(S(r, 8)), stop_min: N(S(r, 9)), workers: N(S(r, 10)), ng_qty: N(S(r, 11)) || 0, remark: T(S(r, 17)), division: /Mini/i.test(S(r, 0)) ? 'Mini' : 'Regular' });
-        else base({ machine: T(S(r, 0)), machine_no: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), ok_qty: N(S(r, 4)) || 0, start: T(S(r, 5)), end: T(S(r, 6)), break_min: N(S(r, 7)), work_min: N(S(r, 8)), stop_min: N(S(r, 9)), ng_qty: N(S(r, 10)) || 0, workers: N(S(r, 11)), remark: T(S(r, 12)), division: 'Mini' }); }
+        if (kind === 'ASM') base({ machine: T(S(r, 0)), machine_no: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), ok_qty: N(S(r, 4)) || 0, start: T(S(r, 5)), end: T(S(r, 6)), break_min: N(S(r, 7)), work_min: N(S(r, 8)), stop_min: N(S(r, 9)), workers: N(S(r, 10)), ng_qty: N(S(r, 11)) || 0, remark: T(S(r, 17)), division: dailyDiv(T(S(r, 2)), S(r, 0)) });
+        else base({ machine: T(S(r, 0)), machine_no: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), ok_qty: N(S(r, 4)) || 0, start: T(S(r, 5)), end: T(S(r, 6)), break_min: N(S(r, 7)), work_min: N(S(r, 8)), stop_min: N(S(r, 9)), ng_qty: N(S(r, 10)) || 0, workers: N(S(r, 11)), remark: T(S(r, 12)), division: dailyDiv(T(S(r, 2)), S(r, 0)) }); }
     }
     rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; });
-    return [{ table: 'prod_log', rows, mode: 'range', proc: kind, label: L('생산 일보 · ', 'Báo cáo SX · ') + ERP.procName(kind) + ' ' + date, hasShift: true, date }];
+    const label = L('생산 일보 · ', 'Báo cáo SX · ') + ERP.procName(kind) + ' ' + (date || L('(날짜 없음)', '(chưa có ngày)')) + (shift === 'N' ? L(' · 야간', ' · ca đêm') : '') + (workplace ? ' · ' + workplace : '');
+    return [{ table: 'prod_log', rows, mode: 'range', proc: kind, label, hasShift: true, date, needDate: !date, include: rows.length > 0 && !!date, overlap: XL.overlapOf(rows),
+      note: date ? '' : L('생산일자를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày sản xuất — hãy nhập ngày để áp dụng.') }];
+  });
+
+  // ERP 일보 양식 ("일보 양식 받기"): 시트 이름 prod_<공정>, 머리글 = 생산일 · 주/야 · 그 공정의 입력 칸 (한국어/베트남어)
+  const tplProc = (n) => { const m = String(n || '').match(/^prod_(.+)$/i); if (!m) return null; const p = ERP.PROC.find(x => String(x.id).toUpperCase() === m[1].trim().toUpperCase()); return p ? p.id : null; };
+  const tplHdr = (r) => hasCell(r, /^(생산일|Ngày SX)$/i);
+  D('erp-daily', (n, M) => !!tplProc(n) && findRow(M, tplHdr, 0, 4) >= 0, (M, ctx) => {
+    const proc = tplProc(ctx.sheet); const P = ERP.PROC.find(x => x.id === proc); const hi = findRow(M, tplHdr, 0, 4); const cols = ERP.TABLES.prod_log.cols; const map = {};
+    M[hi].forEach((x, ci) => {
+      if (typeof x !== 'string') return; const nx = norm(x);
+      if (/^(생산일|ngaysx)$/.test(nx)) map.date = ci; else if (/^(주야|ca)$/.test(nx)) map.shift = ci;
+      else { const c = cols.find(cc => nx === norm(cc.ko) || nx === norm(cc.vi) || nx === norm(cc.k)); if (c && map[c.k] === undefined && !['date', 'process', 'shift', 'source'].includes(c.k)) map[c.k] = ci; }
+    });
+    const rows = [];
+    for (let i = hi + 1; i < M.length; i++) {
+      const r = M[i]; if (!r) continue; const o = { process: proc, source: 'template' };
+      Object.keys(map).forEach(k => { if (k === 'date' || k === 'shift') return; const c = cols.find(cc => cc.k === k); const v = S(r, map[k]); if (v === null) return; o[k] = c.t === 'n' ? N(v) : T(v); });
+      if ((o.ok_qty === undefined || o.ok_qty === null) && (o.ng_qty === undefined || o.ng_qty === null) && (o.ok_ea === undefined || o.ok_ea === null)) continue;   // 빈 줄 · 예시 줄
+      o.date = ERP.fmt.parseDate(S(r, map.date)) || ''; o.shift = shiftCell(S(r, map.shift), 'D');
+      if (o.ok_qty === undefined || o.ok_qty === null) o.ok_qty = 0; if (o.ok_ea === undefined || o.ok_ea === null) o.ok_ea = o.ok_qty; if (P && P.unit === 'set') o.unit = 'set';
+      rows.push(pick(o));
+    }
+    const need = rows.some(r => !r.date);
+    return [{ table: 'prod_log', rows, mode: 'range', proc, label: L('ERP 일보 양식 · ', 'Mẫu báo cáo ERP · ') + ERP.procName(proc), hasShift: true, needDate: need, include: rows.length > 0 && !need, overlap: XL.overlapOf(rows),
+      note: need ? L('생산일을 읽지 못한 줄이 있습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Có dòng không đọc được ngày — hãy nhập ngày.') : '' }];
   });
 
   // generic (own template / localized export)
@@ -395,6 +472,19 @@
     const mode = job.mode;
     if (mode === 'replace') { res.removed = DB.rows(t).length; DB.replace(t, rows); res.added = rows.length; }
     else if (mode === 'append') { DB.addMany(t, rows); res.added = rows.length; }
+    else if (mode === 'range' && t === 'prod_log' && rows.length && rows.every(r => r.source === 'daily-report' || r.source === 'template')) {
+      // 일보 · ERP 양식: 같은 날짜 · 공정 · 출처 · 조 · 작업장의 행만 바꾼다 (다른 조 · 다른 층 · 직접 입력 · 누적 시트는 그대로).
+      // 같은 날짜 · 공정의 누적 시트(history) 행이 있으면 기본은 그 일보 행을 건너뛰고, "일보로 바꾸기"(overlapMode 'replace')면 그날 누적 행을 지운다.
+      let add = rows;
+      if (job.overlapMode === 'replace') { const ks = new Set(rows.map(r => r.date + '|' + r.process)); const n0 = DB.rows(t).length; DB.t[t] = DB.rows(t).filter(r => !(r.source === 'history' && ks.has(r.date + '|' + r.process))); res.removed += n0 - DB.t[t].length; }
+      else { const hk = new Set(DB.rows(t).filter(r => r.source === 'history').map(r => r.date + '|' + r.process)); add = rows.filter(r => !hk.has(r.date + '|' + r.process)); res.skipped = rows.length - add.length; }
+      const key = (r) => [r.date, r.process, r.source, r.shift || 'D'].join('|');
+      const ks = new Map(); add.forEach(r => { const k = key(r); let w = ks.get(k); if (!w) ks.set(k, w = new Set()); w.add(norm(r.workplace)); });
+      const n0 = DB.rows(t).length;
+      DB.t[t] = DB.rows(t).filter(r => { const w = ks.get(key(r)); if (!w) return true; const wp = norm(r.workplace); return !(w.has(wp) || !wp); });   // 작업장이 없는 예전(1.2.0) 행은 같은 일보로 본다
+      res.removed += n0 - DB.t[t].length;
+      DB.addMany(t, add); res.added = add.length;
+    }
     else if (mode === 'range') {
       const ds = rows.map(r => r.date).filter(Boolean).sort(); if (ds.length) {
         const lo = ds[0], hi = ds[ds.length - 1];

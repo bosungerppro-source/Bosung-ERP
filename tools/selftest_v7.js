@@ -316,10 +316,10 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
   {
     const a = await ev(() => { const DB = ERP.db; ERP.goto('production'); ERP.render();
       const chip = (document.querySelector('main .label-sample') || {}).textContent || '';
-      const po = DB.rows('po').find(r => r._ex); DB.update('po', po._id, { remarks: 'checked' });
+      const po = DB.rows('po').find(r => r._ex && r.po_no); DB.update('po', po._id, { remarks: 'checked' });   // PO 번호가 있는 줄 (8차: 예전에는 첫 줄이 데이터로 들어간 머리글 행이었다)
       return { ex: ERP.sampleCount('prod_log'), all: DB.rows('prod_log').length, chip, po: ERP.sampleCount('po'), poAll: DB.rows('po').length }; });
-    eq('생산일보: 예시 21,677행 + 새로 넣은 2행', [a.ex, a.all], [21677, 21679]); ok('화면 표시 "예시 21,677행 포함"', /21,677/.test(a.chip), a.chip);
-    eq('손으로 고친 PO 1행은 예시에서 빠짐', [a.po, a.poAll], [521, 522]);
+    eq('생산일보: 예시 21,631행 + 새로 넣은 2행 (8차: 중복 일보 46행 정리)', [a.ex, a.all], [21631, 21633]); ok('화면 표시 "예시 21,631행 포함"', /21,631/.test(a.chip), a.chip);
+    eq('손으로 고친 PO 1행은 예시에서 빠짐 (8차: 머리글 행 정리 → 521줄)', [a.po, a.poAll], [520, 521]);
     await ev(() => { ERP.goto('settings'); ERP.render(); }); await page.waitForTimeout(200);
     await page.click('main button:has-text("예시 데이터 한 번에 삭제")'); await page.waitForSelector('.modal');
     const unchecked = await ev(() => Array.from(document.querySelectorAll('.modal label')).filter(l => !l.querySelector('input').checked).map(l => l.textContent.split(' (')[0].trim()));
@@ -341,7 +341,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const open5 = async () => { await p5.goto(S5.url + '/#/materials'); await p5.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.querySelector('.side'), null, { timeout: 120000 }); await p5.waitForTimeout(600); };
     await open5();
     const r = await p5.evaluate(() => { const D = ERP.db; const s = ERP.calc.stock().get('R-001'); return { items: D.rows('items').length, wh: D.rows('warehouses').length, codes: D.rows('code_dict').length, open: D.rows('stock_open').length, po: D.rows('po').length, poEx: ERP.sampleCount('po'), mine: D.rows('po').some(x => x.po_no === 'MY-PO-1' && !x._ex), v6: !!D.meta.v6, keep: D.meta.lowCover, mode: ERP.inv.prodMode(), r001: s ? [s.by.WH, s.by.FAC] : null }; });
-    eq('품목 · 창고 · 코드 · 기초재고 보강', [r.items, r.wh, r.codes, r.open], [2265, 11, 34, 1276]); eq('PO 523 = 예시 522 + 직접 넣은 1 (예시 아님)', [r.po, r.poEx, r.mine], [523, 522, true]);
+    eq('품목 · 창고 · 코드 · 기초재고 보강', [r.items, r.wh, r.codes, r.open], [2265, 11, 34, 1276]); eq('PO 522 = 예시 521 + 직접 넣은 1 (예시 아님)', [r.po, r.poEx, r.mine], [522, 521, true]);
     ok('업그레이드 표시 · 기존 설정 유지 · 생산 반영 기본값', r.v6 && r.keep === 7 && r.mode === 'in_bom', r); eq('R-001 창고/공장', r.r001, [1695, -790.53]);
     await open5(); eq('다시 켜도 한 번만 (품목 2,265 · 기초재고 1,276)', await p5.evaluate(() => [ERP.db.rows('items').length, ERP.db.rows('stock_open').length]), [2265, 1276]);
     ok('업그레이드 전 원본 자동 백업 (backup/날짜/po.json)', fs.readdirSync(path.join(d5, 'backup')).some(d => fs.existsSync(path.join(d5, 'backup', d, 'po.json'))));

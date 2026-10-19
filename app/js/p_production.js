@@ -85,7 +85,7 @@
       const cs = cols();
       ERP.modal({ title: L('엑셀에서 붙여넣기', 'Dán từ Excel'), width: '760px', body: h('div', h('p', { class: 'help' }, L('열 순서: ', 'Thứ tự cột: ') + cs.map(c => ERP.colLabel(c)).join(' → ')), ta),
         buttons: [{ label: L('취소', 'Hủy') }, { label: L('입력표에 넣기', 'Đưa vào bảng'), kind: 'primary', onClick: () => {
-          const rows = ta.value.split(/\r?\n/).filter(x => x.trim()).map(line => { const cells = line.split('\t'); const o = {}; cs.forEach((c, j) => { let v = (cells[j] || '').trim(); if (v === '') return; if (c.t === 'n') { v = Number(v.replace(/,/g, '')); if (isNaN(v)) return; } o[c.k] = v; }); calcMin(o); return o; });
+          const rows = ta.value.split(/\r?\n/).filter(x => x.trim()).map(line => { const cells = line.split('\t'); const o = {}; cs.forEach((c, j) => { let v = (cells[j] || '').trim(); if (v === '') return; if (c.t === 'n') { v = F.parseNum(v); if (v === null) return; } o[c.k] = v; }); calcMin(o); return o; });
           if (rows.length) { es.rows = (es.rows.length === 1 && !Object.keys(es.rows[0]).length) ? rows : es.rows.concat(rows); draw(); }
         } }] });
     }
@@ -151,7 +151,8 @@
       const totRow = h('tr', { style: { background: '#F4F6F9', fontWeight: '700', position: 'sticky', bottom: 0 } }, h('td', L('월 합계', 'Tổng tháng')), colKeys.map(c => h('td', { class: 'num' }, F.n(colTot[c.k] || 0))), h('td', { class: 'num' }, F.n(grand)));
       const tbl = h('div', { class: 'tbl-wrap', style: { maxHeight: '62vh' } }, h('table', { class: 'tbl' }, h('thead', h('tr', h('th', L('일자', 'Ngày')), colKeys.map(c => h('th', { class: 'num' }, c.label)), h('th', { class: 'num' }, L('일 합계', 'Tổng ngày')))), h('tbody', trs, totRow)));
       // machine ranking
-      const mm = {}; rows.forEach(r => { const k = r.process + ':' + (r.machine_no === undefined ? '-' : r.machine_no); const o = mm[k] || (mm[k] = { proc: r.process, no: r.machine_no, ea: 0, days: new Set() }); o.ea += C.qty(r); o.days.add(r.date); });
+      // 설비 = 공정 + 종류 + 번호 (Mini 1번과 Regular 1번은 다른 설비)
+      const mm = {}; rows.forEach(r => { const k = C.machKey(r); const o = mm[k] || (mm[k] = { proc: r.process, no: k.slice(k.indexOf(':') + 1).replace('#', ' ').trim() || '-', ea: 0, days: new Set() }); o.ea += C.qty(r); o.days.add(r.date); });
       const mlist = Object.values(mm).sort((x, y) => y.ea - x.ea);
       const dp = {}; rows.forEach(r => { const d = dk(r); (dp[d] = dp[d] || {})[r.process] = (dp[d][r.process] || 0) + C.qty(r); }); const dpRows = Object.keys(dp).sort();
       const raw = {}; rows.forEach(r => { if (r.raw_material && r.raw_kg) raw[r.raw_material] = (raw[r.raw_material] || 0) + C.num(r.raw_kg); });
@@ -214,9 +215,12 @@
   // ------------ tab: machines ------------
   function machinesTab(host) {
     const ref = C.latestProdDate(); const from = F.addDays(ref, -29);
-    const stat = {}; C.rowsBetween(from, ref).forEach(r => { const k = r.process + ':' + r.machine_no; const o = stat[k] || (stat[k] = { d: new Set(), ea: 0, ng: 0 }); o.d.add(r.date); o.ea += C.qty(r); o.ng += C.num(r.ng_qty); });
+    // 설비 마스터에 설비명 · 품목군이 있으면 종류까지 맞춰 세고(Mini 1번 ≠ Regular 1번), 없으면 번호로만 센다
+    const stat = {}, statN = {}; const add = (m, k, r) => { const o = m[k] || (m[k] = { d: new Set(), ea: 0, ng: 0 }); o.d.add(r.date); o.ea += C.qty(r); o.ng += C.num(r.ng_qty); };
+    C.rowsBetween(from, ref).forEach(r => { add(stat, C.machKey(r), r); add(statN, r.process + ':' + r.machine_no, r); });
+    const statOf = (m) => (m.name || m.division) ? stat[C.machKey({ process: m.process, machine: m.name, division: m.division, machine_no: m.machine_no })] : statN[m.process + ':' + m.machine_no];
     const g = ERP.grid({ table: 'machines', pageSize: 50, maxH: '66vh', filters: [{ id: 'p', label: L('공정', 'Công đoạn'), key: 'process', options: () => ERP.PROC.map(p => ({ v: p.id, label: L(p.ko, p.vi) })) }],
-      extraCols: [{ label: () => L('30일 가동일', 'Ngày chạy/30'), num: 1, render: m => { const s = stat[m.process + ':' + m.machine_no]; return s ? s.d.size : 0; } }, { label: () => L('30일 생산량', 'SL 30 ngày'), num: 1, render: m => { const s = stat[m.process + ':' + m.machine_no]; return s ? F.n(s.ea) : '–'; } }] });
+      extraCols: [{ label: () => L('30일 가동일', 'Ngày chạy/30'), num: 1, render: m => { const s = statOf(m); return s ? s.d.size : 0; } }, { label: () => L('30일 생산량', 'SL 30 ngày'), num: 1, render: m => { const s = statOf(m); return s ? F.n(s.ea) : '–'; } }] });
     host.append(h('p', { class: 'help' }, L('설비 마스터는 일보 입력 시 설비번호 자동완성에 사용됩니다. 기록이 없는 설비는 "사용"을 해제하세요.', 'Danh mục máy dùng để gợi ý số máy khi nhập báo cáo. Bỏ chọn "Đang dùng" với máy không còn chạy.')), g.el);
   }
 

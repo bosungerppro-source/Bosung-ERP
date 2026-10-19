@@ -7,12 +7,6 @@
     upsert: L('덮어쓰기/추가 (키 기준)', 'Cập nhật/thêm (theo khóa)'), range: L('기간 교체 (같은 날짜 범위)', 'Thay theo khoảng ngày'), slip: L('전표 번호 기준 교체', 'Thay theo số phiếu'),
     update: L('기존 항목만 갱신', 'Chỉ cập nhật mã có sẵn'), append: L('끝에 추가', 'Thêm vào cuối'), replace: L('전체 교체', 'Thay toàn bộ') });
 
-  // dd-mm-yyyy / dd.mm.yy inside a file name -> ISO
-  function fileDate(name) {
-    const m = String(name || '').match(/(\d{1,2})[-.](\d{1,2})[-.](\d{2,4})/); if (!m) return null;
-    let y = m[3].length === 3 ? +m[3].slice(0, 2) : +m[3]; if (y < 100) y += 2000; const d = +m[1], mo = +m[2]; if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-    return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-  }
   // ---------------- import ----------------
   // 자료 종류별 안내 (마지막 업로드일은 uploads 표에서)
   const GUIDE = () => [
@@ -71,13 +65,21 @@
         if (pv && pv.unknown) extra.push(h('button', { class: 'btn sm', onclick: () => ERP.ecount.resolveDialog(j, show) }, L('코드 확인 ', 'Xác nhận mã ') + pv.unknown));
         const ds = j.rows.map(r => r.date).filter(Boolean).sort();
         let dateCell = j.custom === 'stock' ? F.d(j.date) : (ds.length ? F.d(ds[0]) + (ds[0] !== ds[ds.length - 1] ? ' ~ ' + F.d(ds[ds.length - 1]) : '') : '');
-        const fd = fileDate(j.file);
-        if (ds.length && ds[0] === ds[ds.length - 1] && j.table === 'prod_log') {
-          const di = h('input', { class: 'inp', type: 'date', value: ds[0], onchange: (e) => { if (e.target.value) { j.rows.forEach(r => { r.date = e.target.value; }); show(); } } });
-          dateCell = [di, fd && fd !== ds[0] ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 파일명 날짜(' + fd + ')와 다름 ', '⚠ Khác ngày trong tên file (' + fd + ') '), h('button', { class: 'btn sm', onclick: () => { j.rows.forEach(r => { r.date = fd; }); show(); } }, L('파일명 날짜 적용', 'Dùng ngày tên file'))) : null];
+        const fd = XL.fileDate(j.file);
+        if (j.table === 'prod_log' && (j.needDate || (ds.length && ds[0] === ds[ds.length - 1]))) {
+          const setDate = (d) => { j.rows.forEach(r => { r.date = d; }); if (j.needDate) { j.needDate = false; j.include = true; j.note = ''; } show(); };
+          const di = h('input', { class: 'inp', type: 'date', value: ds[0] || '', onchange: (e) => { if (e.target.value) setDate(e.target.value); } });
+          dateCell = [di, fd && fd !== ds[0] ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 파일명 날짜(' + fd + ')와 다름 ', '⚠ Khác ngày trong tên file (' + fd + ') '), h('button', { class: 'btn sm', onclick: () => setDate(fd) }, L('파일명 날짜 적용', 'Dùng ngày tên file'))) : null];
+        }
+        // 같은 날짜 · 공정의 누적 시트(Ho_so) 행이 있으면: 기본은 일보를 건너뛰고, 고르면 일보로 바꾼다
+        if (j.table === 'prod_log' && j.rows.length && j.rows.every(r => r.source === 'daily-report' || r.source === 'template')) {
+          j.overlap = XL.overlapOf(j.rows);
+          if (j.overlap) extra.push(h('select', { class: 'inp', title: L('누적 시트와 같은 날짜', 'Trùng ngày với sổ tổng hợp'), onchange: (e) => { j.overlapMode = e.target.value; } },
+            [['skip', L('누적 시트에 있는 날짜는 건너뜀', 'Bỏ qua ngày đã có trong sổ tổng hợp')], ['replace', L('일보로 바꾸기 (그날 누적 시트 행 삭제)', 'Thay bằng báo cáo ngày (xóa dòng sổ tổng hợp)')]].map(o => h('option', { value: o[0], selected: (j.overlapMode || 'skip') === o[0] }, o[1]))));
         }
         return h('tr', h('td', cb), h('td', h('div', { class: 'strong' }, j.sheet), h('small', { class: 'muted' }, j.file || '')),
-          h('td', { style: { whiteSpace: 'normal', maxWidth: '460px' } }, j.table ? [ERP.chip('info', j.label || ERP.tableLabel(j.table)), j.proc ? ' ' + ERP.procName(j.proc) : '', j.note ? h('div', { class: 'help' }, j.note) : null, prevBox(pv)] : (j.error ? ERP.chip('bad', j.error) : ERP.chip('neutral', L('인식 불가 (건너뜀)', 'Không nhận dạng (bỏ qua)')))),
+          h('td', { style: { whiteSpace: 'normal', maxWidth: '460px' } }, j.table ? [ERP.chip('info', j.label || ERP.tableLabel(j.table)), j.proc ? ' ' + ERP.procName(j.proc) : '', j.note ? h('div', { class: 'help' }, j.note) : null,
+            j.overlap ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 누적 시트(수주·생산 관리 파일)에 같은 날짜 · 공정 기록이 있습니다: ' + j.overlap + '행', '⚠ Sổ tổng hợp đã có cùng ngày · công đoạn: ' + j.overlap + ' dòng')) : null, prevBox(pv)] : (j.error ? ERP.chip('bad', j.error) : ERP.chip('neutral', L('인식 불가 (건너뜀)', 'Không nhận dạng (bỏ qua)')))),
           h('td', { class: 'num' }, F.n(j.rows.length)), h('td', dateCell), h('td', sel), h('td', extra));
       });
       const info = h('span', { class: 'muted' });
@@ -97,6 +99,7 @@
       sel.sort((a, b) => (a.prio === undefined ? 9 : a.prio) - (b.prio === undefined ? 9 : b.prio));
       // undo snapshot of every touched table
       const touched = new Set(sel.map(j => j.table)); if (sel.some(j => j.custom === 'stock')) { touched.add('items'); touched.add('ecount_snap'); }
+      touched.add('uploads');   // 되돌리면 업로드 이력(마지막 업로드일)도 되돌린다
       st.undo = { at: new Date().toISOString(), tables: {} }; touched.forEach(t => { st.undo.tables[t] = JSON.parse(JSON.stringify(DB.rows(t))); });
       const log = []; const at = F.now();
       sel.forEach(j => {
@@ -137,7 +140,7 @@
       const S = ERP.TABLES[n]; const cols = S.cols.map(c => c.k); const rows = DB.rows(n); prog(n, 0, rows.length);
       for (let i = 0; i === 0 || i < rows.length; i += CHUNK) {
         const part = rows.slice(i, i + CHUNK).map(r => cols.map(k => r[k] === undefined ? '' : r[k]));
-        await gcall({ action: 'put', table: n, cols, rows: part, first: i === 0 }); prog(n, Math.min(i + CHUNK, rows.length), rows.length);
+        await gcall({ action: 'put', table: n, cols, types: S.cols.map(c => c.t), rows: part, first: i === 0 }); prog(n, Math.min(i + CHUNK, rows.length), rows.length);
         if (!rows.length) break;
       }
     }
@@ -167,8 +170,10 @@
     const bPush = h('button', { class: 'btn primary' }, L('↑ 구글 시트로 올리기', '↑ Đẩy lên Google Sheet'));
     const bPull = h('button', { class: 'btn' }, L('↓ 구글 시트에서 가져오기', '↓ Lấy về từ Google Sheet'));
     const bSnap = h('button', { class: 'btn' }, L('드라이브에 백업 복사본', 'Sao lưu sang Drive'));
-    bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); });
-    bPush.onclick = busy(bPush, async () => { const n = names(); if (!n.length) return; say(L('업로드 시작', 'Bắt đầu đẩy')); await gpush(n, prog); say('✓ ' + L('완료', 'Xong')); });
+    // Code.gs 2판부터: 글자 · 날짜 열을 텍스트 형식으로 써서 0 으로 시작하는 코드 · 523034E200 같은 코드가 숫자로 바뀌지 않는다
+    const oldScript = () => say(L('⚠ 구글 Apps Script 가 옛 버전입니다. 설치 폴더의 google/Code.gs 를 다시 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요 (코드 · 날짜가 숫자로 바뀌는 문제 수정).', '⚠ Apps Script là bản cũ. Hãy dán lại google/Code.gs và triển khai phiên bản mới (sửa lỗi mã bị đổi thành số).'));
+    bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); if (!(j.ver >= 2)) oldScript(); });
+    bPush.onclick = busy(bPush, async () => { const n = names(); if (!n.length) return; const pj = await gcall({ action: 'ping' }); if (!(pj.ver >= 2)) oldScript(); say(L('업로드 시작', 'Bắt đầu đẩy')); await gpush(n, prog); say('✓ ' + L('완료', 'Xong')); });
     bPull.onclick = busy(bPull, async () => { const n = names(); if (!n.length) return; if (!(await ERP.confirm(L('선택한 표의 현재 데이터를 구글 시트 내용으로 교체합니다. 계속할까요?', 'Dữ liệu các bảng đã chọn sẽ bị thay bằng nội dung Google Sheet. Tiếp tục?')))) return; await gpull(n, prog); say('✓ ' + L('완료', 'Xong')); ERP.toast(L('구글 시트 데이터를 가져왔습니다', 'Đã lấy dữ liệu từ Google Sheet'), 'ok'); });
     bSnap.onclick = busy(bSnap, async () => { const j = await gcall({ action: 'snapshot' }); say('✓ Drive: ' + j.name + ' ' + j.url); });
     host.append(h('div', { class: 'grid2' },
@@ -232,7 +237,11 @@
     }
     root.append(h('div', { class: 'grid2' },
       h('div', { class: 'card' }, h('h3', L('일반', 'Chung')),
-        h('div', { class: 'field' }, h('span', L('언어', 'Ngôn ngữ')), h('div', { class: 'toolbar' }, h('button', { class: 'btn' + (ERP.lang === 'ko' ? ' primary' : ''), onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: 'btn' + (ERP.lang === 'vi' ? ' primary' : ''), onclick: () => ERP.setLang('vi') }, 'Tiếng Việt')))),
+        h('div', { class: 'field' }, h('span', L('언어', 'Ngôn ngữ')), h('div', { class: 'toolbar' }, h('button', { class: 'btn' + (ERP.lang === 'ko' ? ' primary' : ''), onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: 'btn' + (ERP.lang === 'vi' ? ' primary' : ''), onclick: () => ERP.setLang('vi') }, 'Tiếng Việt'))),
+        // 엑셀에서 붙여넣은 숫자의 형식 (35.000 이 3만 5천인지 35인지) — 자동은 이 PC 의 숫자 형식을 따른다
+        h('div', { class: 'field' }, h('span', L('붙여넣기 숫자 형식', 'Định dạng số khi dán')), h('select', { class: 'inp', onchange: (e) => { DB.setSetting('numFmt', e.target.value); ERP.toast(L('저장됨', 'Đã lưu'), 'ok'); } },
+          [['auto', L('자동 (이 PC 형식: ', 'Tự động (máy này: ') + (F.decimalSep() === ',' ? '1.234,5' : '1,234.5') + ')'], ['dot', '1,234.5 (' + L('소수점 .', 'thập phân .') + ')'], ['comma', '1.234,5 (' + L('소수점 ,', 'thập phân ,') + ')']].map(o => h('option', { value: o[0], selected: DB.setting('numFmt', 'auto') === o[0] }, o[1]))),
+          h('small', { class: 'muted' }, L('엑셀에서 복사한 수량이 1000 배로 작거나 크게 들어가면 여기서 바꾸세요.', 'Nếu số lượng dán từ Excel bị sai 1000 lần, hãy đổi ở đây.')))),
       h('div', { class: 'card' }, h('h3', L('데이터', 'Dữ liệu')), info, lan,
         h('div', { class: 'toolbar' },
           h('button', { class: 'btn', onclick: async () => { if (!(await ERP.confirm(L('현재 데이터를 지우고 샘플(첨부 엑셀) 데이터로 되돌립니다.', 'Xóa dữ liệu hiện tại và nạp lại dữ liệu mẫu (từ Excel đính kèm).')))) return; await DB.loadSeed(); ERP.toast(L('샘플 데이터로 초기화했습니다', 'Đã nạp lại dữ liệu mẫu'), 'ok'); ERP.render(); } }, L('샘플 데이터로 초기화', 'Nạp lại dữ liệu mẫu')),

@@ -20,7 +20,8 @@
   const DIVS = ['Dial', 'Mini', 'Pencil', 'Glass', 'Regular', 'Mixed', 'Lead', 'Peel', 'Bic', 'Freedom'];
 
   const T = ERP.TABLES = {
-    po: { ko: '수주 (PO)', vi: 'Đơn hàng (PO)', nat: ['po_no', 'item_no', 'date', 'kind'], sort: ['date', -1], cols: [
+    // multi: PO 시트에는 키가 같은 줄이 여러 개 있을 수 있다 → 합치지 않고 순번으로 맞춘다 (DB.upsert)
+    po: { ko: '수주 (PO)', vi: 'Đơn hàng (PO)', nat: ['po_no', 'po_no2', 'item_no', 'date', 'kind', 'kind2', 'color'], multi: true, sort: ['date', -1], cols: [
       { k: 'date', ko: '수주일', vi: 'Ngày đặt', t: 'd', list: 1 },
       { k: 'customer', ko: '거래처', vi: 'Khách hàng', t: 't', list: 1 },
       { k: 'country', ko: '국가', vi: 'Quốc gia', t: 't' },
@@ -49,11 +50,13 @@
       { k: 'date', ko: '생산일', vi: 'Ngày SX', t: 'd', list: 1, req: 1 },
       { k: 'process', ko: '공정', vi: 'Công đoạn', t: 's', opts: procOpts, list: 1, req: 1 },
       { k: 'shift', ko: '주/야', vi: 'Ca', t: 's', opts: shiftOpts, list: 1 },
+      { k: 'workplace', ko: '작업장', vi: 'Công đoạn / xưởng', t: 't' },
       { k: 'machine', ko: '설비명', vi: 'Tên máy', t: 't' },
       { k: 'machine_no', ko: '설비번호', vi: 'Số máy', t: 't', list: 1 },
       { k: 'division', ko: '품목군', vi: 'Nhóm', t: 't', list: 1, opts: DIVS },
       { k: 'part', ko: '부품(사출)', vi: 'Chi tiết (ép)', t: 't' },
       { k: 'code', ko: '코드', vi: 'Mã hàng', t: 't', list: 1 },
+      { k: 'item', ko: '재고 품목코드', vi: 'Mã hàng tồn kho', t: 't' },
       { k: 'name', ko: '품명/색상', vi: 'Tên/Màu', t: 't', list: 1 },
       { k: 'po_no', ko: 'PO 번호', vi: 'Số PO', t: 't' },
       { k: 'po_qty', ko: 'PO 수량', vi: 'SL PO', t: 'n' },
@@ -61,6 +64,7 @@
       { k: 'ok_qty', ko: '양품수량', vi: 'SL đạt', t: 'n', list: 1 },
       { k: 'ng_qty', ko: '불량수량', vi: 'SL lỗi (NG)', t: 'n', list: 1 },
       { k: 'ok_ea', ko: '환산 pcs', vi: 'Quy đổi pcs', t: 'n' },
+      { k: 'ok_ct', ko: '박스 (CT)', vi: 'Thùng (CT)', t: 'n' },
       { k: 'unit', ko: '단위', vi: 'Đơn vị', t: 't' },
       { k: 'start', ko: '시작', vi: 'Bắt đầu', t: 'tm' },
       { k: 'end', ko: '종료', vi: 'Kết thúc', t: 'tm' },

@@ -49,6 +49,7 @@
       Object.keys(ERP.TABLES).forEach(n => { DB.t[n] = tables[n] || []; DB.ver[n] = 1; });
       if (!DB.meta.seeded) await DB.loadSeed(true);
       else if (!DB.meta.v6) await DB.upgradeV6();
+      await DB.upgradeV8();
       DB.ready = true;
       // 창을 닫거나 새로 고칠 때 0.7초 대기 중인 저장을 바로 보낸다 (설치형은 창 닫기 전에 electron 이 flush 를 기다림)
       window.addEventListener('beforeunload', (e) => {
@@ -112,6 +113,12 @@
       }
       await DB.saveMeta();
     },
+    /** 8차(v1.3.0): 기초재고 기준일을 범위마다 설정에 고정한다 (예전 자료는 범위별 기초재고 행 날짜의 최댓값으로 한 번 채움) */
+    async upgradeV8() {
+      if (DB.meta.openDate || !DB.rows('stock_open').length) return;
+      const od = {}; DB.rows('stock_open').forEach(r => { const sc = r.scope === 'FAC' ? 'FAC' : 'WH'; if (r.date && (!od[sc] || r.date > od[sc])) od[sc] = r.date; });
+      DB.meta.openDate = od; await DB.saveMeta();
+    },
     rows(n) { return DB.t[n] || (DB.t[n] = []); },
     onChange(fn) { DB._listeners.push(fn); },
     emit(name) { DB._listeners.forEach(f => { try { f(name); } catch (e) { console.error(e); } }); },
@@ -129,6 +136,16 @@
       const cur = DB.rows(n); let added = 0, updated = 0;
       if (!keys.length) { DB.addMany(n, rows); return { added: rows.length, updated: 0 }; }
       const kf = (r) => keys.map(k => String(r[k] === undefined || r[k] === null ? '' : r[k]).trim().toLowerCase()).join('\u0001');
+      if (ERP.TABLES[n] && ERP.TABLES[n].multi) {
+        // 같은 키가 반복될 수 있는 표(PO 줄): 파일 안의 n번째 같은 키 줄 ↔ 기존의 n번째 같은 키 줄. 합치지 않고, 다시 올려도 늘지 않는다
+        const lists = new Map(); cur.forEach(r => { const k = kf(r); let a = lists.get(k); if (!a) lists.set(k, a = []); a.push(r); });
+        const seen = new Map();
+        rows.forEach(r => {
+          const k = kf(r); const i = seen.get(k) || 0; seen.set(k, i + 1); const e = (lists.get(k) || [])[i];
+          if (e) { Object.assign(e, r); delete e._ex; updated++; } else { cur.push(Object.assign({ _id: ERP.fmt.uid() + Math.random().toString(36).slice(2, 5) }, r)); added++; }
+        });
+        DB.touch(n); return { added, updated };
+      }
       const idx = new Map(); cur.forEach(r => idx.set(kf(r), r));
       rows.forEach(r => {
         const e = idx.get(kf(r));
@@ -181,6 +198,7 @@
       DB.meta = Object.assign({}, o.meta || {}, { seeded: DB.meta.seeded || new Date().toISOString() });
       await DB.persistAll();
       if (!DB.meta.v6) await DB.upgradeV6(); // 5차 백업을 복원한 경우 ECOUNT 기준 자료를 더한다
+      await DB.upgradeV8();
       DB.emit();
     },
 

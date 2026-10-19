@@ -175,7 +175,7 @@
     return m;
   });
 
-  INV.opening = () => DB.memo('inv.open', ['stock_open'], () => {
+  const openRows = () => DB.memo('inv.open', ['stock_open'], () => {
     const by = { WH: new Map(), FAC: new Map() }, date = { WH: null, FAC: null }, n = { WH: 0, FAC: 0 };
     DB.rows('stock_open').forEach(r => {
       const sc = r.scope === 'FAC' ? 'FAC' : 'WH'; const c = str(r.code); if (!c) return;
@@ -186,8 +186,15 @@
       by[sc].set(c, o); n[sc]++;
       if (r.date && (!date[sc] || r.date > date[sc])) date[sc] = r.date;
     });
-    return { by, date, n };
+    return { by, max: date, n };
   });
+  /** 기초재고: 범위별 수량 + 기준일. 기준일은 설정(meta.openDate, 기초재고를 올릴 때 저장)이 이기고, 없으면 행 날짜의 최댓값 —
+      행 하나를 나중 날짜로 더하거나 고쳐도 그 범위 전체의 기준일이 바뀌지 않는다 */
+  INV.opening = () => { const o = openRows(); const md = DB.meta.openDate || {}; return { by: o.by, n: o.n, max: o.max, date: { WH: md.WH || o.max.WH, FAC: md.FAC || o.max.FAC } }; };
+  /** 이동 전표 등 자동 수불의 날짜: 오늘 — 단, 오늘이 기초재고 기준일 이전 · 당일이면 기준일 다음 날 (기준일 당일 수불은 기초재고에 들어 있다고 보므로) */
+  INV.suggestDate = () => { const od = INV.openDates(); const t = F.today(); return !od.any || t > od.any ? t : F.addDays(od.any, 1); };
+  /** 계산 캐시 키에 넣는 값: 기초재고 기준일 · 공정 단위 (설정만 바뀌어도 다시 계산되게) */
+  const calcSig = () => { const d = INV.opening().date; return (d.WH || '') + '/' + (d.FAC || '') + '|' + ERP.PROC.map(p => p.id + ':' + (p.unit || '')).join(','); };
   /** {WH, FAC, any, all} opening dates */
   INV.openDates = () => { const d = INV.opening().date; const arr = [d.WH, d.FAC].filter(Boolean).sort(); return { WH: d.WH, FAC: d.FAC, any: arr.length ? arr[arr.length - 1] : null, first: arr[0] || null }; };
 
@@ -390,8 +397,13 @@
     }
     // finished / manila-packed item -> one pencil of every colour per set
     if (proc === 'PCK' || st === 'FG' || st === 'SG') {
-      const rows = (B.byRetail.get(code) || (ERP.bomFor ? ERP.bomFor(code).rows : [])) || [];
-      if (rows.length) return { src: 'retail', kids: rows.map(r => ({ code: str(r.color_code), per: 1, basis: 'set' })) };
+      let rows = B.byRetail.get(code), alt = null;
+      if (!rows && ERP.bomFor) { const bf = ERP.bomFor(code); rows = bf.rows; if (rows && rows.length && bf.key && bf.key !== code) alt = bf.key; }
+      rows = rows || [];
+      if (rows.length) {
+        if (alt && diag) { diag.similar = diag.similar || new Map(); diag.similar.set(code, alt); }   // 같은 품번 BOM 이 없어 비슷한 품번의 색상 구성을 썼다 (진단에 표시)
+        return { src: alt ? 'retail-similar' : 'retail', kids: rows.map(r => ({ code: str(r.color_code), per: 1, basis: 'set' })), ref: alt || undefined };
+      }
     }
     return null;
   }
@@ -400,8 +412,9 @@
   INV.postRows = function (prodRows, opt) {
     opt = opt || {};
     const mode = opt.mode || INV.prodMode(); const od = INV.opening().date; const IT = INV.items(); const rmBy = INV.rmByName(); const MAP = INV.codeMap();
-    const diag = { mode, open: od.FAC || od.WH || null, considered: 0, before: 0, prod: 0, use: 0, mapped: 0, resin: 0, notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), bomSrc: {} };
-    const rawItem = (name) => { const a = rmBy.get(normName(name)); if (a) return a; const c = MAP.raw(name); return c ? IT.get(c) : null; };
+    const diag = { mode, open: od.FAC || od.WH || null, considered: 0, before: 0, prod: 0, use: 0, mapped: 0, resin: 0, notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), similar: new Map(), bomSrc: {} };
+    // 원료 이름 → RM 품목: 사용자가 연결한 것(code_map raw)이 먼저, 그다음 이름이 같은 RM
+    const rawItem = (name) => { const c = MAP.raw(name); const a = c ? IT.get(c) : null; return a || rmBy.get(normName(name)) || null; };
     const out = [];
     if (mode === 'off') return { rows: out, diag };
     const openDate = od.FAC || od.WH;
@@ -412,7 +425,8 @@
       if (!r || !r.date) return;
       if (r.date <= openDate) { diag.before++; return; }
       diag.considered++;
-      const code = str(r.code); let item = code ? IT.get(code) : null;
+      // 재고 품목: 일보의 재고 품목코드(item, 예: 포장 일보의 완제품 코드) → 코드 → 코드 연결(code_map)
+      const code = str(r.code); let item = (str(r.item) && IT.get(r.item)) || (code ? IT.get(code) : null);
       const src = code || str(r.part) || str(r.name);
       if (!item && src) { const mc = MAP.daily(r.process, r.division, src); if (mc) { item = IT.get(mc); if (item) diag.mapped++; } }
       const pcs = C.qty(r); const P = procOf(r.process); const setProc = r.process === 'PCK' || (P && P.unit === 'set');
@@ -428,12 +442,12 @@
       const unit = INV.unitN(item.unit); const spc = num(item.set_per_ct), pps = num(item.pcs_per_set);
       let sets = setProc ? num(r.ok_qty) : (pps ? pcs / pps : null);
       let mainQ = null;
-      if (unit === 'CT') mainQ = (sets !== null && spc) ? sets / spc : null;
+      if (unit === 'CT') mainQ = num(r.ok_ct) > 0 ? num(r.ok_ct) : ((sets !== null && spc) ? sets / spc : null);   // 일보에 박스(CT) 실적이 있으면 그대로
       else if (unit === 'SET') mainQ = sets;
       else if (unit === 'kg') mainQ = num(r.weight_kg) || null;
       else mainQ = pcs;
       if (mainQ === null || !isFinite(mainQ)) { bump(diag.noConv, item.code, setProc ? num(r.ok_qty) : pcs); resin(); return; }
-      if (!mainQ) return;
+      if (!mainQ) { resin(); return; }   // 양품 0 (전부 불량 · 시험 사출)이어도 사출 원료는 쓴 것
       const base = base0;
       out.push(Object.assign({ kind: 'PROD', to_scope: 'FAC', code: item.code, name: item.name, qty: r4(mainQ), unit: INV.unitShow(item.unit) }, base)); diag.prod++;
       if (mode !== 'in_bom') return;
@@ -452,7 +466,7 @@
     });
     return { rows: out, diag };
   };
-  INV.prodPost = () => { const mode = INV.prodMode(); return DB.memo('inv.post:' + mode, ['prod_log', 'items', 'stock_open', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_map'], () => INV.postRows(DB.rows('prod_log'), { mode })); };
+  INV.prodPost = () => { const mode = INV.prodMode(); return DB.memo('inv.post:' + mode + ':' + calcSig(), ['prod_log', 'items', 'stock_open', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_map'], () => INV.postRows(DB.rows('prod_log'), { mode })); };
 
   // ------------------------------------------------------------------ the stock map (replaces the old material-only C.stock)
   function mk(code, m) {
@@ -464,7 +478,7 @@
   }
   C.stock = function (upTo) {
     const mode = INV.prodMode();
-    return DB.memo('stock6:' + (upTo || '') + ':' + mode, ['items', 'stock_open', 'stock_tx', 'prod_log', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_dict', 'code_map'], () => {
+    return DB.memo('stock6:' + (upTo || '') + ':' + mode + ':' + calcSig(), ['items', 'stock_open', 'stock_tx', 'prod_log', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_dict', 'code_map'], () => {
       const IT = INV.items(), op = INV.opening(), od = op.date, map = new Map();
       const get = (code) => { const m = IT.get(code); const key = m ? m.code : str(code); let s = map.get(key); if (!s) { s = mk(key, m); map.set(key, s); } return s; };
       IT.m.forEach((m, c) => { map.set(c, mk(c, m)); });
@@ -610,23 +624,33 @@
     opt = opt || {}; const IT = INV.items(); const out = []; const unmapped = [];
     const byXnk = DB.memo('inv.byXnk', ['items'], () => { const m = new Map(); DB.rows('items').forEach(r => { const x = up(r.xnk); if (!x) return; let a = m.get(x); if (!a) m.set(x, a = []); a.push(r); }); return m; });
     const outMode = opt.outMode || 'move';
+    // 원부자재 창고 장부이므로 원부자재 품목으로만 넣는다. 공장 장부의 '품번' 칸에는 카톤 · 마니라가 들어가는 완제품 코드가 적혀 있다 (예: 52-9824-0-006 → 카톤 52-9824-0-808)
+    const isMat = (it) => !!it && INV.groupOf({ stage: INV.info(it).stage, m: it }) === 'mat';
+    const prefix = (c) => { const p = str(c).toUpperCase().split('-'); return p.length >= 3 ? p.slice(0, 3).join('-') : ''; };
     rows.forEach((r, i) => {
-      let it = IT.get(r.item_code) || IT.get(r.wh_code);
-      let cands = [];
-      if (!it) {
-        cands = byXnk.get(up(r.wh_code)) || [];
-        if (cands.length === 1) it = cands[0];
-        else if (cands.length > 1) { const nn = normName(r.name); const exact = cands.filter(c => normName(c.name) === nn); const part = exact.length ? exact : cands.filter(c => nn && (normName(c.name).includes(nn) || nn.includes(normName(c.name)))); if (part.length === 1) it = part[0]; }
-        if (!it) { const alt = up(r.wh_code).replace(/\s+/g, '').replace(/VN$/, ''); it = IT.get(alt) || IT.get(up(r.item_code).replace(/\s+/g, '').replace(/VN$/, '')); }
+      let it = null; let cands = [];
+      const wh = IT.get(r.wh_code), ic = IT.get(r.item_code);
+      if (isMat(wh)) it = wh;                                   // 1) 창고코드가 원부자재 품목
+      else if (isMat(ic)) it = ic;                              // 2) 품번이 원부자재 품목
+      if (!it) {                                                // 3) Mã XNK(공용 세관 코드) 후보를 제품코드 앞부분 · 품명으로 좁힌다
+        cands = (byXnk.get(up(r.wh_code)) || []).filter(isMat);
+        const pre = prefix(r.item_code), icode = up(r.item_code);
+        const narrow = pre ? cands.filter(c => up(c.code).indexOf(pre + '-') === 0 || (icode && up(c.name).indexOf(icode) >= 0)) : [];
+        const pool = narrow.length ? narrow : cands;
+        if (pool.length === 1) it = pool[0];
+        else if (pool.length > 1) { const nn = normName(r.name); const exact = pool.filter(c => normName(c.name) === nn); const part = exact.length ? exact : pool.filter(c => nn && (normName(c.name).includes(nn) || nn.includes(normName(c.name)))); if (part.length === 1) it = part[0]; else cands = pool; }
+        if (!it) { const alt = up(r.wh_code).replace(/\s+/g, '').replace(/VN$/, ''); const a = IT.get(alt) || IT.get(up(r.item_code).replace(/\s+/g, '').replace(/VN$/, '')); if (isMat(a)) it = a; }   // 4) 'R-103VN' → R-103
       }
       const isIn = r.type === 'IN';
       const kg = isIn ? num(r.in_kg) : num(r.out_kg), ea = isIn ? num(r.in_ea) : num(r.out_ea);
       const unit = it ? INV.unitN(it.unit) : '';
       const qty = unit === 'kg' ? (kg || ea) : (ea || kg);
-      const tx = { date: r.date, doc_no: r.doc_no, kind: isIn ? 'IN' : (outMode === 'move' ? 'MOVE' : 'OUT'), from_scope: isIn ? undefined : 'WH', to_scope: isIn ? 'WH' : (outMode === 'move' ? 'FAC' : undefined),
+      const date = F.parseDate(r.date);
+      const tx = { date: date || r.date, doc_no: r.doc_no, kind: isIn ? 'IN' : (outMode === 'move' ? 'MOVE' : 'OUT'), from_scope: isIn ? undefined : 'WH', to_scope: isIn ? 'WH' : (outMode === 'move' ? 'FAC' : undefined),
         code: it ? it.code : undefined, name: it ? it.name : r.name, qty: r4(qty), unit: it ? INV.unitShow(it.unit) : undefined, partner: r.partner_name || undefined, note: r.content || undefined, src: opt.src || 'ledger',
         _orig: { item_code: r.item_code, wh_code: r.wh_code, name: r.name }, _cands: it ? undefined : cands.map(c => c.code) };
       if (!qty) return;
+      if (!date) tx._badDate = true;   // 날짜를 읽지 못함 → 반영하지 않고 미리보기에 보인다
       if (!it) unmapped.push(i);
       out.push(tx);
     });

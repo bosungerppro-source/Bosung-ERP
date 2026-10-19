@@ -1,7 +1,7 @@
 /* ColorPencil ERP - core helpers (namespace, i18n, DOM builder, formatting, modal/toast) */
 (function (g) {
   'use strict';
-  const ERP = g.ERP = { v: '1.2.0', lang: 'ko', pages: {}, state: {} };
+  const ERP = g.ERP = { v: '1.3.0', lang: 'ko', pages: {}, state: {} };
 
   // ---------- language ----------
   try { ERP.lang = localStorage.getItem('erp_lang') || 'ko'; } catch (e) { /* ignore */ }
@@ -65,6 +65,50 @@
     diffDays(a, b) { return Math.round((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000); },
     dow(s) { const d = new Date(s + 'T00:00:00').getDay(); return (ERP.lang === 'vi' ? ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'] : ['일', '월', '화', '수', '목', '금', '토'])[d]; },
     ym(s) { return s ? String(s).slice(0, 7) : ''; },
+    /** y-m-d numbers → 'YYYY-MM-DD', or null when the day does not exist */
+    ymd(y, mo, d) {
+      if (!(y >= 1900 && y <= 2200) || !(mo >= 1 && mo <= 12) || !(d >= 1 && d <= new Date(Date.UTC(y, mo, 0)).getUTCDate())) return null;
+      return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    },
+    /** 날짜 해석: Date · 엑셀 날짜 숫자 · YYYY-MM-DD · d/m/y (일 먼저, 앞자리가 13 이상이면 월 먼저) · dd.mm.yy → ISO, 못 읽으면 null */
+    parseDate(v) {
+      if (v === null || v === undefined || v === '') return null;
+      if (v instanceof Date) return isNaN(v) ? null : F.ymd(v.getFullYear(), v.getMonth() + 1, v.getDate());
+      if (typeof v === 'number') { if (!(v >= 20000 && v < 80000)) return null; const d = new Date(Math.round((v - 25569) * 86400) * 1000); return F.ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()); }
+      const s = String(v).trim();
+      let m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[T\s].*)?$/); if (m) return F.ymd(+m[1], +m[2], +m[3]);
+      m = s.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{4}|\d{2})(?:\s.*)?$/);
+      if (m) { const a = +m[1], b = +m[2], y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return a <= 12 && b > 12 ? F.ymd(y, a, b) : F.ymd(y, b, a); }
+      return null;
+    },
+    /** 이 PC 의 소수점 기호 ('.' 또는 ','): 설정(numFmt) → 브라우저/Windows 숫자 형식 */
+    decimalSep() {
+      const set = ERP.db && ERP.db.setting ? ERP.db.setting('numFmt', 'auto') : 'auto';
+      if (set === 'dot') return '.'; if (set === 'comma') return ',';
+      try { const p = new Intl.NumberFormat().formatToParts(1.5).find(x => x.type === 'decimal'); return p ? p.value : '.'; } catch (e) { return '.'; }
+    },
+    /** 붙여넣은 숫자 해석: 35.000(vi) · 35,000(en) · 1.234,5 · (1,000) · −120 · '2 200'. 애매한 1.234 는 dec(없으면 이 PC 의 소수점 기호)로 정한다. 못 읽으면 null */
+    parseNum(v, dec) {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') return isFinite(v) ? v : null;
+      let s = String(v).trim(); if (!s) return null;
+      let neg = false;
+      if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1).trim(); }
+      s = s.replace(/[−‒–—]/g, '-');
+      if (s[0] === '-') { neg = !neg; s = s.slice(1); } else if (s[0] === '+') s = s.slice(1);
+      s = s.replace(/[\s  ']/g, '');
+      if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return null;
+      const hasDot = s.indexOf('.') >= 0, hasCom = s.indexOf(',') >= 0; let ds = null;
+      if (hasDot && hasCom) ds = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+      else if (hasDot || hasCom) {
+        const c = hasDot ? '.' : ','; const parts = s.split(c);
+        if (parts.length > 2) ds = c === '.' ? ',' : '.';                                   // 1.234.567 → 천 단위
+        else if (parts[1].length !== 3 || parts[0] === '' || parts[0] === '0') ds = c;      // 1.5 · 0.125 → 소수
+        else ds = (dec || F.decimalSep()) === c ? c : (c === '.' ? ',' : '.');            // 1.234 → 이 PC 의 형식
+      }
+      let t = s; if (ds === '.') t = t.replace(/,/g, ''); else if (ds === ',') t = t.replace(/\./g, '').replace(',', '.');
+      const n = Number(t); if (!isFinite(n)) return null; return neg ? -n : n;
+    },
   };
   F.uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 

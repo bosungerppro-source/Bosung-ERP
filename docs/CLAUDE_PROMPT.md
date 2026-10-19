@@ -53,7 +53,8 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - 새 엑셀 양식은 `app/js/xl.js` 에 detector + parser 를 추가한다.
 - 새 화면은 `app/js/p_*.js` 에서 `ERP.pages.<id> = {ko, vi, render(root)}` 로 등록하고 `main.js` 의 NAV 에 추가한다.
 - 모든 문자열은 `L()` 로 양국어 제공(`L(ko, '')` = 베트남어에서 빈 글자, `L(ko)` = 한국어 대체). 숫자/날짜 포맷은 `ERP.fmt`.
-- 변경 후: `npm run test:v7` (재고·위젯·화면, ECOUNT 엑셀은 `seed/ecount`; 이전 버전 업그레이드까지 보려면 `ERP_PREV=<이전 소스 폴더>`) → `npm run test:assistant` (비서·화면·서버) → `npm run demo` → `npm run dist`. 현장 엑셀 파서는 `npm test -- <엑셀폴더> [all]`.
+- 사용자 입력 · 엑셀에서 날짜 · 숫자를 읽을 때는 `ERP.fmt.parseDate` · `ERP.fmt.parseNum` (8차). 진행 중 PO 는 `ERP.calc.isOpen` (완료 · 취소 · 보류 제외).
+- 변경 후: `npm run test:v8` (8차 데이터 정확성, 현장 엑셀 `seed/factory`) → `npm run test:v7` (재고·위젯·화면, ECOUNT 엑셀은 `seed/ecount`; 이전 버전 업그레이드까지 보려면 `ERP_PREV=<이전 소스 폴더>`, 예: `git worktree add /tmp/prev v1.2.0`) → `npm run test:assistant` (비서·화면·서버) → `npm run demo` → `npm run dist`. 현장 엑셀 파서는 `npm test -- <엑셀폴더> [all]`.
 
 ### 7. 다음 개선 아이디어 (요청 시)
 사용자/권한(역할별 화면), 작업지시서·LOT 추적, 설비 가동 실시간 입력(태블릿), 바코드 입출고, 원가 계산, 인쇄 양식(PDF), 자동 업데이트.
@@ -136,3 +137,22 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 **저장**: `DB.queueSave` 는 표마다 0.7초 묶어 저장(대기 수는 표마다 1). `DB.flush()` 는 대기 중인 저장을 바로 보낸다 — 설치형 창 닫기 · 재시작 전에 `electron/main.js` 가 기다린다.
 
 - 시험: `npm run test:v7` 149개 + `npm run test:assistant` 240개.
+
+### 2-7. 8차: 실제 사용 전 데이터 정확성 (v1.3.0, 2026-10-19)
+자세한 문제 · 결정 · 검증은 `docs/PROMPT_v8_ACCURACY.md`, 작업 기록은 `docs/history/v8_work_log.md`.
+
+**배경**: 계정을 옮기며 v1.2.0 전체를 검토했다. 현장 엑셀을 넣으면 입력이 사라지거나 숫자가 틀리는 문제가 있어 실제 사용 전에 고쳤다 (재현 시험 `tools/selftest_v8.js` 를 먼저 만들고 고침).
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **일보 교체**: 일보(`source:'daily-report'`) · ERP 양식(`'template'`) 행은 날짜 · 공정 · 출처 · 조(`shift`) · 작업장(`workplace`)이 모두 같을 때만 바꾼다. 누적 시트(`'history'`)는 공정 · 기간 전체를 바꾼다. 같은 날짜 · 공정에 누적 행이 있으면 일보는 기본 건너뜀(`job.overlap`), `job.overlapMode='replace'` 면 그날 누적 행 대신 일보. 조 = 시트 이름 → 행의 DAY/NIGHT 칸 → D. 작업장 = 일보의 "1. 작업장명" 칸.
+- **수주 키**: `po.nat` = po_no · po_no2 · item_no · date · kind · kind2 · color, `po.multi` → `DB.upsert` 는 같은 키 줄을 순번으로 맞춘다 (합치지 않음).
+- **취소 · 보류**: `C.poCond(p)` ('cancel' · 'hold', Condition 칸). 표시가 있으면 줄 상태 = cancel/hold. PO 는 모든 줄이 취소/보류면 취소/보류, 아니면 그 줄을 뺀 줄로 계산. 진행 중 = `C.isOpen(o)`.
+- **포장 일보**: `code` = PO 품번(열 1 → 열 0), `item` = 재고 품목코드(완제품 열 1), `ok_ct` = 실적 CT. 생산 반영은 `item` → `code` → `code_map`, CT 품목은 `ok_ct` 가 있으면 그대로.
+- **품목군(일보)**: 누적 시트의 같은 코드 → ERP CODE 제품군별 누적 최빈값 → 설비 이름. **설비** = `C.machKey(r)` (공정 + 종류 + 번호).
+- **기초재고 기준일**: 범위마다 `meta.openDate` (ECOUNT 재고현황 "기초재고로 설정" 때 저장, 없으면 `DB.upgradeV8` 가 행 날짜 최댓값으로 채움). 기준일 당일 · 이전 수불은 재고에 더하지 않으므로 입력 화면이 경고한다. 자동 수불 날짜 = `INV.suggestDate()`.
+- **입출고장(KHO NVL)**: 원부자재 품목으로만 넣는다 (창고코드 → 품번 → Mã XNK 후보를 품번 앞부분 · 품명으로 좁힘 → VN 접미어).
+- **날짜 · 숫자**: `ERP.fmt.parseDate` (일 먼저, 앞자리 13 이상이면 월 먼저, 못 읽으면 null → 미리보기에 표시하고 반영 안 함), `ERP.fmt.parseNum` (애매한 1.234 는 이 PC 숫자 형식 또는 설정 `numFmt`). 파일명 날짜 = `XL.fileDate`.
+- **구글 시트**: 올릴 때 `types` 를 보내고 `google/Code.gs` 2판이 글자 · 날짜 열을 텍스트(@) 형식으로 쓴다 (ping `ver: 2`).
+- **원료 연결**: 사출 원료는 사용자 연결(code_map raw)이 이름 매칭보다 먼저, 양품 0 이어도 원료 차감.
+- **캐시**: 생산 반영 · 재고 캐시 키에 기준일 · 공정 단위 포함.
+- 시험: `npm run test:v8` 72개 + `npm run test:v7` 149개(ERP_PREV) + `npm run test:assistant` 240개.

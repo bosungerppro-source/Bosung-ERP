@@ -8,6 +8,8 @@
 
   ERP.ddayChip = function (dd, st) {
     if (st === 'done') return ERP.chip('ok', L('완료', 'Xong'));
+    if (st === 'cancel') return ERP.chip('neutral', L('취소', 'Hủy'));
+    if (st === 'hold') return ERP.chip('neutral', L('보류', 'Tạm dừng'));
     if (dd === null || dd === undefined) return ERP.chip('neutral', '–');
     if (dd < 0) return ERP.chip('bad', L('지연 ' + (-dd) + '일', 'Trễ ' + (-dd) + ' ngày'));
     if (dd === 0) return ERP.chip('bad', 'D-Day');
@@ -15,7 +17,8 @@
     return ERP.chip('neutral', 'D-' + dd);
   };
   ERP.statusChip = function (st) {
-    return { done: ERP.chip('ok', L('완료', 'Hoàn thành')), late: ERP.chip('bad', L('납기 경과', 'Quá hạn')), prod: ERP.chip('info', L('생산 중', 'Đang SX')), wait: ERP.chip('neutral', L('대기', 'Chờ')) }[st];
+    return { done: ERP.chip('ok', L('완료', 'Hoàn thành')), late: ERP.chip('bad', L('납기 경과', 'Quá hạn')), prod: ERP.chip('info', L('생산 중', 'Đang SX')), wait: ERP.chip('neutral', L('대기', 'Chờ')),
+      cancel: ERP.chip('neutral', L('취소', 'Hủy')), hold: ERP.chip('warn', L('보류', 'Tạm dừng')) }[st];
   };
 
   // ---------------------------------------------------------------- helpers
@@ -38,12 +41,12 @@
     lazy('avg', () => { const prev = C.dailySeries(F.addDays(ref, -14), F.addDays(ref, -1)); const o = {}; ERP.PROC.forEach(p => { const v = prev.series[p.id].filter(x => x > 0); o[p.id] = v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }); return o; });
     lazy('mStart', () => ref.slice(0, 8) + '01');
     lazy('orders', () => C.poGroups());
-    lazy('open', () => ctx.orders.filter(o => o.st !== 'done'));
+    lazy('open', () => ctx.orders.filter(o => C.isOpen(o)));
     lazy('late', () => ctx.open.filter(o => o.st === 'late' && o.dday !== null && o.dday >= -60));
     lazy('soon', () => ctx.open.filter(o => o.soon));
     lazy('stock', () => C.stock());
     lazy('low', () => Array.from(ctx.stock.values()).filter(s => s.status === 'low' || s.status === 'neg'));
-    lazy('seen30', () => { const o = {}; C.rowsBetween(F.addDays(ref, -29), ref).forEach(r => { if (r.machine_no !== undefined && r.machine_no !== null) (o[r.process] = o[r.process] || new Set()).add(String(r.machine_no)); }); return o; });
+    lazy('seen30', () => { const o = {}; C.rowsBetween(F.addDays(ref, -29), ref).forEach(r => { if (r.machine_no !== undefined && r.machine_no !== null) (o[r.process] = o[r.process] || new Set()).add(C.machKey(r)); }); return o; });
     ctx.machTotal = (pid) => { const reg = DB.rows('machines').filter(m => m.process === pid && m.active !== false).length; return reg || (ctx.seen30[pid] ? ctx.seen30[pid].size : 0); };
     ctx.machRun = (pid) => Array.from((ctx.byProc[pid] || C.agg([])).machines).filter(k => k.indexOf(pid + ':') === 0).length;
     ctx.monthAgg = (pid, from, to) => C.agg(C.rowsBetween(from, to, pid));

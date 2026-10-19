@@ -137,12 +137,12 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
   {
     const r = await ev(() => { const C = ERP.calc; if (!C.poCond) return null; const lines = C.orders(); const bad = lines.filter(o => C.poCond(o.p) && (o.st === 'late' || o.st === 'prod' || o.st === 'wait' || o.soon));
       const groups = C.poGroups(); const allCancel = groups.filter(g => g.lines.every(l => C.poCond(l.p) === 'cancel'));
-      return { conds: ['Cancle', 'cancle', 'Di hold', '취소', 'hủy', 'HOLD', 'ok', ''].map(c => C.poCond({ condition: c })), bad: bad.length, nCancel: lines.filter(o => o.st === 'cancel').length, nHold: lines.filter(o => o.st === 'hold').length,
+      return { conds: ['Cancle', 'cancle', 'Di hold', '취소', 'hủy', 'HOLD', 'ok', ''].map(c => C.poCond({ condition: c })), bad: bad.length, nCancel: lines.filter(o => o.st === 'cancel').length, nHold: lines.filter(o => o.st === 'hold').length, mism: lines.filter(o => C.poCond(o.p) && o.st !== C.poCond(o.p)).length,
         groupSt: Array.from(new Set(allCancel.map(g => g.st))), sample: allCancel.length ? allCancel[0].po_no : null }; });
     ok('C.poCond 있음', !!r);
     if (r) {
       eq('Condition 해석', r.conds, ['cancel', 'cancel', 'hold', 'cancel', 'cancel', 'hold', '', '']);
-      eq('취소·보류 줄은 대기/생산/지연/임박이 아님', r.bad, 0); ok('취소 줄·보류 줄 상태', r.nCancel === 19 && r.nHold === 18, r);
+      eq('취소·보류 줄은 대기/생산/지연/임박이 아님', r.bad, 0); ok('취소 · 보류 표시가 이긴다 (PO 번호가 있는 줄: 취소 19 · 보류 10, 포장이 끝난 취소 줄 포함)', r.mism === 0 && r.nCancel === 19 && r.nHold === 10, r);
       eq('모든 줄이 취소인 PO = 취소 상태', r.groupSt, ['cancel']);
       await ev(() => { ERP.state.bomTab = 'mrp'; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await page.waitForTimeout(300);
       await page.click('text=진행 중 수주에서 가져오기'); await page.waitForTimeout(300);
@@ -203,7 +203,7 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
   {
     const r = await ev(() => { const INV = ERP.inv; const od0 = INV.openDates(); ERP.db.add('stock_open', { date: '2026-10-19', scope: 'WH', code: 'R-999X', qty: 1 }); const od1 = INV.openDates();
       return { meta: ERP.db.meta.openDate || null, od0: [od0.WH, od0.FAC], od1: [od1.WH, od1.FAC], sug: INV.suggestDate ? INV.suggestDate() : null }; });
-    eq('meta.openDate 저장', r.meta, { WH: '2026-10-16', FAC: '2026-10-16' }); eq('나중 날짜 행 하나를 더해도 기준일 그대로', r.od1, ['2026-10-16', '2026-10-16']);
+    eq('meta.openDate 저장', r.meta && [r.meta.WH, r.meta.FAC], ['2026-10-16', '2026-10-16']); eq('나중 날짜 행 하나를 더해도 기준일 그대로', r.od1, ['2026-10-16', '2026-10-16']);
     const today = await ev(() => ERP.fmt.today()); ok('이동 전표 날짜 = 오늘 (기준일 다음 날 이후)', r.sug === (today > '2026-10-16' ? today : '2026-10-17'), r.sug);
     const s2 = await ev(() => { const t = ERP.fmt.today(); ERP.db.meta.openDate = { WH: t, FAC: t }; ERP.db.ver.stock_open++; const v = ERP.inv.suggestDate ? ERP.inv.suggestDate() : null; return { v, t }; });
     eq('기준일이 오늘이면 이동 전표는 내일 날짜', s2.v, await ev((t) => ERP.fmt.addDays(t, 1), s2.t));
@@ -266,8 +266,8 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
     // client: push sends column types, pull keeps text columns as text
     const r = await ev(async () => {
       const sent = []; const orig = window.fetch;
-      window.fetch = async (url, o) => { if (String(url).includes('/api/gproxy')) { const b = JSON.parse(JSON.parse(o.body).body); sent.push(b); const resp = b.action === 'get' ? { ok: true, cols: ['code', 'name', 'safety'], rows: [['0414210300', 'A', 5], ['523034E200', 'B', '7']], total: 2 } : { ok: true, ver: 2, sheet: 'T', url: 'u', written: (b.rows || []).length }; return new Response(JSON.stringify(resp), { status: 200 }); } return orig(url, o); };
-      ERP.db.setSetting('gUrl', 'https://script.google.com/macros/s/x/exec'); ERP.db.setSetting('gToken', 'T1'); ERP.state.dataTab = 'google'; ERP.goto('data'); ERP.render();
+      window.fetch = async (url, o) => { if (String(url).includes('/api/gproxy')) { const b = JSON.parse(JSON.parse(o.body).body); sent.push(b); const resp = b.action === 'get' ? (b.table === 'warehouses' ? { ok: true, cols: ['code', 'name', 'safety'], rows: [['0414210300', 'A', 5], ['523034E200', 'B', '7']], total: 2 } : { ok: true, cols: [], rows: [], total: 0 }) : { ok: true, ver: 2, sheet: 'T', url: 'u', written: (b.rows || []).length }; return new Response(JSON.stringify(resp), { status: 200 }); } return orig(url, o); };
+      ERP.db.setSetting('gUrl', 'https://script.google.com/macros/s/x/exec'); ERP.db.setSetting('gToken', 'T1'); ERP.state.dataTab = 'google'; location.hash = '#/data'; await new Promise(r => setTimeout(r, 300)); ERP.render();
       document.querySelectorAll('input[data-t]').forEach(x => { x.checked = x.dataset.t === 'warehouses'; });
       const bPush = Array.from(document.querySelectorAll('button')).find(b => /구글 시트로 올리기/.test(b.textContent)); bPush.click(); await new Promise(r => setTimeout(r, 400));
       window.confirm = () => true; const keep = ERP.confirm; ERP.confirm = async () => true;
@@ -325,7 +325,7 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
     eq('누적 시트와 같은 날·공정의 일보 행 없음', seed.prod_log.filter(r => r.source === 'daily-report' && hist.has(r.date + '|' + r.process)).length, 0);
     eq('PO 머리글 행(Po No) 없음', seed.po.filter(p => /^po no$/i.test(String(p.po_no))).length, 0);
     eq('8월 10일로 잘못 들어간 종이권취 일보 없음', seed.prod_log.filter(r => r.process === 'WRP' && r.date === '2026-08-10').length, 0);
-    eq('시드에 기초재고 기준일', seed._meta && seed._meta.openDate, { WH: '2026-10-16', FAC: '2026-10-16' });
+    eq('시드에 기초재고 기준일', seed._meta && seed._meta.openDate && [seed._meta.openDate.WH, seed._meta.openDate.FAC], ['2026-10-16', '2026-10-16']);
     const oct = seed.prod_log.filter(r => r.process === 'ASM' && r.date >= '2026-10-01' && r.date <= '2026-10-31').reduce((a, r) => a + (r.ok_ea !== undefined && r.ok_ea !== null && r.ok_ea !== '' ? +r.ok_ea : +r.ok_qty || 0), 0);
     eq('10월 조립 합계 = 2,615,099 (중복 제거)', oct, 2615099);
   }
