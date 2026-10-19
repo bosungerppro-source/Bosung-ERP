@@ -45,7 +45,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - Vanilla JS SPA (`app/`), 전역 `window.ERP`, DOM 빌더 `h()`, Chart.js 4, SheetJS.
 - `ERP.db`: 메모리 테이블, 저장은 서버모드(JSON 파일) 또는 IndexedDB. 행마다 `_id`.
 - `server.js`: 의존성 없는 로컬 서버 (정적파일, `/api/*`, Google Apps Script 중계 `/api/gproxy`, 일일 백업 14일, LAN 옵션). 9차: 표마다 저장 번호(409 → 화면이 행 단위로 합침) · 설정 항목별 저장(PATCH) · Host/Origin/JSON 검사 · 사내망 PIN · PC 밖 자동 백업 · AI 중계 허용 목록 · 하루 한도.
-- `electron/main.js`: 서버를 내장해 창으로 표시. 설치 파일은 electron-builder(dir) + NSIS(`build/installer.nsi`).
+- `electron/main.js`: 서버를 내장해 창으로 표시 (Electron 44, 10차). 설치 파일은 electron-builder(dir) + NSIS(`build/installer.nsi`, 설치 · 삭제 중 실행 감지).
 - `google/Code.gs`: Apps Script 웹앱 (ping/list/put/get/snapshot/backup, 토큰 보호, 3판 = ping `ver: 3`).
 
 ### 6. 확장할 때 지켜야 할 것
@@ -56,7 +56,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - 사용자 입력 · 엑셀에서 날짜 · 숫자를 읽을 때는 `ERP.fmt.parseDate` · `ERP.fmt.parseNum` (8차). 진행 중 PO 는 `ERP.calc.isOpen` (완료 · 취소 · 보류 제외).
 - 표를 바꿀 때는 `DB.add / addMany / update / remove / replace / upsert / touch` (직접 `DB.t[n]` 을 바꾸면 반드시 `DB.touch(n)`) — 여러 PC 저장 합치기가 행 `_id` 와 저장 번호에 기대므로 (9차). 서버 쓰기 API 는 JSON 만, 바깥 요청은 `doFetch`.
 - AI 대화 기록은 뒤에 붙이기만 한다 (중간 수정 · 삭제, 대화 중 시스템 프롬프트 · 도구 변경 금지 → 바뀐 것은 `role: "system"` 메시지) (9차).
-- 변경 후: `npm run test:v9` (9차 여러 PC · 보안 · 백업) → `npm run test:v8` (8차 데이터 정확성, 현장 엑셀 `seed/factory`) → `npm run test:v7` (재고·위젯·화면, ECOUNT 엑셀은 `seed/ecount`; 이전 버전 업그레이드까지 보려면 `ERP_PREV=<이전 소스 폴더>`, 예: `git worktree add /tmp/prev v1.2.0`) → `npm run test:assistant` (비서·화면·서버) → `npm run demo` → `npm run dist`. 현장 엑셀 파서는 `npm test -- <엑셀폴더> [all]`.
+- 변경 후: `npm run test:v9` (9차 여러 PC · 보안 · 백업) → Electron · 설치 스크립트를 바꿨으면 `npm run test:electron` (Linux + Xvfb, 10차) → `npm run test:v8` (8차 데이터 정확성, 현장 엑셀 `seed/factory`) → `npm run test:v7` (재고·위젯·화면, ECOUNT 엑셀은 `seed/ecount`; 이전 버전 업그레이드까지 보려면 `ERP_PREV=<이전 소스 폴더>`, 예: `git worktree add /tmp/prev v1.2.0`) → `npm run test:assistant` (비서·화면·서버) → `npm run demo` → `npm run dist`. 현장 엑셀 파서는 `npm test -- <엑셀폴더> [all]`.
 
 ### 7. 다음 개선 아이디어 (요청 시)
 사용자/권한(역할별 화면), 작업지시서·LOT 추적, 설비 가동 실시간 입력(태블릿), 바코드 입출고, 원가 계산, 인쇄 양식(PDF), 자동 업데이트.
@@ -169,3 +169,10 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **자동 백업**: `backup.json` (dir · keep · google) → 하루 한 번 `ERP_backup_YYYY-MM-DD.json` + (선택) Code.gs 3판 `backup`(gzip). 복원은 .json · .json.gz.
 - **AI 비서**: 대화는 뒤에 붙이기만 (시스템 프롬프트 대화 시작 때 고정, 바뀐 날짜 · 언어 · 설정 = `role: "system"` 메시지, 30만 자 넘으면 요약으로 새 대화). `max_tokens` 16000 · effort low/medium · 캐시 · `fallbacks: "default"`(받는 모델만) · 429/529 retry-after · refusal / max_tokens 는 기록에 안 남김 · 도구 오류 `is_error` · 마지막 호출 `tool_choice: none` · 도구 결과는 `<목록>_total/_truncated`. 중계(`aiBody`): 모델 = 서버 설정, 정해진 필드만, 서버 도구 거절, 하루 한도(기본 400) · 사용량 `ai_usage.json`. 데모 키는 메모리에만. 설치형은 `net.fetch`.
 - 시험: `npm run test:v9` 87개 + `npm run test:assistant` 289개 + `npm run test:v8` 72개 + `npm run test:v7` 149개(ERP_PREV).
+
+### 2-9. 10차: 부품 업데이트 · 설치 파일 · 날짜 형식 안내 (v1.5.0, 2026-10-19)
+자세한 내용은 `docs/PROMPT_v10_PARTS.md`, 작업 기록은 `docs/history/v10_work_log.md`.
+- **Electron 44.5.1** (33 에서), **electron-builder 26.15.3** (25 에서, 빌드 도구 취약점 해소). `will-navigate` 는 `event.url`. Electron 을 올리면 `npm run test:electron` (`tools/smoke_electron.js`: 서버 모드 · 바깥 주소 · 팝업 · X 버튼으로 닫을 때 저장 · 종료 코드).
+- **설치 · 삭제 중 실행 감지**: 설치 폴더의 exe 를 쓰기 모드로 열어 보고 실패하면 "실행 중 — 닫고 다시 시도" (`CheckRunning` / `un.CheckRunning`).
+- **현장 일보 날짜**: `docs/GUIDE_EXCEL_DATES.md` (생산일자 칸 위치 · `2026-10-08` 또는 `08/10/2026` · 데이터 유효성 검사 · 지역 형식).
+- **SheetJS 0.20.3 은 보류**: cdn.sheetjs.com 이 작업 환경에서 막힘. 열리면 `app/lib/xlsx.full.min.js` + 개발용 `xlsx` 교체 후 v7 · v8 · import 시험.

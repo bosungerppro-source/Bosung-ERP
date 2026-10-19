@@ -4,13 +4,15 @@
 | 경로 | 설명 |
 |---|---|
 | `ERP_Demo.html` | 설치 없이 브라우저로 여는 테스트용 단일 파일 (데이터는 브라우저에만 저장) |
-| `ColorPencil-ERP-Setup-1.4.0.exe` | Windows 설치 프로그램 (사용자 폴더 설치, 관리자 권한 불필요). 이전 버전(1.3.0 · 1.2.0 등)을 쓰던 PC에 덮어 설치하면 데이터·설정은 그대로이고 고친 내용만 더해집니다 |
+| `ColorPencil-ERP-Setup-1.5.0.exe` | Windows 설치 프로그램 (Windows 10 이상, 사용자 폴더 설치, 관리자 권한 불필요). 이전 버전(1.4.0 · 1.3.0 등)을 쓰던 PC에 덮어 설치하면 데이터·설정은 그대로이고 고친 내용만 더해집니다. ERP 가 켜져 있으면 닫으라고 알려 줍니다 |
 | `google/Code.gs` | 구글 시트/드라이브 연동용 Apps Script |
 | `docs/CLAUDE_PROMPT.md` | 개발·확장용 마스터 프롬프트 |
 | `docs/PROMPT_v6_ECOUNT.md` | 6차 개정 프롬프트 (ECOUNT 자료로 품목·창고·재고 재구성) |
 | `docs/PROMPT_v7_WIDGETS.md` | 7차 개정 프롬프트 (위젯 종합 현황 · 원부자재/생산현장 재고 · 조립 BOM 자동 구성 · 표로 답하는 비서) |
 | `docs/PROMPT_v8_ACCURACY.md` | 8차 개정 프롬프트 (실제 사용 전 데이터 정확성: 주/야·층별 일보, 수주 줄, 취소·보류, 입출고장, 날짜·숫자, 구글 시트) |
 | `docs/PROMPT_v9_MULTIPC_AI.md` | 9차 개정 프롬프트 (여러 PC 동시 사용 · 사내망 PIN · PC 밖 자동 백업 · AI 비서 고치기) |
+| `docs/PROMPT_v10_PARTS.md` | 10차 개정 프롬프트 (Electron 44 · 빌드 도구 업데이트 · 설치 중 실행 감지 · 날짜 형식 안내) |
+| `docs/GUIDE_EXCEL_DATES.md` | **현장 일보 엑셀 날짜 칸 입력 안내** (한국어 · 베트남어, 반장 확인표 포함) |
 | `docs/history/` | 차수별 작업 기록 |
 | `app/` `server.js` `electron/` | 소스 코드 (비서: `app/js/assistant*.js`) |
 | `tools/selftest_assistant.js` · `tools/selftest_v7.js` · `tools/selftest_v8.js` · `tools/selftest_v9.js` | 비서 · 재고/위젯/화면 · 8차 데이터 정확성 · 9차 여러 PC/보안/백업 자동 시험 (개발용) |
@@ -36,6 +38,7 @@
    - **생산일보 교체 규칙 (1.3.0)**: 같은 날 같은 공정이라도 조(주간/야간) · 작업장(1층/2층) · 출처(일보/ERP 양식/직접 입력)가 다르면 따로 남습니다. 같은 일보를 다시 올리면 그 일보만 바뀝니다.
    - 같은 날짜 · 공정이 **수주·생산 관리 파일(누적 시트)** 에 이미 있으면 일보는 기본으로 건너뜁니다 (두 번 세지 않게). 일보로 바꾸려면 미리보기의 옵션에서 "일보로 바꾸기"를 고르세요.
    - 생산일자를 읽지 못한 일보는 날짜 칸이 비어 있습니다 — 날짜를 넣으면 반영할 수 있습니다. 파일명 날짜와 다르면 노란 경고와 "파일명 날짜 적용" 버튼이 나옵니다.
+   - 현장 일보의 날짜 칸은 `docs/GUIDE_EXCEL_DATES.md` 대로 넣어 주세요 (가장 안전한 형식 `2026-10-08`, 엑셀 입력 제한 거는 법 포함).
    - 날짜를 읽지 못한 수불 줄은 "날짜를 읽지 못함"으로 표시되고 반영되지 않습니다 (17/10/2026 같은 일/월/년 글자 날짜는 읽습니다).
 6. **구글 연동**: `google/Code.gs` 를 구글 시트의 Apps Script 에 붙여넣고 TOKEN 변경 → 웹 앱 배포 → URL·TOKEN 을 화면에 입력 → 올리기/가져오기/Drive 백업.
    - **1.3.0 부터 Code.gs 2판**: 0 으로 시작하는 코드 · 523034E200 같은 코드가 구글 시트에서 숫자로 바뀌지 않게 글자 열을 텍스트 형식으로 씁니다. 이미 쓰던 Apps Script 는 새 Code.gs 를 붙여넣고 **배포 관리 → 새 버전**으로 다시 배포하세요 (연결 테스트에 옛 버전 경고가 나오면 아직 옛 스크립트입니다).
@@ -56,6 +59,7 @@ npm start           # Electron 실행
 npm run demo        # dist/ERP_Demo.html
 npm run test:assistant   # 비서·화면·서버 자동 시험 (Playwright 필요: npm i -D playwright)
 npm run test:v9     # 9차 여러 PC 저장 합치기 · Host/Origin · 사내망 PIN · 자동 백업
+npm run test:electron   # Electron 실행 시험 (Linux + Xvfb)
 npm run test:v8     # 8차 데이터 정확성 재현 시험 (현장 엑셀: seed/factory)
 npm run test:v7     # 재고·위젯·화면 자동 시험 (ECOUNT 엑셀: seed/ecount, 이전 버전 업그레이드 시험: ERP_PREV=<이전 소스 폴더>)
 npm test -- <엑셀 폴더>   # 현장 엑셀 양식 인식 시험

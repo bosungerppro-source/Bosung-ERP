@@ -29,7 +29,7 @@ else {
     // 바깥 링크는 기본 브라우저로 — http/https 만 (file:// · 다른 프로그램 주소는 열지 않음), ERP 창은 ERP 주소에서 벗어나지 않음
     const openOut = (url) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); };
     win.webContents.setWindowOpenHandler(({ url }) => { openOut(url); return { action: 'deny' }; });
-    win.webContents.on('will-navigate', (e, url) => { if (url !== info.url && !url.startsWith(info.url + '/')) { e.preventDefault(); openOut(url); } });
+    win.webContents.on('will-navigate', (e, legacyUrl) => { const url = String((e && e.url) || legacyUrl || ''); if (url !== info.url && !url.startsWith(info.url + '/')) { e.preventDefault(); openOut(url); } });
     // 닫기 전에 화면에서 대기 중인 저장(0.7초)을 먼저 보낸다 → 마지막 입력이 사라지지 않게
     let flushed = false;
     win.on('close', (e) => { if (flushed) return; e.preventDefault(); flushRenderer().then(() => { flushed = true; if (win && !win.isDestroyed()) win.close(); }); });
