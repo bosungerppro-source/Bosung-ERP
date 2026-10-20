@@ -1,7 +1,7 @@
 # ColorPencil ERP (BOSUNG VINA) — Claude 작업 지침
 
 BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부자재 ERP. Vanilla JS SPA(`app/`) + 의존성 없는 Node 서버(`server.js`) + Electron 설치형(`electron/`).
-저장소: GitHub `bosungerppro-source/Bosung-ERP` (비공개로 쓴다, 브랜치 `main`).
+저장소: GitHub `bosungerppro-source/Bosung-ERP` (공개 저장소, 브랜치 `main`). 2026-10-20 에 공개로 두기로 했다 — 소스 · 예시 데이터 · Release(설치 파일)를 누구나 볼 수 있으므로 API 키 · 비밀번호 · 토큰은 저장소에 올리지 않는다.
 
 ## 일하는 방식
 - 너는 이 ERP를 유지보수하는 시니어 개발자다. 대부분은 스스로 판단해서 적용하고, 정말 필요한 것만 묻는다.
