@@ -77,8 +77,8 @@
     render(ctx) { const late = ctx.late, soon = ctx.soon, open = ctx.open;
       return ERP.kpi(L('납기 임박 / 경과 PO', 'PO sắp / quá hạn'), F.n(soon.length + late.length), L('건', 'đơn'), late.length ? 'bad' : (soon.length ? 'warn' : 'ok'), late.length ? L('경과 ' + late.length, 'Quá hạn ' + late.length) : L('정상', 'Bình thường'), L('7일 내 납기 ' + soon.length + '건 · 진행 중 ' + open.length + '건', '≤7 ngày: ' + soon.length + ' · đang mở: ' + open.length)); } });
   reg('kpi_low', { ko: '안전재고 미달 자재', vi: 'NVL dưới tồn an toàn', dko: '안전재고보다 적거나 마이너스인 품목', dvi: 'Mã dưới tồn an toàn hoặc âm', cat: 'kpi', w: 1, sizes: [1, 2],
-    go: () => () => { ERP.state.matTab = 'reorder'; ERP.goto('materials'); },
-    render(ctx) { const n = ctx.low.length; return ERP.kpi(L('안전재고 미달 자재', 'NVL dưới tồn an toàn'), F.n(n), L('품목', 'mã'), n ? 'bad' : 'ok', n ? L('경고', 'Cảnh báo') : L('정상', 'Tốt'), L('품목·재고 → 발주 · 안전재고', 'Hàng hóa · Tồn kho → Đặt hàng')); } });
+    go: () => () => ERP.goStock('reorder'),
+    render(ctx) { const n = ctx.low.length; return ERP.kpi(L('안전재고 미달 자재', 'NVL dưới tồn an toàn'), F.n(n), L('품목', 'mã'), n ? 'bad' : 'ok', n ? L('경고', 'Cảnh báo') : L('정상', 'Tốt'), L('원부자재 재고 → 발주 · 안전재고', 'Tồn NVL → Đặt hàng')); } });
   reg('kpi_proc', { ko: '공정 실적 (기준일)', vi: 'Sản lượng công đoạn (ngày)', dko: '고른 공정의 기준일 생산량 · 가동 설비 (설정에서 공정 선택)', dvi: 'Sản lượng ngày của công đoạn đã chọn', cat: 'kpi', w: 1, sizes: [1, 2], multi: true, defaults: { proc: 'ASM' },
     opts: [{ k: 'proc', ko: '공정', vi: 'Công đoạn', options: procOpts }],
     go: () => () => ERP.goto('production'),
@@ -107,15 +107,15 @@
     go: () => () => { ERP.state.prodTab = 'machines'; ERP.goto('production'); },
     render(ctx) { let run = 0, tot = 0; ERP.dashProcs().forEach(p => { const r = ctx.machRun(p.id); run += r; tot += Math.max(ctx.machTotal(p.id), r); });
       return ERP.kpi(L('가동 설비 (가동 / 전체)', 'Máy chạy (chạy / tổng)'), F.n(run) + ' / ' + F.n(tot), L('대', 'máy'), run ? 'ok' : 'neutral', tot ? F.n(run / tot * 100, 0) + '%' : '–', ctx.ref, tot ? run / tot * 100 : 0, 'ok'); } });
-  reg('kpi_neg', { ko: '마이너스 재고', vi: 'Tồn âm', dko: '합계가 마이너스인 품목 (원부자재 · 생산현장)', dvi: 'Mã có tồn âm (NVL · hiện trường)', cat: 'kpi', w: 1, sizes: [1, 2],
-    go: () => () => { ERP.state.matTab = 'mat'; ERP.state.stk_mat = Object.assign(ERP.state.stk_mat || {}, { status: 'neg', page: 0 }); ERP.goto('materials'); },
+  reg('kpi_neg', { ko: '마이너스 재고', vi: 'Tồn âm', dko: '합계가 마이너스인 품목 (원부자재 · 현장 재고)', dvi: 'Mã có tồn âm (NVL · hiện trường)', cat: 'kpi', w: 1, sizes: [1, 2],
+    go: () => () => { const rows = ERP.inv.rows(); const g = !rows.some(s => s.negative && ERP.inv.groupOf(s) === 'mat') && rows.some(s => s.negative && ERP.inv.groupOf(s) === 'floor') ? 'floor' : 'mat'; ERP.state['stk_' + g] = Object.assign(ERP.state['stk_' + g] || {}, { status: 'neg', page: 0 }); ERP.goStock(g); },
     render() { const rows = ERP.inv.rows(); const a = rows.filter(s => s.negative && ERP.inv.groupOf(s) === 'mat').length, b = rows.filter(s => s.negative && ERP.inv.groupOf(s) === 'floor').length;
-      return ERP.kpi(L('마이너스 재고', 'Tồn âm'), F.n(a + b), L('품목', 'mã'), a + b ? 'bad' : 'ok', L('원부자재 ', 'NVL ') + a, L('생산현장 ', 'Hiện trường ') + b); } });
+      return ERP.kpi(L('마이너스 재고', 'Tồn âm'), F.n(a + b), L('품목', 'mã'), a + b ? 'bad' : 'ok', L('원부자재 ', 'NVL ') + a, L('현장 재고 ', 'Hiện trường ') + b); } });
   reg('kpi_susp', { ko: '이동 누락 의심', vi: 'Nghi thiếu phiếu chuyển', dko: '창고 +, 공장 − (또는 반대)인 품목', dvi: 'Kho + / Xưởng − (hoặc ngược lại)', cat: 'kpi', w: 1, sizes: [1, 2],
-    go: () => () => { ERP.state.matTab = 'check'; ERP.goto('materials'); },
+    go: () => () => ERP.goStock('check'),
     render() { const n = ERP.inv.rows().filter(s => s.susp).length; return ERP.kpi(L('이동 누락 의심', 'Nghi thiếu phiếu chuyển'), F.n(n), L('품목', 'mã'), n ? 'warn' : 'ok', n ? L('자료 점검에서 정리', 'Xử lý ở Kiểm tra') : L('없음', 'Không có'), L('한쪽 +, 다른 쪽 −', 'Một bên +, bên kia −')); } });
   reg('kpi_post', { ko: '생산 반영 (재고)', vi: 'Cập nhật SX vào tồn', dko: '생산일보 → 재고 입고 · 부품 차감 건수와 해결할 항목', dvi: 'Số dòng nhập · trừ linh kiện từ báo cáo SX', cat: 'kpi', w: 1, sizes: [1, 2],
-    go: () => () => { ERP.state.matTab = 'post'; ERP.goto('materials'); },
+    go: () => () => ERP.goStock('post'),
     render() { const pp = ERP.inv.prodPost(); const d = pp.diag; const issues = d.notItem.size + d.noBom.size + d.missingPart.size + d.rawUnmatched.size + d.noConv.size;
       return ERP.kpi(L('생산 반영 (재고)', 'Cập nhật SX vào tồn'), F.n(d.prod), L('건 입고', 'dòng nhập'), issues ? 'warn' : 'ok', issues ? L('해결할 항목 ' + issues, 'Cần xử lý ' + issues) : L('정상', 'Tốt'), L('부품·원료 차감 ', 'Trừ linh kiện ') + F.n(d.use) + L('건', ' dòng')); } });
 
@@ -201,25 +201,25 @@
   // ===== stock
   reg('low_list', { ko: '안전재고 미달 자재', vi: 'NVL dưới tồn an toàn', dko: '안전재고 대비 가장 부족한 8품목', dvi: '8 mã thiếu nhiều nhất', cat: 'stock', w: 2, sizes: [2, 3, 4],
     render(ctx) { const list = ctx.low.slice().sort((a, b) => (a.bal / (a.safety || 1)) - (b.bal / (b.safety || 1))).slice(0, 8);
-      return box(L('안전재고 미달 자재', 'NVL dưới mức tồn an toàn'), h('a', { href: '#/materials', onclick: () => { ERP.state.matTab = 'reorder'; } }, L('발주 보기 →', 'Xem đặt hàng →')),
+      return box(L('안전재고 미달 자재', 'NVL dưới mức tồn an toàn'), h('a', { href: '#/materials', onclick: (e) => { e.preventDefault(); ERP.goStock('reorder'); } }, L('발주 보기 →', 'Xem đặt hàng →')),
         h('div', { class: 'list' }, list.length ? list.map(s => h('div', h('div', h('b', s.code), h('div', { class: 'sub' }, s.name)),
           h('div', { class: 'right' }, h('div', F.n(s.bal, 1) + ' ' + s.prim + ' / ' + F.n(s.safety)), ERP.chip(s.status === 'neg' ? 'bad' : 'warn', s.status === 'neg' ? L('마이너스', 'Âm') : L('미달', 'Thiếu'))))) : h('div', { class: 'empty' }, L('모든 자재가 안전재고 이상입니다', 'Tất cả NVL đạt mức an toàn')))); } });
-  reg('flow', { ko: '재고 · 공정 흐름', vi: 'Tồn kho · dòng chảy sản xuất', dko: '원재료 → 부품 → 스탬핑 → 조립 → 포장 단계별 재고 품목 수 (누르면 해당 재고 탭)', dvi: 'Số mã có tồn theo từng công đoạn', cat: 'stock', w: 2, sizes: [2, 3, 4],
+  reg('flow', { ko: '재고 · 공정 흐름', vi: 'Tồn kho · dòng chảy sản xuất', dko: '자재 → 부품 → 조립 → 포장 단계별 재고 품목 수 (누르면 해당 재고 메뉴)', dvi: 'Số mã có tồn theo từng công đoạn', cat: 'stock', w: 2, sizes: [2, 3, 4],
     render() {
       const INV = ERP.inv; const rowsS = INV.rows(); const by = new Map(INV.stageSummary(rowsS).map(x => [x.stage, x]));
       const neg = rowsS.filter(x => x.negative).length, susp = rowsS.filter(x => x.susp).length;
-      const flow = h('div', { class: 'flow' }, INV.STAGES.map((sg, i) => { const o = by.get(sg.code) || { items: 0, withStock: 0, negative: 0 }; return [i && ['WIP00', 'WIP11', 'WIP55', 'SG'].includes(sg.code) ? h('span', { class: 'arrow' }, '›') : null,
+      const flow = h('div', { class: 'flow' }, INV.STAGES.map((sg, i) => { const o = by.get(sg.code) || { items: 0, withStock: 0, negative: 0 }; return [i && ['WIP00', 'WIP55', 'SG'].includes(sg.code) ? h('span', { class: 'arrow' }, '›') : null,
         h('button', { type: 'button', class: 'st', style: { flexBasis: '104px', minHeight: '84px' }, onclick: () => ERP.openStock(sg.code) },
           h('b', { style: { fontSize: '12px' }, title: INV.stageName(sg.code) }, INV.labelShort('stage', sg.code)), h('div', { class: 'n', style: { fontSize: '16px' } }, F.n(o.withStock), h('small', ' / ' + F.n(o.items))), h('div', { class: 'fl' }, o.negative ? h('span', { style: { background: '#FBE6E4', color: '#9F1F18' } }, '−' + o.negative) : null))]; }));
-      return box(L('재고 · 공정 흐름', 'Tồn kho · dòng chảy sản xuất'), h('a', { href: '#/materials' }, L('품목·재고 →', 'Hàng hóa · Tồn kho →')), flow,
+      return box(L('재고 · 공정 흐름', 'Tồn kho · dòng chảy sản xuất'), h('a', { href: '#/floor' }, L('현장 재고 →', 'Tồn hiện trường →')), flow,
         h('div', { class: 'toolbar', style: { margin: '8px 0 0' } }, ERP.chip(neg ? 'bad' : 'ok', L('마이너스 ', 'Âm ') + F.n(neg)), ERP.chip(susp ? 'warn' : 'ok', L('이동 누락 의심 ', 'Nghi thiếu phiếu chuyển ') + F.n(susp)), h('span', { class: 'muted' }, L('숫자 = 재고 있는 품목 / 전체', 'Số = mã có tồn / tổng'))));
     } });
-  reg('floor_post', { ko: '생산현장 재고 반영 (7일)', vi: 'Cập nhật tồn hiện trường (7 ngày)', dko: '최근 7일 공정별 생산 입고 수량 · 부품 차감 건수 · 해결할 항목', dvi: 'Nhập SX · trừ linh kiện 7 ngày', cat: 'stock', w: 2, sizes: [2, 3, 4],
+  reg('floor_post', { ko: '현장 재고 반영 (7일)', vi: 'Cập nhật tồn hiện trường (7 ngày)', dko: '최근 7일 공정별 생산 입고 수량 · 부품 차감 건수 · 해결할 항목', dvi: 'Nhập SX · trừ linh kiện 7 ngày', cat: 'stock', w: 2, sizes: [2, 3, 4],
     render(ctx) {
       const pp = ERP.inv.prodPost(); const d = pp.diag; const days7 = []; for (let i = 6; i >= 0; i--) days7.push(F.addDays(ctx.ref, -i));
       const cell = {}; pp.rows.forEach(t => { if (days7.indexOf(t.date) < 0) return; const k = t.proc + '|' + t.date; const o = cell[k] = cell[k] || { in: 0, use: 0 }; if (t.kind === 'PROD') o.in++; else o.use++; });
       const issues = d.notItem.size + d.noBom.size + d.missingPart.size + d.rawUnmatched.size + d.noConv.size;
-      return box(L('생산현장 재고 반영 (최근 7일)', 'Cập nhật tồn hiện trường (7 ngày)'), h('a', { href: '#/materials', onclick: () => { ERP.state.matTab = 'post'; } }, L('생산 반영 →', 'Cập nhật SX →')),
+      return box(L('현장 재고 반영 (최근 7일)', 'Cập nhật tồn hiện trường (7 ngày)'), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('post'); } }, L('생산 반영 →', 'Cập nhật SX →')),
         ERP.simpleTable([{ label: L('공정', 'Công đoạn'), render: p => h('b', { style: { color: p.color } }, L(p.ko, p.vi)) }].concat(days7.map(dd => ({ label: F.md(dd), num: 1, render: p => { const o = cell[p.id + '|' + dd]; return o ? h('span', { title: L('입고 ', 'Nhập ') + o.in + L(' · 차감 ', ' · trừ ') + o.use }, ERP.chip('ok', '+' + o.in), o.use ? ' ' : '', o.use ? ERP.chip('warn', '−' + o.use) : '') : h('span', { class: 'muted' }, '–'); } }))), ERP.PROC, {}),
         h('p', { class: 'help' }, L('+ = 생산 입고 건수, − = 현장 부품 차감 건수 (원부자재 제외) · 기준일 ', '+ = số dòng nhập, − = số dòng trừ linh kiện (không trừ NVL) · ngày chốt ') + (d.open || '–') + (issues ? L(' · 해결할 항목 ' + issues + '종', ' · cần xử lý ' + issues) : ''))); } });
   reg('fresh', { ko: '자료 최신 여부', vi: 'Độ mới của dữ liệu', dko: '수불 · 생산일보 · ECOUNT · 수주 자료의 마지막 날짜', dvi: 'Ngày gần nhất của từng loại dữ liệu', cat: 'etc', w: 2, sizes: [2, 3, 4],
@@ -233,7 +233,7 @@
   reg('shortcuts', { ko: '바로가기', vi: 'Lối tắt', dko: '자주 하는 일 (일보 입력 · 수불 입력 · 자료 올리기 · 수주 등록 · AI 비서)', dvi: 'Việc hay làm', cat: 'etc', w: 1, sizes: [1, 2],
     render() { const b = (icon, ko, vi, fn) => h('button', { type: 'button', class: 'scut', onclick: (e) => { e.stopPropagation(); fn(); } }, h('span', icon), L(ko, vi));
       return box(L('바로가기', 'Lối tắt'), null, h('div', { class: 'scuts' },
-        b('📝', '일보 입력', 'Nhập báo cáo', () => { ERP.state.prodTab = 'entry'; ERP.goto('production'); }), b('📦', '수불 입력', 'Nhập phiếu', () => { ERP.state.matTab = 'entry'; ERP.goto('materials'); }),
+        b('📝', '일보 입력', 'Nhập báo cáo', () => { ERP.state.prodTab = 'entry'; ERP.goto('production'); }), b('📦', '수불 입력', 'Nhập phiếu', () => ERP.goStock('entry')),
         b('⬆', '자료 올리기', 'Tải dữ liệu', () => { ERP.state.dataTab = 'import'; ERP.goto('data'); }), b('🧾', '수주 관리', 'Đơn hàng', () => ERP.goto('orders')),
         b('🔩', '조립 BOM', 'BOM lắp ráp', () => ERP.goto('bom', { tab: 'asm' })), b('✦', 'AI 비서', 'Trợ lý AI', () => ERP.ai && ERP.ai.open && ERP.ai.open()))); } });
   reg('memo', { ko: '메모', vi: 'Ghi chú', dko: '포스트잇처럼 적어 두는 메모 (여러 개 가능)', dvi: 'Ghi chú dán (nhiều cái)', cat: 'etc', w: 1, sizes: [1, 2, 3, 4], multi: true, defaults: { text: '' },

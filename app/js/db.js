@@ -199,7 +199,7 @@
       const od = {}; DB.rows('stock_open').forEach(r => { const sc = r.scope === 'FAC' ? 'FAC' : 'WH'; if (r.date && (!od[sc] || r.date > od[sc])) od[sc] = r.date; });
       DB.meta.openDate = od; await DB.saveMeta();
     },
-    /** 11차(v1.6.0): WIP21 · 31 … 품목은 가공 배럴(WIPx1, 배럴 계열) — 예전 판이 '기타(ETC)'로 저장한 단계를 다시 매긴다 */
+    /** 11차(v1.6.0): WIP21 · 31 … 품목은 배럴 계열(WIPx1) — 예전 판이 '기타(ETC)'로 저장한 단계를 다시 매긴다 */
     async upgradeV11() {
       if (DB.meta.v11) return;
       const INV = ERP.inv; let n = 0;

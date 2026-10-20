@@ -246,8 +246,8 @@
         opts.map(c => h('option', { value: c, selected: c === cur }, c + ' · ' + String((IT.get(c) || {}).name || '').slice(0, 16))), none ? null : h('option', { value: '', selected: cur === '' }, L('— 빼기 —', '— bỏ —')));
       return h('td', sel, p.conf === 'review' ? h('div', { style: { fontSize: '11px', color: TONE.review } }, L('후보 ', 'ứng viên ') + opts.length) : (none ? h('div', { style: { fontSize: '11px', color: TONE.none } }, L('비슷한 코드 ', 'mã gần giống ') + opts.length) : null));
     };
-    host.append(
-      h('p', { class: 'help', style: { marginTop: 0 } }, L('ECOUNT 품목코드로 조립품(펜)마다 들어가는 부품을 찾아 BOM을 만듭니다. 같은 제품군 + 같은 색 이름 + 코드 숫자로 찾고, 제품군에 하나뿐인 부품(MINI HOLDER · MINI SPOON 등)은 공용으로 씁니다. 초록 = 확실, 노랑 = 확인 필요(후보 중 선택), 빨강 = 못 찾음. 적용하면 "품목 · 구성 (BOM 설정)"에 저장되고, 조립 일보를 올리면 조립 수량만큼 이 부품들이 생산현장 재고에서 차감됩니다. 직접 만든 BOM은 바꾸지 않습니다.',
+    ERP.put(host,
+      h('p', { class: 'help', style: { marginTop: 0 } }, L('ECOUNT 품목코드로 조립품(펜)마다 들어가는 부품을 찾아 BOM을 만듭니다. 같은 제품군 + 같은 색 이름 + 코드 숫자로 찾고, 제품군에 하나뿐인 부품(MINI HOLDER · MINI SPOON 등)은 공용으로 씁니다. 초록 = 확실, 노랑 = 확인 필요(후보 중 선택), 빨강 = 못 찾음. 적용하면 "품목 · 구성 (BOM 설정)"에 저장되고, 조립 일보를 올리면 조립 수량만큼 이 부품들이 현장 재고에서 차감됩니다. 직접 만든 BOM은 바꾸지 않습니다.',
         'Tìm linh kiện của từng bút lắp ráp theo mã ECOUNT (cùng dòng SP + cùng tên màu + số trong mã; linh kiện duy nhất của dòng như MINI HOLDER dùng chung). Xanh = chắc chắn, vàng = cần chọn, đỏ = không tìm thấy. Áp dụng → lưu vào "Cấu thành (BOM)"; báo cáo lắp ráp sẽ trừ linh kiện theo số lượng. BOM tự tạo không bị thay đổi.')),
       h('div', { class: 'toolbar' },
         h('div', { class: 'seg' }, [['asm', L('조립 BOM (펜 → 부품)', 'BOM lắp ráp (bút → linh kiện)')], ['stp', L('스탬핑 BOM (스탬핑 배럴 → 배럴)', 'BOM ép nhũ (barrel nhũ → barrel)')]].map(o => h('button', { class: 'btn sm' + (st.kind === o[0] ? ' primary' : ''), onclick: () => { st.kind = o[0]; st.page = 0; st.stat = ''; ERP.render(); } }, o[1]))),

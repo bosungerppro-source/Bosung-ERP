@@ -424,9 +424,11 @@
     const q = parse(text), c = ctx(q.lang), I = q.intent, s = c.s; let X = [], actions = [];
     const P = (t) => [B.p(t)];
     const pages = {
-      orders: act(c, '수주 관리 열기', 'Mở Đơn hàng', go('orders')), materials: act(c, '품목·재고 열기', 'Mở Hàng hóa · Tồn kho', go('materials', () => { ERP.state.matTab = 'stock'; })),
-      reorder: act(c, '발주 필요 목록 열기', 'Mở danh sách cần đặt', go('materials', () => { ERP.state.matTab = 'reorder'; ERP.state.reo = Object.assign(ERP.state.reo || {}, { view: 'list' }); })),
+      orders: act(c, '수주 관리 열기', 'Mở Đơn hàng', go('orders')), materials: act(c, '원부자재 재고 열기', 'Mở Tồn NVL', () => ERP.goStock('mat')), floor: act(c, '현장 재고 열기', 'Mở Tồn hiện trường', () => ERP.goStock('floor')),
+      reorder: act(c, '발주 필요 목록 열기', 'Mở danh sách cần đặt', () => { ERP.state.reo = Object.assign(ERP.state.reo || {}, { view: 'list' }); ERP.goStock('reorder'); }),
       production: act(c, '생산 관리 열기', 'Mở Sản xuất', go('production')), dashboard: act(c, '종합 현황 열기', 'Mở Tổng quan', go('dashboard')) };
+    // 12차: 재고는 메뉴가 둘 (원부자재 재고 / 현장 재고) — 첫 품목이 속한 쪽을 연다
+    const stockPage = (rows) => { const it = rows && rows[0] && ERP.inv.item(rows[0].code); return it && ERP.inv.groupOf(Object.assign({ m: it }, ERP.inv.info(it))) === 'floor' ? pages.floor : pages.materials; };
     switch (I.name) {
       case 'briefing': X = fmtBriefing(T.briefing(), c); actions = [pages.dashboard, pages.orders, pages.reorder]; break;
       case 'po': {
@@ -452,7 +454,7 @@
         let r = T.material_stock({ query: I.query, limit: 12 }), used = I.query;
         if (!r.total && I.parts && I.parts.length > 1) for (const p of I.parts.slice().sort((a, b) => b.length - a.length)) { const t = T.material_stock({ query: p, limit: 12 }); if (t.total) { r = t; used = p; break; } }
         if (!r.total) { X = P(s(`"${I.query}"에 맞는 품목을 찾지 못했습니다. 품목코드(예: R-101, BM09)나 ERP CODE·이름의 일부로 다시 물어보세요.`, `Không tìm thấy mã phù hợp "${I.query}". Hãy thử mã (vd: R-101, BM09), ERP CODE hoặc một phần tên.`)); break; }
-        X = fmtStockList(r, s('재고', 'Tồn kho') + ' · ' + used, c); actions = [pages.materials]; const top = r.rows[0]; if (top) actions.unshift(act(c, top.code + ' 상세', 'Chi tiết ' + top.code, () => ERP.materialDetail(top.code))); break; }
+        X = fmtStockList(r, s('재고', 'Tồn kho') + ' · ' + used, c); actions = [stockPage(r.rows)]; const top = r.rows[0]; if (top) actions.unshift(act(c, top.code + ' 상세', 'Chi tiết ' + top.code, () => ERP.materialDetail(top.code))); break; }
       case 'reorder': { const r = T.reorder({ limit: 15 }); X = fmtReorder(r, c); actions = [pages.reorder]; break; }
       case 'production': {
         const per = q.period; let res = T.production_summary({ from: per.from, to: per.to, process: q.process || undefined }), fb = '';
@@ -466,7 +468,7 @@
       case 'thanks': X = P(s('도움이 되었다니 다행입니다. 더 필요한 게 있으면 말씀하세요.', 'Rất vui được giúp bạn. Cần gì thêm cứ hỏi nhé.')); break;
       case 'search': {
         const parts = (I.parts || []).slice().sort((a, b) => b.length - a.length); let done = false;
-        for (const p of parts) { const m = T.material_stock({ query: p, limit: 12 }); if (m.total && m.total <= 30) { X = fmtStockList(m, s('재고', 'Tồn kho') + ' · ' + p, c); actions = [pages.materials]; done = true; break; } }
+        for (const p of parts) { const m = T.material_stock({ query: p, limit: 12 }); if (m.total && m.total <= 30) { X = fmtStockList(m, s('재고', 'Tồn kho') + ' · ' + p, c); actions = [stockPage(m.rows)]; done = true; break; } }
         if (!done) for (const p of parts) { const r = T.find_orders({ query: p, status: 'all', limit: 12 }); if (r.total) { X = fmtOrders(r, p, c); actions = [pages.orders]; done = true; break; } }
         if (!done) X = fmtHelp(c, s('질문을 정확히 이해하지 못했습니다.', 'Tôi chưa hiểu rõ câu hỏi.'));
         break; }

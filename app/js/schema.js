@@ -304,16 +304,6 @@
       { k: 'src', ko: '출처', vi: 'Nguồn', t: 't' },
     ] },
 
-    // 비교용 ECOUNT 재고 (기초재고 이후에 올린 재고현황)
-    ecount_snap: { ko: 'ECOUNT 재고 (비교용)', vi: 'Tồn ECOUNT (đối chiếu)', nat: ['date', 'scope', 'code'], sort: ['date', -1], cols: [
-      { k: 'date', ko: '기준일', vi: 'Ngày', t: 'd', list: 1, req: 1 },
-      { k: 'scope', ko: '범위', vi: 'Phạm vi', t: 's', list: 1, opts: () => ERP.SCOPES.map(x => ({ v: x.v, ko: x.ko, vi: x.vi })) },
-      { k: 'code', ko: '품목코드', vi: 'Mã hàng', t: 't', list: 1 },
-      { k: 'qty', ko: '재고수량', vi: 'Số lượng', t: 'n', list: 1 },
-      { k: 'sets', ko: 'Số Set', vi: 'Số Set', t: 'n' },
-      { k: 'pcs', ko: 'Số PCS', vi: 'Số PCS', t: 'n' },
-    ] },
-
     // 업로드 이력
     uploads: { ko: '업로드 이력', vi: 'Lịch sử tải lên', nat: [], sort: ['at', -1], cols: [
       { k: 'at', ko: '시각', vi: 'Thời điểm', t: 't', list: 1 },

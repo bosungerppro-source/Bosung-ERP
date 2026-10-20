@@ -32,11 +32,12 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - 대시보드/배지는 PO 단위(`C.poGroups`), 라인 단위는 `C.orders`.
 
 ### 3. 화면
-종합 현황(7차: 위젯) / 수주 관리(진행률·납기 달력·상세·월별×품목군 표) / 생산 관리(일보 조회·입력·일별 생산수량·설비) / **품목·재고**(7차: 원부자재 · 생산현장 · 생산 반영 · 수불 입력 · 수불 내역 · 발주·안전재고 · 외주 · ECOUNT 비교 · 자료 점검 · 코드 사전 · 마스터 · 예시 자료) / 제품·BOM·배합(MRP 소요량 계산 · 조립 BOM 자동 구성) / 엑셀·구글 연동 / 설정.
+종합 현황(7차: 위젯) / 수주 관리(진행률·납기 달력·상세·월별×품목군 표) / 생산 관리(일보 조회·입력·일별 생산수량·설비) / **품목**(12차: 품목 마스터 · 코드 사전 · 자료 점검 · 예시 자료) / **현장 재고**(12차: 현장 재고 · 생산 반영 · 수불 입력 · 수불 내역) / **원부자재 재고**(12차: 원부자재 재고 · 수불 입력 · 수불 내역 · 발주·안전재고 · 외주) / 제품·BOM·배합(MRP 소요량 계산 · 조립 BOM 자동 구성) / 엑셀·구글 연동 / 설정.
 
 ### 4. 도메인 규칙
 - 재고(6차) = ECOUNT 기초재고(기준일) + 기준일 이후 수불(입고·출고·이동·조정) + 생산일보 자동 반영(입고·BOM 차감). 범위는 창고 / 공장 2묶음. 자세한 규칙은 아래 2-5.
 - **11차부터**: 생산 반영의 BOM 차감은 현장 재고(반제품 · 완제품)만 — 원부자재(RM · SM · CM)는 절대 차감하지 않는다. 공정 중(WIP 단계) 품목은 현장 실사(TỒN KHO → `grp: 'floor'`)가 기초 · 기준일 (원부자재는 ECOUNT). 배럴 계열 = WIP01 · WIP11 · WIPx1. 아래 2-10.
+- **12차부터**: 메뉴도 셋 — 품목 / 현장 재고 / 원부자재 재고 (수불 입력 · 수불 내역 · 배지도 따로). ECOUNT 비교는 없앴다 (2026-11 부터 ECOUNT 를 쓰지 않음). 확인되지 않은 코드 이름은 쓰지 않고 코드만 보인다. 아래 2-11.
 - 안전재고 상태: 정상 / 임박(<120%) / 미달 / 마이너스 / 기준없음.
 - 수주 상태: 완료 / 납기경과 / 생산중 / 대기. 포장 실적(set)은 포장일보의 PO 번호로 자동 집계.
 - 배합표 coef = 제품 1개당 원료 g. 원료 소요 kg = 수량 × coef ÷ 1000. 수량은 색상수로 균등 배분.
@@ -92,21 +93,21 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 ### 2-5. 6차: ECOUNT 기준 품목 · 재고 (v1.1.0, 2026-10-16)
 자세한 결정·숫자·검증표는 `docs/PROMPT_v6_ECOUNT.md`.
 
-**결정**: 품목·창고·기초재고는 ECOUNT 자료(2026-10-16)로 다시 구성한다. 재고의 기준은 이 ERP다(ECOUNT = 기초재고 + 비교용). 범위 2묶음 창고(WH) / 공장(FAC). 수불은 엑셀 업로드 + 화면 입력. 생산일보는 입고 + BOM 차감. 예전 샘플은 행 단위 "예시"로 남긴다.
+**결정**: 품목·창고·기초재고는 ECOUNT 자료(2026-10-16)로 다시 구성한다. 재고의 기준은 이 ERP다(ECOUNT = 기초재고 + 비교용 — 12차에서 비교는 없앰). 범위 2묶음 창고(WH) / 공장(FAC). 수불은 엑셀 업로드 + 화면 입력. 생산일보는 입고 + BOM 차감. 예전 샘플은 행 단위 "예시"로 남긴다.
 
 **파일 (로드 순서: schema, db, calc, inv, ui, xl, ecount, p_dashboard, p_orders, p_production, p_stock, p_bom, p_data, assistant_tools, assistant_local, assistant, main)**
 - `app/js/inv.js` 재고 엔진 + ERP CODE 사전. `C.stock(upTo)` 를 덮어쓴다(옛 계산은 `C.stockLegacy`). 반환 형식은 그대로(code, m, name, prim, bal, safety, status …)이고 `by{WH,FAC}`, `open`, `sets`, `pcs`, `negative`, `susp`(이동 누락 의심), `stage/line/sub/cat`, `hidden` 이 더해졌다.
 - `app/js/ecount.js` ECOUNT 5종 + 수불 양식 detector/job. `XL.addDetector` 로 앞에 끼워 넣고, job 은 `apply`/`preview`/`modes()` 훅을 가질 수 있다.
-- `app/js/p_stock.js` 품목·재고 화면, `ERP.itemDetail(code)` 품목 상세(수불부·쓰이는 곳·관련 PO).
-- 표: `items`(통합 품목, 키 code) · `warehouses` · `code_dict`(level+parent+code) · `stock_open`(scope+code) · `stock_tx` · `ecount_snap` · `uploads`.
+- `app/js/p_stock.js` 품목 · 현장 재고 · 원부자재 재고 화면 (12차: 메뉴 3개, `ERP.goStock(탭)`), `ERP.itemDetail(code)` 품목 상세(수불부·쓰이는 곳·관련 PO).
+- 표: `items`(통합 품목, 키 code) · `warehouses` · `code_dict`(level+parent+code) · `stock_open`(scope+code) · `stock_tx` · `uploads` (`ecount_snap` 은 12차에서 없앰).
 
 **도메인 규칙**
-- ERP CODE = `단계-제품군(분류)-세부-품목코드`. 단계 15칸 흐름: RM → SM → CM → WIP00(심) → WIP01(배럴) → WIP02(노즈콘) → WIP03(홀더) → WIP04(스푼) → WIPx6 → WIPx5 → WIP11(스탬핑) → WIP55 → WIP(조립) → SG(마니라) → FG(박스, CT). + ETC(코드 없음), TEST(T* 테스트, 숨김). FD 는 FG 로 본다.
-- 이름 = 내장 사전 + `code_dict` 표(표가 이김). 추정 이름은 `guessed` 로 "확인 필요" 표시.
+- ERP CODE = `단계-제품군(분류)-세부-품목코드`. 단계 15칸 흐름: RM → SM → CM → WIP00(심) → WIP01(배럴) → WIP02(노즈콘) → WIP03(홀더) → WIP04(스푼) → WIPx6 → WIPx5 → WIP11 → WIP55 → WIP(조립) → SG(마니라) → FG(박스, CT). + ETC(코드 없음), TEST(T* 테스트, 숨김). FD 는 FG 로 본다.
+- 이름 = 내장 사전 + `code_dict` 표(표가 이김). 확인되지 않은 코드(`guessed`)는 12차부터 이름을 비워 두고 코드만 보인다 ("이름 미정"). 이름은 사용자가 코드 사전에 넣거나 ERP CODE 설명 파일로 정한다.
 - 수불 효과: IN → to +, OUT → from −, MOVE → from − / to +, ADJ → ±, PROD → 공장 +, USE → 공장 −. 기준일 당일까지의 수불은 기초재고에 들어 있다고 본다.
 - 생산 반영(`prodPost` = in_bom / in / off)은 **저장하지 않고** `prod_log` 에서 매번 계산 → 같은 일보를 다시 올려도 중복 없음. 단위: CT 는 `set_per_ct` 필요, SET 은 set, kg 는 weight_kg, 그 외 pcs. BOM 찾는 순서: `bom_lines` → 조립(색상 코드 → 배럴·노즈콘·리필·홀더·스푼) → 리필(배합표 g/개 → kg) → 포장(세트의 색상별 1개). 진단(BOM 없음 · 품목코드 아님 · 환산 없음 · 원료명 미연결)은 수불 내역 탭에 보인다.
 - 이동 누락 의심 = 한 범위 +, 다른 범위 −. 자료 점검 탭의 [이동 전표 만들기] 로 정리한다.
-- ECOUNT 재고현황 첫 업로드 = 기초재고, 그 뒤는 "비교만"이 기본(재설정은 확인 필수). 품목등록 재업로드는 지우지 않고 "숨김 후보"(missing)만 표시하고, ECOUNT 안전재고가 비어 있으면 ERP 값을 유지한다.
+- ECOUNT 재고현황 업로드 = 기초재고 (다시 올리면 그 범위의 기초재고 재설정 — 확인 필수, 12차에서 "비교만" 은 없앰). 품목등록 재업로드는 지우지 않고 "숨김 후보"(missing)만 표시하고, ECOUNT 안전재고가 비어 있으면 ERP 값을 유지한다.
 - 예시 데이터: 시드의 `_meta.sample` 표 행에 `_ex:1`. `ERP.sampleCount(t)` / `ERP.isSample(t)` / `ERP.sampleChip(t)`. 손으로 고치거나(`DB.update`) 업로드로 갱신된(`DB.upsert`) 행은 `_ex` 가 지워진다. 설정의 일괄 삭제는 `_ex` 행만 지운다.
 - 5차 데이터 업그레이드: `DB.init` 에서 `meta.v6` 이 없으면 `DB.upgradeV6()` — 없는 품목코드만 추가, 빈 표(warehouses·code_dict·stock_open·uploads)만 채움, 5차 샘플과 같은 행에만 `_ex`. 5차 백업 복원 후에도 실행된다.
 
@@ -185,6 +186,21 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **원부자재는 생산 반영으로 절대 차감하지 않는다**: `INV.postRows` 는 원부자재(`isMatItem` = `INV.groupOf` 'mat') USE 를 만들지 않고, 사출 수지(`raw_kg`) · 배합표 원료(recipe kid)도 차감하지 않는다 → `diag.matSkip` (코드 · 원료 이름별 행 · 수량)에만 남긴다. 8차의 "사출 원료 차감 · 원료 연결로 차감" 규칙은 이것으로 바뀌었다 (원료 연결 `code_map raw` 는 진단에 이름을 붙일 때만 쓴다). 원부자재 재고는 수불(입고 · 출고 · 이동 · 조정)로만 바뀐다.
 - **공정 중 재고 = 현장 실사**: 인식기 `floor_count` (머리글 `Mã mặt hàng · ERP CODE · SẢN XUẤT`, 시트마다 TOTAL). `stock_open` 행에 `grp: 'floor'` · scope FAC · `file` · `sheet`, 기준일 `meta.openDate.FLOOR` (파일 이름의 날짜, 화면에서 고칠 수 있음). WIP 단계(`INV.WIP_STAGES`)만 받고 원부자재 · 포장품 · ERP CODE 없는 행은 제외로 보인다. 품목 마스터에 없으면 ERP CODE 로 만든다(`src: 'floor'`).
 - **현장 실사가 있으면** 공정 중 품목의 기초 = 현장 실사 행만 (ECOUNT 의 같은 품목 숫자 무시), 기준일 = 현장 실사일 (`INV.openDateFor(item)` — 수불 · 생산 반영 · 수불부 · 수불 입력 경고 모두). ECOUNT 재고현황 "기초재고로 설정" 은 `grp: 'floor'` 행을 지우지 않는다. 현장 실사를 다시 올리면 다른 파일 · 기준일의 현장 실사 행을 모두 바꾼다 (같은 파일의 시트는 차례로 더함).
-- **배럴 계열**: `WIP[2-9]1` → 단계 `WIPx1` (가공 배럴), `INV.BARREL_STAGES = WIP01 · WIP11 · WIPx1`. 조립 BOM 배럴 후보 순서 WIP11 → WIPx1 → WIP01, 스탬핑 일보 제안 WIP11 · WIPx1. `DB.upgradeV11` 이 예전에 ETC 로 저장한 WIPn1 품목을 다시 분류.
+- **배럴 계열**: `WIP[2-9]1` → 단계 `WIPx1` (이름 미정 — 화면에는 WIP21·31…), `INV.BARREL_STAGES = WIP01 · WIP11 · WIPx1`. 조립 BOM 배럴 후보 순서 WIP11 → WIPx1 → WIP01, 스탬핑 일보 제안 WIP11 · WIPx1. `DB.upgradeV11` 이 예전에 ETC 로 저장한 WIPn1 품목을 다시 분류.
 - **BOM 사용량(배합표)**: 인식기 `recipes_usage` (`components` 시트, 첫 칸 `code` + `item code` + `color`), 기본 전체 교체, 같은 code 는 첫 행, 글자 열 = `note`, `열N` · 빈 열 제외, `meta.recipeSrc` 기록(배합표 탭에 표시). 소요량 · 신고서용 — 재고 차감 없음. `XL.apply` 는 반영 뒤 `job.after` 를 부른다, 업로드 화면은 `job.onFile` 을 부른다.
 - 시험: `npm run test:v11` 50개 + v9 · v8 · v7 · assistant (사출 원료 · 원료 연결 기대값을 11차 규칙으로 고침).
+
+### 2-11. 12차: 메뉴 3개 (품목 / 현장 재고 / 원부자재 재고) · ECOUNT 비교 없앰 · 이름 미정은 코드만 (v1.7.0, 2026-10-20)
+자세한 요청 · 결정은 `docs/PROMPT_v12_MENUS.md`, 작업 기록은 `docs/history/v12_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **메뉴 3개**: `ERP.pages.items` (품목: master · codes · check · legacy), `ERP.pages.floor` (현장 재고: floor · post · fentry · fledger), `ERP.pages.materials` (원부자재 재고: mat · entry · ledger · reorder · outsource). 메뉴마다 고른 탭은 `ERP.state.itemTab` · `floorTab` · `mtab`. 새 재고 탭을 만들면 `p_stock.js` 의 `MENUS` · `TAB_PAGE` · `TAB_FN` 에 넣는다.
+- **다른 화면에서 재고 탭으로**: `ERP.goStock(탭)` (그 탭이 있는 메뉴를 연다), `ERP.openStock(단계)` (단계 그룹의 메뉴를 그 단계 필터로). 예전 방식 `ERP.state.matTab = '탭'; ERP.goto('materials')` 도 맞는 메뉴로 보낸다 (`'stock'` → 단계 그룹, `'compare'` → 원부자재 재고).
+- **현장 / 원부자재는 끝까지 따로**: 수불 입력 (`txe` / `txe_floor`) · 수불 내역 (`txl` / `txl_floor`) · 재고 표 (`stk_mat` / `stk_floor`) · 왼쪽 메뉴 배지 · 품목 목록(datalist) 모두 `INV.groupOf` 로 나눈다. 다른 쪽 품목은 입력에서 막는다. 생산 반영 자동 행은 현장 재고 수불 내역에만. 발주 · 안전재고는 원부자재만.
+- **ECOUNT 비교 없음**: `ecount_snap` 표 · 비교 탭 · 재고현황 "비교만" 방식을 지웠다. 다시 만들지 않는다 (ECOUNT 는 2026-11 부터 쓰지 않음). ECOUNT 파일은 처음 자료(품목 · 창고 · ERP CODE 설명 · 기초재고)를 옮길 때만.
+- **이름을 짐작하지 않는다**: 내장 사전에서 확인되지 않은 코드(`guessed`)는 이름이 빈칸이고 `INV.label` · `labelShort` 는 코드를 돌려준다 (묶음 단계는 `INV.stageCodeShow`: WIP06·x6 · WIP15·25·35 · WIP21·31…). 화면 글 · 시험 이름 · 문서에도 짐작한 이름을 쓰지 않는다. 물음표(?) 표시도 쓰지 않는다. 이름은 사용자에게 묻거나 사용자가 코드 사전 · ERP CODE 설명 파일로 넣는다.
+- **코드 사전 저장**: guessed 줄은 빈 이름에서 시작, 이름을 넣으면 `guessed: false`, 이름이 모두 비면 `guessed: true`. 저장 뒤 다시 그리지 않는다 (입력 포커스 유지).
+- **자료 올리기 결과 버튼**: 현장 실사 · 생산일보 → 현장 재고, 재고현황 · 수불 → 원부자재 재고, 품목 · 창고 · 코드 → 품목.
+- **화면에 "null" 글자 금지**: `Element.append` · `replaceChildren` 에 null 을 넘기면 "null" 글자가 붙는다. 빈 값이 섞일 수 있으면 `ERP.put(el, ...)` (빈 값은 빼고 붙임) 를 쓰거나 `.filter(Boolean)` 으로 거른다. `h()` 는 null 을 건너뛴다. 공용 표(`ERP.grid`)의 빈 표 · 재고 · 수불 내역 · 외주 · 예시 자료 · 조립 BOM 에서 "null" 이 보이던 것을 12차에서 고쳤다.
+- 물음표 표시도 쓰지 않는다: 이동 누락 의심은 "이동 누락" (말풍선에 "이동 누락 의심").
+- 시험: `npm run test:v12` 120개 (모든 화면 null · undefined 글자 검사 포함) + v11 · v9 · v8 · v7 · assistant (v7 의 ECOUNT 비교 시험은 "비교 없음 · 기초재고 재설정 경고" 로 바꿈).

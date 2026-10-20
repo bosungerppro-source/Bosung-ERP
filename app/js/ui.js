@@ -122,7 +122,7 @@
           (st.page + 1) + ' / ' + pages,
           h('button', { class: 'btn', disabled: st.page >= pages - 1, onclick: () => { st.page++; render(); } }, '›'),
           h('select', { class: 'inp', style: { minHeight: '32px' }, onchange: (e) => { st.ps = Number(e.target.value); st.page = 0; render(); } }, [25, 50, 100, 200].map(n => h('option', { value: n, selected: st.ps === n }, n + L('개씩', '/trang'))))));
-      el.replaceChildren(tb, total ? body : h('div', { class: 'empty' }, L('데이터가 없습니다.', 'Không có dữ liệu.')), total ? pager : null);
+      el.replaceChildren(...[tb, total ? body : h('div', { class: 'empty' }, L('데이터가 없습니다.', 'Không có dữ liệu.')), total ? pager : null].filter(Boolean));   // null 을 넘기면 "null" 글자가 붙는다
     }
     render();
     return { el, refresh: render, state: st };

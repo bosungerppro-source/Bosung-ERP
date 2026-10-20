@@ -7,7 +7,9 @@
     { id: 'dashboard', ko: '종합 현황', vi: 'Tổng quan', icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
     { id: 'orders', ko: '수주 관리', vi: 'Đơn hàng (PO)', icon: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h6' },
     { id: 'production', ko: '생산 관리', vi: 'Sản xuất', icon: 'M3 20V11l6 4v-4l6 4V5h4v15z' },
-    { id: 'materials', ko: '품목 · 재고', vi: 'Hàng hóa · Tồn kho', icon: 'M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8' },
+    { id: 'items', ko: '품목', vi: 'Mặt hàng', icon: 'M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h11' },
+    { id: 'floor', ko: '현장 재고', vi: 'Tồn hiện trường', icon: 'M12 3l9 4-9 4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4' },
+    { id: 'materials', ko: '원부자재 재고', vi: 'Tồn NVL', icon: 'M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8' },
     { id: 'bom', ko: '제품 · BOM · 배합', vi: 'Sản phẩm · BOM', icon: 'M5 4h14v4H5zM5 10h6v10H5zM13 10h6v4h-6zM13 16h6v4h-6z' },
     { sep: true, ko: '데이터', vi: 'Dữ liệu' },
     { id: 'data', ko: '엑셀 · 구글 연동', vi: 'Excel · Google', icon: 'M12 3v12M7 10l5 5 5-5M5 21h14' },
@@ -54,7 +56,7 @@
   function badge(id) {
     let n = 0, tone = '#C77700';
     try {
-      if (id === 'materials') n = Array.from(ERP.calc.stock().values()).filter(s => s.status === 'low' || s.status === 'neg').length;
+      if (id === 'materials' || id === 'floor') { const g = id === 'floor' ? 'floor' : 'mat'; n = Array.from(ERP.calc.stock().values()).filter(s => (s.status === 'low' || s.status === 'neg') && ERP.inv.groupOf(s) === g).length; }
       else if (id === 'orders') { n = ERP.calc.poGroups().filter(o => o.st === 'late' && o.dday !== null && o.dday >= -30).length; tone = '#B3261E'; }
     } catch (e) { n = 0; }
     return n ? h('em', { style: { marginLeft: 'auto', fontStyle: 'normal', fontSize: '11px', fontWeight: 700, background: tone, color: '#fff', borderRadius: '10px', padding: '1px 7px' } }, n > 99 ? '99+' : n) : null;
@@ -71,7 +73,7 @@
       const po = DB.rows('po').filter(p => has(p.po_no, p.item_no, p.customer)).slice(0, 8);
       if (po.length) groups.push([L('수주', 'Đơn hàng'), po.map(p => [p.po_no + ' · ' + (p.customer || '') + ' · ' + (p.item_no || ''), F.d(p.due) || '', () => go('orders')])]);
       const mt = ERP.inv.search(q, 10);
-      if (mt.length) groups.push([L('품목 · 재고', 'Hàng hóa · Tồn kho'), mt.map(m => { const s = ERP.calc.stock().get(m.code); return [m.code + ' · ' + (m.name || ''), (m.erp_code || '') + (s ? ' · ' + F.n(s.bal, s.prim === 'kg' ? 1 : 0) + ' ' + s.prim : ''), () => { document.querySelector('.modal-back') && document.querySelector('.modal-back').remove(); ERP.itemDetail(m.code); }]; })]);
+      if (mt.length) groups.push([L('품목', 'Mặt hàng'), mt.map(m => { const s = ERP.calc.stock().get(m.code); return [m.code + ' · ' + (m.name || ''), (m.erp_code || '') + (s ? ' · ' + F.n(s.bal, s.prim === 'kg' ? 1 : 0) + ' ' + s.prim : ''), () => { document.querySelector('.modal-back') && document.querySelector('.modal-back').remove(); ERP.itemDetail(m.code); }]; })]);
       const rt = Array.from(new Set(DB.rows('bom').filter(b => has(b.retail_no, b.color_code, b.color_name)).map(b => b.retail_no))).slice(0, 8);
       if (rt.length) groups.push([L('제품 / BOM (MRP로 이동)', 'Sản phẩm / BOM (sang MRP)'), rt.map(r => [r, '', () => go('bom', { tab: 'mrp', retail: r, qty: 0 })])]);
       out.append(...(groups.length ? groups.map(g => h('div', { style: { marginBottom: '10px' } }, h('div', { class: 'sub', style: { fontWeight: 700, margin: '4px 0' } }, g[0]), g[1].map(r => h('div', { class: 'click', style: { display: 'flex', justifyContent: 'space-between', padding: '7px 8px', borderRadius: '8px', cursor: 'pointer' }, onmouseenter: (e) => { e.currentTarget.style.background = '#F4F6F9'; }, onmouseleave: (e) => { e.currentTarget.style.background = ''; }, onclick: r[2] }, h('span', r[0]), h('span', { class: 'muted' }, r[1]))))) : [h('div', { class: 'empty' }, L('검색 결과가 없습니다', 'Không có kết quả'))]));

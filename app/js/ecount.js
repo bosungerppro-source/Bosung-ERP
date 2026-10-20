@@ -157,10 +157,9 @@
   });
   EC.stockJob = function (rows, o) {
     const scope = EC.scopeFromLabel(o.scopeLabel);
-    const hasOpen = scope ? DB.rows('stock_open').some(r => r.scope === scope) : false;
     const job = { table: 'stock_open', rows, custom: 'stock', prio: 3, kind: 'ecount_stock', scope, scopeLabel: o.scopeLabel || '', date: o.date, totals: o.totals,
-      mode: hasOpen ? 'compare' : 'open',
-      modes: () => ({ open: L('기초재고로 설정', 'Đặt làm tồn đầu kỳ'), compare: L('비교만 (이 ERP 재고와 차이 보기)', 'Chỉ đối chiếu với tồn ERP') }),
+      mode: 'open',   // 12차: '비교만' 은 없앰 (ECOUNT 를 그만 씀)
+      modes: () => ({ open: L('기초재고로 설정', 'Đặt làm tồn đầu kỳ') }),
       apply: applyStock, preview: previewStock };
     job.label = L('ECOUNT 재고현황', 'ECOUNT · Tồn kho') + (o.scopeLabel ? ' · ' + o.scopeLabel : '');
     return job;
@@ -182,7 +181,6 @@
     let detail = L('기준일 ', 'Ngày chốt ') + (job.date || '–') + rnote;
     const ex = DB.rows('stock_open').filter(r => r.scope === job.scope); const exDate = ex.reduce((a, r) => (r.date > a ? r.date : a), '');
     if (job.mode === 'open' && ex.length) detail += L(' · ⚠ 이 범위의 기존 기초재고(' + ex.length + '행, 기준일 ' + exDate + ')를 바꿉니다 (기초재고 재설정)', ' · ⚠ Thay tồn đầu hiện có (' + ex.length + ' dòng, ngày ' + exDate + ')');
-    if (job.mode === 'compare' && !ex.length) detail += L(' · 이 범위에 기초재고가 없습니다 — "기초재고로 설정"을 고르세요', ' · Chưa có tồn đầu cho phạm vi này — hãy chọn "Đặt làm tồn đầu kỳ"');
     if (!job.scope) detail += L(' · 재고 범위를 고르세요', ' · Hãy chọn phạm vi');
     // 11차: 현장 실사가 있으면 공정 중 품목은 현장 실사 수량을 쓴다 (이 파일의 그 품목 숫자는 기초에 쓰지 않음)
     if (INV.floorActive()) {
@@ -193,11 +191,6 @@
   }
   function applyStock(job) {
     if (!job.scope) throw new Error(L('재고 범위(창고/공장)를 고르세요', 'Hãy chọn phạm vi (Kho/Xưởng)'));
-    if (job.mode === 'compare') {
-      const all = DB.rows('ecount_snap'); const keep = all.filter(r => !(r.date === job.date && r.scope === job.scope)); const removed = all.length - keep.length;
-      DB.t.ecount_snap = keep; DB.addMany('ecount_snap', job.rows.map(r => pick({ date: job.date, scope: job.scope, code: r.code, qty: r.qty, sets: r.sets, pcs: r.pcs })));
-      return { added: job.rows.length, removed };
-    }
     // 11차: 현장 실사(grp 'floor') 행은 ECOUNT 재고현황으로 바꾸지 않는다 — 공정 중 재고는 원부자재와 따로 관리
     const all = DB.rows('stock_open'); const keep = all.filter(r => r.scope !== job.scope || r.grp === 'floor'); const removed = all.length - keep.length;
     DB.t.stock_open = keep; DB.addMany('stock_open', job.rows.map(r => pick(Object.assign({ date: job.date, scope: job.scope, file: job.file }, r))));

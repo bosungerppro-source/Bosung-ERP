@@ -1,7 +1,7 @@
 /* ColorPencil ERP - core helpers (namespace, i18n, DOM builder, formatting, modal/toast) */
 (function (g) {
   'use strict';
-  const ERP = g.ERP = { v: '1.6.0', lang: 'ko', pages: {}, state: {} };
+  const ERP = g.ERP = { v: '1.7.0', lang: 'ko', pages: {}, state: {} };
 
   // ---------- language ----------
   try { ERP.lang = localStorage.getItem('erp_lang') || 'ko'; } catch (e) { /* ignore */ }
@@ -161,6 +161,8 @@
       barPct !== undefined && barPct !== null ? ERP.bar(barPct, barTone) : null,
       h('div', { class: 'kpi-note' }, chipLabel ? ERP.chip(chipTone, chipLabel) : null, note ? h('span', note) : null));
   };
+  /** Element.append 는 null 을 "null" 글자로 붙인다 — 빈 값(null · undefined · false)은 빼고 붙인다 (12차) */
+  ERP.put = function (el) { el.append(...Array.prototype.slice.call(arguments, 1).filter(x => x !== null && x !== undefined && x !== false)); return el; };
   ERP.tabs = function (defs, current, onSelect) {
     return h('div', { class: 'tabs', role: 'tablist' }, defs.map(d => h('button', { type: 'button', role: 'tab', class: 'tab' + (d.id === current ? ' on' : ''),
       'aria-selected': d.id === current ? 'true' : 'false', onclick: () => onSelect(d.id) }, d.label)));

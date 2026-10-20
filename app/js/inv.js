@@ -19,21 +19,22 @@
   const r4 = (x) => Math.round((+x || 0) * 10000) / 10000;
 
   // ------------------------------------------------------------------ ERP CODE dictionary (built-in; code_dict table overrides)
+  // 12차: 확인되지 않은 코드(guessed · 끝의 1)는 이름을 비워 둔다 — 짐작한 이름을 쓰지 않고 코드만 보인다. 이름은 사용자가 정한다 (코드 사전 · ERP CODE 설명 파일)
   // g: 'mat' = 자재 단계 (2번째 칸 = 분류), 그 외는 2번째 칸 = 제품군
   const STAGES = [
     { code: 'RM', ko: '원재료', vi: 'Nguyên vật liệu', g: 'mat', etype: '원재료' },
     { code: 'SM', ko: '부자재', vi: 'Vật liệu phụ', g: 'mat', etype: '부재료' },
-    { code: 'CM', ko: '소모품', vi: 'Vật tư tiêu hao', g: 'mat', etype: '부재료', guessed: true },
+    { code: 'CM', ko: '', vi: '', g: 'mat', etype: '부재료', guessed: true },
     { code: 'WIP00', ko: '심 (리필)', vi: 'Lõi (refill)', proc: 'REF', etype: '반제품' },
     { code: 'WIP01', ko: '배럴', vi: 'Barrel', proc: 'INJ', etype: '반제품' },
     { code: 'WIP02', ko: '노즈콘', vi: 'Nose cone', proc: 'INJ', etype: '반제품' },
     { code: 'WIP03', ko: '홀더/플러그', vi: 'Holder/plug', proc: 'INJ', etype: '반제품' },
     { code: 'WIP04', ko: '스푼', vi: 'Spoon', proc: 'INJ', etype: '반제품' },
-    { code: 'WIPx6', ko: '클릭펜 시스템·부품', vi: 'Hệ thống bút bấm', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP06 + WIP16·26·36·46·56' },
-    { code: 'WIPx5', ko: '리필 컨테이너 부품', vi: 'Linh kiện hộp refill', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP15·25·35' },
-    { code: 'WIP11', ko: '스탬핑 완료 배럴', vi: 'Barrel đã ép nhũ', proc: 'STP', etype: '반제품', guessed: true },
-    { code: 'WIPx1', ko: '가공 배럴', vi: 'Barrel gia công', proc: 'STP', etype: '반제품', guessed: true, note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차)' },
-    { code: 'WIP55', ko: '클릭펜슬 조립품', vi: 'Bút bấm đã lắp', proc: 'ASM', etype: '반제품', guessed: true },
+    { code: 'WIPx6', ko: '', vi: '', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP06 + WIP16·26·36·46·56' },
+    { code: 'WIPx5', ko: '', vi: '', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP15·25·35' },
+    { code: 'WIP11', ko: '', vi: '', proc: 'STP', etype: '반제품', guessed: true },
+    { code: 'WIPx1', ko: '', vi: '', proc: 'STP', etype: '반제품', guessed: true, note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차, 이름은 사용자가 정함)' },
+    { code: 'WIP55', ko: '', vi: '', proc: 'ASM', etype: '반제품', guessed: true },
     { code: 'WIP', ko: '조립 완료', vi: 'Hoàn thành lắp ráp', proc: 'ASM', etype: '반제품' },
     { code: 'SG', ko: '마니라 포장 완료', vi: 'Đã đóng gói Manila', proc: 'PCK', etype: '반제품' },
     { code: 'FG', ko: '박스 포장 완료', vi: 'Đã đóng thùng (thành phẩm)', proc: 'PCK', etype: '제품' },
@@ -41,19 +42,19 @@
   const EXTRA_STAGES = [{ code: 'ETC', ko: '기타 (ERP CODE 없음)', vi: 'Khác (không có ERP CODE)' }, { code: 'TEST', ko: '테스트 품목', vi: 'Mã thử nghiệm' }];
   const LINES = [
     ['MINI', '미니', 'Mini'], ['REG', '레귤러', 'Regular'], ['PEN', '펜슬', 'Pencil'], ['CPC', '클릭펜슬', 'Click pencil'], ['GLA', '유리용', 'Glass'], ['MARKER', '마커', 'Marker'],
-    ['GRA', 'GRA', 'GRA', 1], ['MIX', '혼합', 'Hỗn hợp', 1]];
-  const SUBS = [['SUP', '스매쉬업', 'Smash Up'], ['SIL', '실리', 'Silly Scents'], ['NEON', '네온', 'Neon', 1], ['PAS', '파스텔', 'Pastel', 1], ['CLA', '클래식', 'Classic', 1],
-    ['CRA', '크레욜라', 'Crayola', 1], ['HF', '핫포일', 'Hot foil', 1], ['RB', '레인보우', 'Rainbow', 1], ['BRR', '배럴', 'Barrel', 1], ['BARREL', '배럴', 'Barrel', 1], ['NCONE', '노즈콘', 'Nose cone', 1],
-    ['SP', '스푼', 'Spoon', 1], ['HD', '홀더', 'Holder', 1], ['ASSY', '조립품', 'Lắp ráp', 1], ['SYS', '시스템', 'Hệ thống', 1], ['PBAG', '비닐백', 'Túi nhựa', 1]];
+    ['GRA', '', '', 1], ['MIX', '', '', 1]];
+  const SUBS = [['SUP', '스매쉬업', 'Smash Up'], ['SIL', '실리', 'Silly Scents'], ['NEON', '', '', 1], ['PAS', '', '', 1], ['CLA', '', '', 1],
+    ['CRA', '', '', 1], ['HF', '', '', 1], ['RB', '', '', 1], ['BRR', '', '', 1], ['BARREL', '', '', 1], ['NCONE', '', '', 1],
+    ['SP', '', '', 1], ['HD', '', '', 1], ['ASSY', '', '', 1], ['SYS', '', '', 1], ['PBAG', '', '', 1]];
   const CATS = [
     ['RM', 'SCOIL', '향기오일', 'Tinh dầu mùi hương'], ['RM', 'PIG', '안료', 'Sắc tố / Bột màu'], ['RM', 'WAX', '왁스', 'Sáp'], ['RM', 'CHE', '화학물질', 'Hóa chất'], ['RM', 'OC', '유기화학물', 'Chất hữu cơ'],
-    ['RM', 'IC', '무기화학물', 'Chất vô cơ'], ['RM', 'EP', '엔지니어링 플라스틱', 'Nhựa kỹ thuật'], ['RM', 'OIL', '오일', 'Dầu', 1],
+    ['RM', 'IC', '무기화학물', 'Chất vô cơ'], ['RM', 'EP', '엔지니어링 플라스틱', 'Nhựa kỹ thuật'], ['RM', 'OIL', '', '', 1],
     ['SM', 'SL', '슬리브/칸막이', 'Vỏ bọc / Tấm ngăn'], ['SM', 'CT', '박스', 'Hộp / Thùng carton'], ['SM', 'PCASE', '플라스틱 케이스', 'Hộp nhựa / Khay nhựa'], ['SM', 'MNA', '마니라', 'Manila'],
     ['SM', 'SRP', '리드트레이 박스', 'Hộp khay đựng'], ['SM', 'INR', '인너박스', 'Hộp bên trong'], ['SM', 'PAP', '종이', 'Giấy'], ['SM', 'PVC', 'PVC 포장지', 'Màng bọc PVC'],
-    ['SM', 'PAPER', '종이', 'Giấy', 1], ['SM', 'SRT', '트레이/후드', 'Khay / nắp', 1], ['SM', 'LB', '라벨', 'Nhãn', 1], ['SM', 'BLISTER', '블리스터', 'Vỉ nhựa', 1], ['SM', 'PAD', '패드', 'Miếng đệm', 1],
-    ['SM', 'CDU', '진열대 (CDU)', 'Kệ trưng bày', 1], ['SM', 'MANILA', '마니라', 'Manila', 1],
-    ['CM', 'LB', '라벨', 'Nhãn', 1], ['CM', 'PET', 'PET 필름', 'Màng PET', 1], ['CM', 'HOTFOIL', '핫포일', 'Nhũ ép nóng', 1], ['CM', 'INMAY', '인쇄 잉크/용제', 'Mực in / dung môi', 1],
-    ['CM', 'GLUE', '접착제', 'Keo', 1], ['CM', 'TAPE', '테이프', 'Băng keo', 1], ['CM', 'FILM', '필름', 'Màng', 1], ['CM', 'POF', '수축필름 (POF)', 'Màng co POF', 1], ['CM', 'FOIL', '포일', 'Giấy bạc', 1], ['CM', 'TP', '스티커', 'Decal', 1]];
+    ['SM', 'PAPER', '', '', 1], ['SM', 'SRT', '', '', 1], ['SM', 'LB', '', '', 1], ['SM', 'BLISTER', '', '', 1], ['SM', 'PAD', '', '', 1],
+    ['SM', 'CDU', '', '', 1], ['SM', 'MANILA', '', '', 1],
+    ['CM', 'LB', '', '', 1], ['CM', 'PET', '', '', 1], ['CM', 'HOTFOIL', '', '', 1], ['CM', 'INMAY', '', '', 1],
+    ['CM', 'GLUE', '', '', 1], ['CM', 'TAPE', '', '', 1], ['CM', 'FILM', '', '', 1], ['CM', 'POF', '', '', 1], ['CM', 'FOIL', '', '', 1], ['CM', 'TP', '', '', 1]];
 
   const BUILTIN = (() => {
     const rows = [];
@@ -76,20 +77,24 @@
     const lines = new Set(LINE_SET); m.forEach(r => { if (r.level === 'line') lines.add(up(r.code)); });
     return { m, lines };
   });
-  /** label of a code: level = stage | line | sub | cat (cat needs parent stage) */
+  /** 단계 코드 보이는 모양: 묶음 단계는 실제 코드로 (WIPx6 → WIP06·x6, WIPx5 → WIP15·25·35, WIPx1 → WIP21·31…) */
+  INV.stageCodeShow = (c) => (c === 'WIPx6' ? 'WIP06·x6' : c === 'WIPx5' ? 'WIP15·25·35' : c === 'WIPx1' ? 'WIP21·31…' : c);
+  const codeShow = (level, code) => (level === 'stage' ? INV.stageCodeShow(code) : code);
+  /** label of a code: level = stage | line | sub | cat (cat needs parent stage).
+      12차: 이름이 확인되지 않은 코드(guessed — ECOUNT 코드 설명에도 없고 사용자가 정하지도 않음)는 짐작한 이름 대신 코드만 보인다 */
   INV.label = function (level, code, parent) {
     if (!code) return ''; const D = INV.dict().m;
     const r = D.get(level + '|' + (level === 'cat' ? (parent || '') : '') + '|' + up(code)) || (level === 'cat' ? Array.from(D.values()).find(x => x.level === 'cat' && up(x.code) === up(code)) : null);
-    if (!r) return code;
-    const t = ERP.lang === 'vi' ? (r.vi || r.ko) : (r.ko || r.vi); return t || code;
+    if (!r || r.guessed) return codeShow(level, code);
+    const t = ERP.lang === 'vi' ? (r.vi || r.ko) : (r.ko || r.vi); return t || codeShow(level, code);
   };
-  /** short label for chips / cards: a long dictionary name (e.g. "반제품 펜조립 완료상태") falls back to the built-in short name; the full name stays in tooltips */
+  /** short label for chips / cards: a long dictionary name (e.g. "반제품 펜조립 완료상태") falls back to the built-in short name (확인된 이름만); the full name stays in tooltips */
   const BUILTIN_IDX = new Map(BUILTIN.map(r => [r.level + '|' + (r.level === 'cat' ? (r.parent || '') : '') + '|' + r.code, r]));
   INV.labelShort = function (level, code, parent) {
     const full = INV.label(level, code, parent); const max = ERP.lang === 'vi' ? 20 : 9;
-    if (String(full).length <= max) return full;
+    if (String(full).length <= max || INV.isGuessed(level, code, parent)) return full;
     const b = BUILTIN_IDX.get(level + '|' + (level === 'cat' ? (parent || '') : '') + '|' + up(code)) || (level === 'cat' ? BUILTIN.find(r => r.level === 'cat' && r.code === up(code)) : null);
-    if (b) { const t = ERP.lang === 'vi' ? (b.vi || b.ko) : (b.ko || b.vi); if (t && t.length < String(full).length) return t; }
+    if (b && !b.guessed) { const t = ERP.lang === 'vi' ? (b.vi || b.ko) : (b.ko || b.vi); if (t && t.length < String(full).length) return t; }
     return full;
   };
   INV.isGuessed = (level, code, parent) => { const r = INV.dict().m.get(level + '|' + (level === 'cat' ? (parent || '') : '') + '|' + up(code)); return !!(r && r.guessed); };

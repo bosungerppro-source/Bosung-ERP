@@ -66,9 +66,9 @@ function usageBook(rows) {
         barrel: ['WIP01', 'WIP11', 'WIPx1', 'WIP02'].map(s => I.isBarrel(s)), floor: I.groupOf({ stage: 'WIPx1' }), inproc: ['WIPx1', 'WIP', 'WIP55', 'SG', 'FG', 'RM'].map(s => I.inProcess(s)),
         floorStages: I.FLOOR_STAGES.includes('WIPx1'), item: I.info(I.item('AC105')).stage };
     });
-    eq('WIP21 · WIP31 → 가공 배럴 (WIPx1), WIP11 · WIP01 · WIP55 · WIPx5 · WIPx6 는 그대로', [r.w21, r.w31, r.w11, r.w01, r.w55, r.w15, r.w06], ['WIPx1', 'WIPx1', 'WIP11', 'WIP01', 'WIP55', 'WIPx5', 'WIPx6']);
+    eq('WIP21 · WIP31 → 배럴 계열 (WIPx1), WIP11 · WIP01 · WIP55 · WIPx5 · WIPx6 는 그대로', [r.w21, r.w31, r.w11, r.w01, r.w55, r.w15, r.w06], ['WIPx1', 'WIPx1', 'WIP11', 'WIP01', 'WIP55', 'WIPx5', 'WIPx6']);
     eq('배럴 계열 = WIP01 · WIP11 · WIPx1 (노즈콘 아님)', r.barrel, [true, true, true, false]);
-    ok('WIPx1 은 생산현장 재고 · 공정 중 단계', r.floor === 'floor' && r.floorStages && r.item === 'WIPx1', r);
+    ok('WIPx1 은 현장 재고 · 공정 중 단계', r.floor === 'floor' && r.floorStages && r.item === 'WIPx1', r);
     eq('공정 중(현장 실사 대상) = WIP 단계만 (마니라 · 박스 · 원재료 아님)', r.inproc, [true, true, true, false, false, false]);
   });
 
@@ -116,7 +116,7 @@ function usageBook(rows) {
       const bar = (c) => { const x = p(c); const b = x && x.parts.find(q => q.role === 'barrel'); return b ? b.code + ':' + b.conf : null; };
       return { red: bar('BM01002'), redOrange: bar('BM01005'), roles: ERP.inv.ASM_ROLES.find(x => x.role === 'barrel').st };
     });
-    eq('배럴 후보 순서: 스탬핑(WIP11) → 가공 배럴(WIPx1) → 배럴(WIP01)', r.roles, ['WIP11', 'WIPx1', 'WIP01']);
+    eq('배럴 후보 순서: WIP11 → 배럴 계열(WIPx1) → 배럴(WIP01)', r.roles, ['WIP11', 'WIPx1', 'WIP01']);
     eq('같은 색 WIP11 이 있으면 WIP11 (RED → AB102)', r.red, 'AB102:high');
     eq('WIP11 이 없고 WIP21 이 있으면 WIP21 (RED ORANGE → AC105)', r.redOrange, 'AC105:high');
   });
@@ -225,7 +225,7 @@ function usageBook(rows) {
     await A.evaluate(async () => { const DB = ERP.db; DB.add('items', { code: 'AC201', erp_code: 'WIP21-MINI-HF-AC201', name: 'BRICK RED', stage: 'ETC', src: 'ecount' }); delete DB.meta.v11; await DB.saveMeta(); await DB.flush(); });
     await A.reload(); await ready();
     const r = await A.evaluate(() => ({ st: ERP.inv.info(ERP.inv.item('AC201')).stage, v11: !!ERP.db.meta.v11 }));
-    eq('다시 열면 WIP21 품목이 가공 배럴(WIPx1)로 바뀜', [r.st, r.v11], ['WIPx1', true]);
+    eq('다시 열면 WIP21 품목이 배럴 계열(WIPx1)로 바뀜', [r.st, r.v11], ['WIPx1', true]);
   });
 
   // ------------------------------------------------------------------------------------------
@@ -235,7 +235,7 @@ function usageBook(rows) {
     ok('생산 반영 탭: 원부자재는 차감하지 않는다는 안내', /원부자재/.test(t) && /차감하지 않/.test(t), t.slice(0, 300));
     await A.evaluate(() => { ERP.state.matTab = 'floor'; ERP.render(); }); await A.waitForTimeout(300);
     const f = await A.evaluate(() => document.querySelector('#main').innerText);
-    ok('생산현장 재고 탭: 현장 실사 기준일 표시', /2026-10-25|25\/10|10-25/.test(f) && /실사/.test(f), f.slice(0, 400));
+    ok('현장 재고 메뉴: 현장 실사 기준일 표시', /2026-10-25|25\/10|10-25/.test(f) && /실사/.test(f), f.slice(0, 400));
     await A.evaluate(() => ERP.goto('bom', { tab: 'recipes' })); await A.waitForTimeout(500);
     const b = await A.evaluate(() => document.querySelector('#main').innerText);
     ok('배합표 탭: 지금 쓰는 파일 이름', /bom 사용량 2026-11\.xlsx/.test(b), b.slice(0, 300));

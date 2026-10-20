@@ -21,7 +21,7 @@ const SAMPLE = ['po', 'prod_log', 'bom', 'item_bom', 'recipes', 'refill_specs', 
   await page.goto(S.url + '/#/data');
   await page.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 });
   // the old seed tables only (ECOUNT tables start empty)
-  await page.evaluate(() => { ['items', 'warehouses', 'code_dict', 'stock_open', 'stock_tx', 'ecount_snap', 'uploads'].forEach(t => ERP.db.replace(t, [])); ERP.state.dataTab = 'import'; ERP.render(); });
+  await page.evaluate(() => { ['items', 'warehouses', 'code_dict', 'stock_open', 'stock_tx', 'uploads'].forEach(t => ERP.db.replace(t, [])); ERP.state.dataTab = 'import'; ERP.render(); });
   await page.setInputFiles('.drop input[type=file]', files);
   await page.waitForFunction(() => ERP.state.imp && ERP.state.imp.jobs && ERP.state.imp.jobs.length >= 5, null, { timeout: 120000 });
   const jobs = await page.evaluate(() => ERP.state.imp.jobs.map(j => ({ file: j.file, label: j.label, table: j.table, rows: j.rows.length, mode: j.mode, scope: j.scope, date: j.date, include: j.include })));

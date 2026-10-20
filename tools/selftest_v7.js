@@ -1,6 +1,6 @@
 'use strict';
 /* 7차 자동 시험 (6차 시험 포함): ECOUNT 자료 · 재고 엔진 · 원부자재/생산현장 탭 · 생산 반영(코드 연결 · 조립 BOM 자동 구성 · 사출 원료) ·
-   종합 현황 위젯(추가·삭제·이동·크기·저장) · 일별 조립 · 월별 수주(Checking) · 수주 품목군 표 · 수불 · ECOUNT 비교 · 자료 점검 · 모든 화면(한/베)
+   종합 현황 위젯(추가·삭제·이동·크기·저장) · 일별 조립 · 월별 수주(Checking) · 수주 품목군 표 · 수불 · ECOUNT 재고 재설정 · 자료 점검 · 모든 화면(한/베)
    사용:  npm run test:v7 [-- <ECOUNT 엑셀 폴더>]   (기본 폴더 seed/ecount · Playwright 필요: npm i -D playwright)
    폴더에는 ECOUNT 품목등록 · 창고리스트 · 재고현황(창고) · 재고현황(공장) · ERP CODE 설명 엑셀을 넣는다 (파일명 무관). */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -69,31 +69,35 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     await ev((l) => ERP.setLang(l), lang);
     const pages = await ev(() => Object.keys(ERP.pages));
     for (const p of pages) { await ev((x) => ERP.goto(x), p); await page.waitForTimeout(250); }
-    for (const t of ['mat', 'floor', 'post', 'entry', 'ledger', 'reorder', 'outsource', 'compare', 'check', 'codes', 'master', 'legacy', 'stock']) { await ev((x) => { ERP.state.matTab = x; ERP.goto('materials'); ERP.render(); }, t); await page.waitForTimeout(250); }
+    // 12차: 메뉴 3개 (품목 / 현장 재고 / 원부자재 재고) — ERP.goStock(탭) 으로 그 탭이 있는 메뉴를 연다. 'stock' · 'compare' 는 예전 이름 (compare 는 원부자재 재고로)
+    for (const t of ['mat', 'entry', 'ledger', 'reorder', 'outsource', 'floor', 'post', 'fentry', 'fledger', 'master', 'codes', 'check', 'legacy']) { await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await page.waitForTimeout(250); }
+    for (const t of ['stock', 'compare', 'post', 'codes', 'mat']) { await ev((x) => { ERP.state.matTab = x; ERP.goto('materials'); ERP.render(); }, t); await page.waitForTimeout(250); }
     for (const t of ['mrp', 'struct', 'asm', 'semi_stock', 'bom', 'recipes']) { await ev((x) => { ERP.state.bomTab = x; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }, t); await page.waitForTimeout(250); }
     await ev(() => { ERP.state.asm = Object.assign(ERP.state.asm || {}, { kind: 'stp' }); ERP.render(); ERP.state.asm.kind = 'asm'; });
     for (const t of ['log', 'entry', 'analysis', 'machines', 'procs']) { await ev((x) => { ERP.state.prodTab = x; ERP.goto('production'); ERP.render(); }, t); await page.waitForTimeout(200); }
     await ev(() => { ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); ERP.state.dashEdit = false; ERP.render(); });
-    for (const t of ['items', 'warehouses', 'partners', 'stock_open', 'uploads']) await ev((x) => { ERP.state.matTab = 'master'; ERP.state.mst = { t: x }; ERP.render(); }, t);
-    for (const lv of ['stage', 'line', 'cat', 'sub']) await ev((x) => { ERP.state.matTab = 'codes'; ERP.state.cod = Object.assign(ERP.state.cod || {}, { level: x }); ERP.render(); }, lv);
-    const chk = await ev(() => { ERP.state.matTab = 'check'; const ids = ['susp', 'neg', 'type', 'space', 'empty', 'end', 'dup', 'fd', 'unit', 'noerp', 'missing', 'unknown', 'test', 'prod']; ids.forEach(i => { ERP.state.chk = { open: i }; ERP.render(); }); return true; });
+    for (const t of ['items', 'warehouses', 'partners', 'stock_open', 'uploads']) await ev((x) => { ERP.state.mst = { t: x }; ERP.goStock('master'); ERP.render(); }, t);
+    for (const lv of ['stage', 'line', 'cat', 'sub']) await ev((x) => { ERP.state.cod = Object.assign(ERP.state.cod || {}, { level: x }); ERP.goStock('codes'); ERP.render(); }, lv);
+    const chk = await ev(() => { ERP.goStock('check'); ERP.render(); const ids = ['susp', 'neg', 'type', 'space', 'empty', 'end', 'dup', 'fd', 'unit', 'noerp', 'missing', 'unknown', 'test', 'prod']; ids.forEach(i => { ERP.state.chk = { open: i }; ERP.render(); }); return true; });
     ok('[' + lang + '] 모든 화면·탭 열림, 오류 0', chk && errors.length === 0, errors.slice(0, 5));
   }
   await ev(() => ERP.setLang('ko'));
 
-  section('5. 품목·재고 화면: 원부자재 / 생산현장 탭 · 공정 흐름 · 필터 · 상세');
+  section('5. 원부자재 재고 / 현장 재고 메뉴: 공정 흐름 · 필터 · 상세');
   {
-    await ev(() => { ERP.state.matTab = 'mat'; ERP.state.stk_mat = null; ERP.state.stk_floor = null; ERP.goto('materials'); ERP.render(); }); await page.waitForTimeout(300);
-    const cm = await page.$$eval('.flow .st', a => a.map(x => x.querySelector('code').textContent));
-    await ev(() => { ERP.state.matTab = 'floor'; ERP.render(); }); await page.waitForTimeout(300);
-    const cf = await page.$$eval('.flow .st', a => a.map(x => x.querySelector('code').textContent));
-    eq('원부자재 탭 흐름 카드 = 원재료·부자재·소모품', cm, ['RM', 'SM', 'CM']); ok('생산현장 탭 흐름 카드 = 심 … 박스 포장 (13칸 · 11차 가공 배럴 포함)', cf.length === 13 && cf[0] === 'WIP00' && cf[cf.length - 1] === 'FG' && cf.includes('WIP21·31…'), cf);
+    // 단계 카드의 코드: 이름이 있으면 <code> 줄, 이름 미정이면 제목 자리에 코드만 (12차)
+    const cardCodes = () => page.$$eval('.flow .st', a => a.map(x => (x.querySelector('code') || x.querySelector('b')).textContent));
+    await ev(() => { ERP.state.stk_mat = null; ERP.state.stk_floor = null; ERP.goStock('mat'); ERP.render(); }); await page.waitForTimeout(300);
+    const cm = await cardCodes();
+    await ev(() => { ERP.goStock('floor'); ERP.render(); }); await page.waitForTimeout(300);
+    const cf = await cardCodes();
+    eq('원부자재 재고 흐름 카드 = RM · SM · CM', cm, ['RM', 'SM', 'CM']); ok('현장 재고 흐름 카드 = 심 … 박스 포장 (13칸 · 배럴 계열 WIP21·31… 포함)', cf.length === 13 && cf[0] === 'WIP00' && cf[cf.length - 1] === 'FG' && cf.includes('WIP21·31…'), cf);
     await page.click('.flow .st:has-text("배럴")'); await page.waitForTimeout(300);
     const r = await ev(() => ({ stage: ERP.state.stk_floor.stage, rows: document.querySelectorAll('main table.tbl tbody tr').length }));
     eq('배럴 카드 → WIP01 필터', r.stage, 'WIP01'); ok('배럴 표에 행', r.rows > 0, r.rows);
-    const sus = await ev(async () => { const out = {}; for (const g of ['mat', 'floor']) { ERP.state.matTab = g; ERP.state['stk_' + g] = { stage: '', line: '', sub: '', cat: '', scope: 'all', status: 'susp', q: '', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }; ERP.render(); out[g] = parseInt(document.querySelector('main .pager span').textContent.replace(/,/g, ''), 10); } return out; });
-    eq('이동 누락 의심 = 원부자재 + 생산현장 = 71', sus.mat + sus.floor, 71);
-    await ev(() => { ERP.state.matTab = 'mat'; ERP.state.stk_mat.status = ''; ERP.state.stk_mat.q = 'rm wax bees'; ERP.render(); }); await page.waitForTimeout(300);
+    const sus = await ev(async () => { const out = {}; for (const g of ['mat', 'floor']) { ERP.goStock(g); ERP.state['stk_' + g] = { stage: '', line: '', sub: '', cat: '', scope: 'all', status: 'susp', q: '', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }; ERP.render(); out[g] = parseInt(document.querySelector('main .pager span').textContent.replace(/,/g, ''), 10); } return out; });
+    eq('이동 누락 의심 = 원부자재 + 현장 재고 = 71', sus.mat + sus.floor, 71);
+    await ev(() => { ERP.state.stk_mat.status = ''; ERP.state.stk_mat.q = 'rm wax bees'; ERP.goStock('mat'); ERP.render(); }); await page.waitForTimeout(300);
     const q = await ev(() => Array.from(document.querySelectorAll('main table.tbl tbody tr td:first-child')).map(x => x.textContent)); ok('검색: 띄어쓰기·대소문자 무시 (ERP CODE)', q.includes('R-001'), q.slice(0, 5));
     await ev(() => ERP.itemDetail('R-001')); await page.waitForTimeout(300);
     const md = await ev(() => document.querySelector('.modal').innerText); ok('품목 상세: 수불부·기초재고', /수불부/.test(md) && /기초재고/.test(md) && /BEE WAX/.test(md), md.slice(0, 200));
@@ -105,7 +109,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const r = await ev(() => {
       const before = ERP.calc.stock().get('R-001'); const b = { wh: before.by.WH, fac: before.by.FAC, bal: before.bal };
       ERP.state.txe = { rows: [{ date: '2026-10-17', kind: 'IN', to: 'WH', code: 'R-001', qty: 100, partner: 'Supplier A' }, { date: '2026-10-17', kind: 'MOVE', from: 'WH', to: 'FAC', code: 'r-001', qty: 800 }, { date: '2026-10-17', kind: 'OUT', from: 'WH', code: 'NO-SUCH', qty: 5 }] };
-      ERP.state.matTab = 'entry'; ERP.render(); return b; });
+      ERP.goStock('entry'); ERP.render(); return b; });
     await page.waitForTimeout(300);
     const okN = await page.textContent('main button.btn.primary'); ok('잘못된 코드 줄은 제외 (저장 2)', /\(2\)/.test(okN), okN);
     await page.click('main button.btn.primary'); await page.waitForTimeout(400);
@@ -157,21 +161,20 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('설정 끔 → 반영 없음 / 입고만 → 차감 0', off, [630, 0]);
   }
 
-  section('9. ECOUNT 다시 올리기 (변경 0) · 비교만 · 재설정 경고');
+  section('9. ECOUNT 다시 올리기 (변경 0) · 재고현황은 기초재고 재설정만 (12차: 비교 없음)');
   {
     await ev(() => { ERP.state.imp = { jobs: [] }; ERP.goto('data'); ERP.render(); }); await page.waitForTimeout(300);
     await page.setInputFiles('.drop input[type=file]', files); await page.waitForFunction(() => ERP.state.imp.jobs.length >= 5, null, { timeout: 60000 });
     const j = await ev(() => ERP.state.imp.jobs.map(x => ({ kind: x.kind, mode: x.mode, scope: x.scope, prev: x.preview ? x.preview(x) : null })));
     const it = j.find(x => x.kind === 'ecount_items'); eq('품목등록 다시: 신규 0 · 변경 0 · 없음 0', it.prev.parts.map(p => p[1]), [0, 0, 0]);
-    const stk = j.filter(x => x.kind === 'ecount_stock'); eq('재고현황 다시: 기본 = 비교만, 범위 자동', stk.map(x => x.mode + ':' + x.scope).sort(), ['compare:FAC', 'compare:WH']);
+    const stk = j.filter(x => x.kind === 'ecount_stock'); eq('재고현황 다시: 방식 = 기초재고로 설정, 범위 자동', stk.map(x => x.mode + ':' + x.scope).sort(), ['open:FAC', 'open:WH']);
+    eq('재고현황 반영 방식은 하나뿐 (비교만 없음)', await ev(() => ERP.state.imp.jobs.filter(x => x.kind === 'ecount_stock').map(x => Object.keys(x.modes()))), [['open'], ['open']]);
     ok('합계 일치 표시', stk.every(x => /일치/.test(x.prev.parts[0][0])), stk.map(x => x.prev.parts[0]));
-    await page.click('text=선택 항목 모두 반영'); await page.waitForTimeout(600);
-    const c0 = await ev(() => { ERP.state.matTab = 'compare'; ERP.state.cmp = null; ERP.goto('materials'); ERP.render(); return { snap: ERP.db.rows('ecount_snap').length, empty: !!document.querySelector('main .empty') || /0행|^0/.test(document.querySelector('main p.help:last-of-type').textContent) }; });
-    eq('비교용 ECOUNT 재고 1,276행', c0.snap, 1276); ok('같은 기준일(10-16) 비교 → 차이 없음', c0.empty);
-    // the same ECOUNT figures dated after our transactions -> the differences are exactly what was entered in this ERP
-    const c = await ev(() => { ERP.db.rows('ecount_snap').forEach(r => { r.date = '2026-10-18'; }); ERP.db.touch('ecount_snap'); ERP.state.cmp = null; ERP.render(); const rows = Array.from(document.querySelectorAll('main table.tbl tbody tr')).map(tr => tr.innerText.replace(/\s+/g, ' ')); return rows; });
-    ok('10-18 기준 비교: 차이 = 이 ERP 에서 입력한 수불 (R-001 창고 −700 등)', c.length >= 4 && c.some(x => /R-001/.test(x) && /-700|−700/.test(x)), c.slice(0, 6));
-    eq('비교만 → 기초재고는 그대로', await ev(() => ERP.db.rows('stock_open').length), 1276);
+    ok('다시 올리면 기초재고 재설정 경고', stk.every(x => /기초재고 재설정/.test(x.prev.detail)), stk.map(x => x.prev.detail));
+    const pg = await ev(() => ({ t: document.querySelector('main').innerText, tables: Object.keys(ERP.TABLES) }));
+    ok('자료 화면에 "비교만" 안내 없음 · ecount_snap 표 없음', !/비교만|ECOUNT 비교/.test(pg.t) && !pg.tables.includes('ecount_snap'), pg.t.match(/.{0,30}비교.{0,30}/));
+    await page.click('main button:has-text("취소")'); await page.waitForTimeout(300);
+    eq('반영하지 않으면 기초재고 그대로', await ev(() => ERP.db.rows('stock_open').length), 1276);
   }
 
   section('10. 자료 점검');
@@ -179,7 +182,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const k = await ev(() => { const K = ERP.inv.checks(); return [K.typeMismatch.length, K.space.length, K.emptySeg.length, K.notEnding.length, K.dup.length, K.fd.length, K.test.length, K.noUnit.length, K.unitVariant.length]; });
     eq('품목구분 불일치 124 · 공백 2 · 빈 칸 18 · 끝 불일치 13 · 중복 2 · FD 1 · 테스트 11 · 단위 없음 1 · 표기 혼재 13', k, [124, 2, 18, 13, 2, 1, 11, 1, 13]);
     const mv = await ev(() => ERP.inv.suggestMoves('2026-10-20').length); ok('이동 전표 제안 (이동 누락 의심 정리)', mv >= 70, mv);
-    const b = await ev(() => { ERP.state.cod = { level: 'stage', b: { stage: 'SG', line: 'PEN', cat: '', sub: 'SIL', code: 'X123' } }; ERP.state.matTab = 'codes'; ERP.render(); return document.querySelector('main').innerText.includes('SG-PEN-SIL-X123'); });
+    const b = await ev(() => { ERP.state.cod = { level: 'stage', b: { stage: 'SG', line: 'PEN', cat: '', sub: 'SIL', code: 'X123' } }; ERP.goStock('codes'); ERP.render(); return document.querySelector('main').innerText.includes('SG-PEN-SIL-X123'); });
     ok('ERP CODE 만들기 도우미 (SG-PEN-SIL-X123)', b);
   }
 
@@ -190,12 +193,12 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
         const lhs = s.openTot + s.in + s.prod - s.out - s.use + s.adj; if (Math.abs(lhs - s.bal) > 1e-4) bad.push([s.code, lhs, s.bal]); });
       const fg = ERP.calc.stock().get('52-9724-K-000');
       return { g, total: rows.length, stBad, bad: bad.slice(0, 5), fg: [fg.openTot, fg.prod, fg.bal] }; });
-    eq('모든 품목이 원부자재 또는 생산현장 (숨김 제외)', r.g.mat + r.g.floor, r.total); ok('단계별 구분 (RM·SM·CM = 원부자재, WIP·SG·FG = 생산현장)', !r.stBad.length, r.stBad.slice(0, 5));
+    eq('모든 품목이 원부자재 또는 현장 재고 (숨김 제외)', r.g.mat + r.g.floor, r.total); ok('단계별 구분 (RM·SM·CM = 원부자재, WIP·SG·FG = 현장 재고)', !r.stBad.length, r.stBad.slice(0, 5));
     ok('모든 품목: 합계 = 기초 + 입고 + 생산 − 출고 − 소모 ± 조정', !r.bad.length, r.bad);
     eq('FG 52-9724-K-000: 기초 0 + 생산 10 − 출고 5 = 5', r.fg, [0, 10, 5]);
-    await ev(() => { ERP.state.matTab = 'floor'; ERP.state.stk_floor = { stage: '', line: '', sub: '', cat: '', scope: 'all', status: '', q: '52-9724-K-000', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }; ERP.goto('materials'); ERP.render(); }); await page.waitForTimeout(300);
+    await ev(() => { ERP.state.stk_floor = { stage: '', line: '', sub: '', cat: '', scope: 'all', status: '', q: '52-9724-K-000', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }; ERP.goStock('floor'); ERP.render(); }); await page.waitForTimeout(300);
     const row = await ev(() => Array.from(document.querySelectorAll('main table.tbl tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())).find(c => c[0] === '52-9724-K-000'));
-    ok('생산현장 표: 기초 0 · 생산 입고 +10 · 기타 −5 · 합계 5', row && row[3] === '0' && row[4] === '+10' && row[6] === '-5' && row[9] === '5', row);
+    ok('현장 재고 표: 기초 0 · 생산 입고 +10 · 기타 −5 · 합계 5', row && row[3] === '0' && row[4] === '+10' && row[6] === '-5' && row[9] === '5', row);
   }
 
   section('12. 생산 반영: 코드 연결 · 사출 원료 차감 · 조립 BOM 자동 구성 → 부품 차감');
@@ -216,7 +219,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('제안: Mini holder → MH (확실) · RM01012 → RM112 (확실)', base.sug, ['MH', 'high', 'RM112', 'high']);
     ok('제안: PP → R-100 POLYPROPYLENE', base.pp.includes('R-100'), base.pp);
     eq('조립 BM01002 입고 1,000 (BOM 만들기 전)', base.bm.prod, 1000);
-    await ev(() => { ERP.state.matTab = 'post'; ERP.goto('materials'); ERP.render(); document.querySelectorAll('main details').forEach(d => { d.open = true; }); }); await page.waitForTimeout(300);
+    await ev(() => { ERP.goStock('post'); ERP.render(); document.querySelectorAll('main details').forEach(d => { d.open = true; }); }); await page.waitForTimeout(300);
     const clickLink = async (src) => { await page.click(`xpath=//main//tr[td/b[normalize-space()="${src}"]]//button[normalize-space()="연결"]`); await page.waitForTimeout(300); await ev(() => document.querySelectorAll('main details').forEach(d => { d.open = true; })); };
     await clickLink('holder'); await clickLink('RM01012');
     // 11차: 원료 연결 화면은 차감하지 않으므로 나오지 않는다 — 연결(code_map raw)은 진단에 품목코드를 붙일 때만 쓴다
@@ -276,7 +279,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const saved = await ev(() => ({ ids: Array.from(document.querySelectorAll('.wgrid > .w')).map(w => w.dataset.id + ':' + w.dataset.w), n: (ERP.db.setting('dash') || []).length }));
     ok('다시 켜도 배치 그대로 (설정에 저장)', saved.ids[0] === 'kpi_proc:1' && saved.ids.includes('procs:2') && !saved.ids.some(x => /^due_list/.test(x)) && saved.n === 12, saved);
     await page.click('.w[data-id=kpi_low]'); await page.waitForTimeout(300);
-    eq('숫자 위젯을 누르면 해당 화면 (안전재고 → 발주 · 안전재고)', await ev(() => [location.hash, ERP.state.matTab]), ['#/materials', 'reorder']);
+    eq('숫자 위젯을 누르면 해당 화면 (안전재고 → 원부자재 재고 · 발주 · 안전재고)', await ev(() => [location.hash, ERP.state.mtab]), ['#/materials', 'reorder']);
     await ev(() => { ERP.goto('dashboard'); ERP.state.dashEdit = true; ERP.render(); }); await page.waitForTimeout(300);
     await page.click('main button:has-text("기본 배치로")'); await page.waitForSelector('.modal'); await page.click('.modal .modal-foot button.primary'); await page.waitForTimeout(400);
     eq('기본 배치로 되돌리기 → 12개', await ev(() => document.querySelectorAll('.wgrid > .w:not(.wadd)').length), 12);
@@ -368,7 +371,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const q2 = await browser.newPage(); const eN = []; q2.on('pageerror', e => eN.push(e.message));
     await q2.goto(SN.url + '/#/dashboard'); await q2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.querySelector('.wgrid'), null, { timeout: 120000 }); await q2.waitForTimeout(800);
     const after = await q2.evaluate(() => { const D = ERP.db; const INV = ERP.inv; const plan = INV.asmPlan();
-      ERP.state.matTab = 'post'; ERP.goto('materials'); ERP.render(); const postOk = !!document.querySelector('main .kpis');
+      ERP.goStock('post'); ERP.render(); const postOk = !!document.querySelector('main .kpis');
       ERP.state.bomTab = 'asm'; ERP.goto('bom'); ERP.render(); const asmOk = document.querySelectorAll('main table.tbl tbody tr').length > 0;
       return { v: ERP.v, items: D.rows('items').length, open: D.rows('stock_open').length, po: D.rows('po').length, widgets: ERP.dashLayout().length,
         manual: D.rows('bom_lines').filter(r => r.note === 'prev-manual' && !r.src).length, tx: D.rows('stock_tx').filter(r => r.note === 'prev-tx').length, keep: D.meta.lowCover,
@@ -385,8 +388,8 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const out = require('child_process').execSync('node ' + path.join(ROOT, 'tools/build_demo.js'), { cwd: ROOT }).toString(); console.log('  ' + out.trim());
     const p2 = await browser.newPage(); const e2 = []; p2.on('pageerror', e => e2.push(e.message));
     await p2.goto('file://' + path.join(ROOT, 'dist/ERP_Demo.html') + '#/materials'); await p2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 }); await p2.waitForTimeout(800);
-    const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.state.matTab = 'floor'; ERP.render(); const b = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b], widgets: document.querySelectorAll('.wgrid .w').length }; });
-    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 생산현장 13) · 위젯 12', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 13], 12]); ok('데모 오류 0', e2.length === 0, e2);
+    const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.goStock('floor'); ERP.render(); const b = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b], widgets: document.querySelectorAll('.wgrid .w').length }; });
+    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고 13) · 위젯 12', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 13], 12]); ok('데모 오류 0', e2.length === 0, e2);
   }
 
   section('18. 저장 표시 · 닫기 전 저장 · 베트남어 빈 글자');
