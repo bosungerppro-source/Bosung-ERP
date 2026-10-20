@@ -296,9 +296,10 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
     eq('조립 1층 주간 가동 설비 = 11대 (Mini/Regular 1번을 따로 셈)', [m.asm, m.key], [11, true]);
     const mrp = await ev(() => ERP.poMrpLines ? ERP.poMrpLines('4700025118') : null);
     ok('MRP 전체 품번: 완료된 줄(52-9724-L-002)은 빼고 남은 수량만', Array.isArray(mrp) && mrp.length === 1 && mrp[0].qty > 0 && !mrp.some(l => /52-9724/.test(l.code)), mrp);
-    const inj = await ev(() => { ERP.db.add('code_map', { kind: 'raw', src: 'PP', item: 'R-102' }); const r = ERP.inv.postRows([{ _id: 'x1', date: '2026-10-20', process: 'INJ', code: 'Barrel', part: 'Barrel', division: 'Pencil', ok_qty: 100, raw_material: 'PP', raw_kg: 100 }, { _id: 'x2', date: '2026-10-20', process: 'INJ', code: 'BM09', ok_qty: 0, raw_material: 'PP', raw_kg: 50 }], { mode: 'in_bom' }).rows;
-      return r.filter(t => t.kind === 'USE').map(t => [t.code, t.qty]); });
-    eq('사출 원료: 사용자 연결(PP → R-102) 우선 · 양품 0 이어도 원료 차감', inj, [['R-102', 100], ['R-102', 50]]);
+    const inj = await ev(() => { ERP.db.add('code_map', { kind: 'raw', src: 'PP', item: 'R-102' }); const p = ERP.inv.postRows([{ _id: 'x1', date: '2026-10-20', process: 'INJ', code: 'Barrel', part: 'Barrel', division: 'Pencil', ok_qty: 100, raw_material: 'PP', raw_kg: 100 }, { _id: 'x2', date: '2026-10-20', process: 'INJ', code: 'BM09', ok_qty: 0, raw_material: 'PP', raw_kg: 50 }], { mode: 'in_bom' });
+      const s = p.diag.matSkip.get('R-102'); return [p.rows.filter(t => t.kind === 'USE').map(t => [t.code, t.qty]), s ? [s.n, s.qty] : null]; });
+    // 11차: 원부자재는 생산 반영으로 차감하지 않는다 — 사용자 연결(PP → R-102)은 진단에 이름을 붙일 때만, 양품 0 행도 진단에 남는다
+    eq('사출 원료: 사용자 연결(PP → R-102) 로 알아보지만 차감 0 · 진단 2행 150 kg', inj, [[], [2, 150]]);
     const unit = await ev(() => { ERP.db.add('items', { code: 'TSET1', name: 'test set', unit: 'SET', pcs_per_set: 10, src: 'local' }); ERP.db.add('prod_log', { date: '2026-10-20', process: 'WRP', code: 'TSET1', ok_qty: 100, ok_ea: 100, source: 'manual' });
       const q = () => (ERP.inv.prodPost().rows.find(t => t.code === 'TSET1' && t.kind === 'PROD') || {}).qty; const a = q(); const P = ERP.PROC.find(x => x.id === 'WRP'); P.unit = 'set'; ERP.saveProcs(); const b = q(); P.unit = 'pcs'; ERP.saveProcs(); return [a, b]; });
     eq('공정 단위를 바꾸면 생산 반영도 바로 다시 계산 (pcs 10 set → set 100 set)', unit, [10, 100]);

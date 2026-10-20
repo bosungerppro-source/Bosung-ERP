@@ -299,6 +299,32 @@
     for (let i = 1; i < M.length; i++) { const r = M[i]; if (!S(r, 0)) continue; for (let j = 5; j < hdr.length; j++) { const h2 = hdr[j]; if (!h2 || /^열\d+$/.test(h2)) continue; const v = N(S(r, j)); if (v) rows.push({ code: T(S(r, 0)), sku: T(S(r, 1)), color: T(S(r, 2)), material: h2, coef: v }); } }
     return [{ table: 'recipes', rows, mode: 'upsert', label: L('배합표 (components)', 'Công thức phối liệu') }];
   });
+  // 11차: BOM 사용량 (components 시트: code · item code · color · 원료별 g/개). 원재료 소요량(MRP) · 신고서 계산용 — 재고는 차감하지 않는다.
+  // 최신 판을 올리면 통째로 바뀐다(전체 교체). 같은 코드가 두 번이면 첫 행을 쓰고 알린다. 글자만 있는 열(향기오일 이름)은 비고로.
+  const usageHdr = (r) => { const n = (r || []).map(x => norm(x)); return n[0] === 'code' && n.includes('itemcode') && n.includes('color'); };
+  D('recipes_usage', (n, M) => findRow(M, usageHdr, 0, 3) >= 0, (M) => {
+    const hi = findRow(M, usageHdr, 0, 3); const H = M[hi]; const hn = H.map(x => norm(x));
+    const ci = { code: hn.indexOf('code'), sku: hn.indexOf('itemcode'), color: hn.indexOf('color') };
+    const cols = []; H.forEach((x, j) => { if (j === ci.code || j === ci.sku || j === ci.color) return; const name = typeof x === 'string' ? x.trim() : ''; if (!name || /^열\s*\d+$/.test(name)) return; cols.push({ j, name }); });
+    const textOnly = (j) => { let t = 0, nn = 0; for (let i = hi + 1; i < M.length; i++) { const v = S(M[i], j); if (v === null || v === '') continue; if (typeof v === 'number') nn++; else t++; } return t > 0 && nn === 0; };
+    const noteCols = cols.filter(c => textOnly(c.j)), matCols = cols.filter(c => !textOnly(c.j));
+    const rows = [], seen = new Set(), dups = [], notes = new Map(); let products = 0;
+    for (let i = hi + 1; i < M.length; i++) {
+      const r = M[i]; const code = String(T(S(r, ci.code)) || '').trim(); if (!code) continue;
+      const nt = noteCols.map(c => String(T(S(r, c.j)) || '').trim()).filter(Boolean).join(' · '); if (nt && !notes.has(code)) notes.set(code, nt);
+      if (seen.has(code)) { if (!dups.includes(code)) dups.push(code); continue; }
+      seen.add(code); products++;
+      const sv = S(r, ci.sku); const sku = sv === null || sv === '' || sv === 0 || String(sv).trim() === '0' ? undefined : String(sv).trim();
+      const color = String(T(S(r, ci.color)) || '').trim() || undefined;
+      matCols.forEach(c => { const v = N(S(r, c.j)); if (!v) return; rows.push(pick({ code, sku, color, material: c.name, coef: v })); });
+    }
+    rows.forEach(r => { const nt = notes.get(r.code); if (nt) r.note = nt; });
+    return [{ table: 'recipes', rows, mode: 'replace', kind: 'recipes_usage', products, dups, materials: matCols.length, label: L('BOM 사용량 · 배합표 (원료 g/개)', 'Định mức NVL (g/cái)'),
+      modes: () => ({ replace: L('전체 교체 (최신 판으로 바꾸기)', 'Thay toàn bộ (bản mới nhất)'), upsert: L('같은 품목 · 원료만 갱신', 'Chỉ cập nhật mã · NL trùng') }),
+      preview: (j) => ({ parts: [[L('품목', 'Mã'), j.products, 'info'], [L('원료 열', 'Cột NL'), j.materials, 'neutral'], [L('지금 배합표', 'Hiện có'), ERP.db.rows('recipes').length, 'neutral']].concat(j.dups.length ? [[L('중복 코드 (첫 행 사용)', 'Mã trùng (dùng dòng đầu)'), j.dups.length, 'warn']] : []),
+        detail: L('재고는 차감하지 않습니다 — 원재료 소요량(MRP) · 신고서 계산용. "전체 교체"면 지금 배합표를 이 파일로 바꿉니다.', 'Không trừ tồn — chỉ để tính nhu cầu NVL (MRP) · tờ khai. "Thay toàn bộ" sẽ thay bằng file này.') + (j.dups.length ? L(' · 중복: ', ' · Trùng: ') + j.dups.slice(0, 8).join(', ') + (j.dups.length > 8 ? ' …' : '') : '') }),
+      after: (j) => { const DB = ERP.db; DB.meta.recipeSrc = { file: j.file || '', at: new Date().toISOString(), products: j.products, rows: j.rows.length, dups: j.dups.slice(0, 300), mode: j.mode }; DB.saveMeta(); } }];
+  });
   D('refill-spec', (n, M) => hasCell(M[0] || [], /^ERP Code$/i) && hasCell(M[0] || [], /^Phân loại$/), (M) => {
     const rows = []; for (let i = 1; i < M.length; i++) { const r = M[i]; if (S(r, 2) && S(r, 5)) rows.push(pick({ customer: T(S(r, 0)), kind: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), class: T(S(r, 4)), erp_code: T(S(r, 5)), plan_weight_g: N(S(r, 6)), g_per_pc: N(S(r, 7)), plan_qty: N(S(r, 8)) })); }
     return [{ table: 'refill_specs', rows, mode: 'upsert', label: L('리필 규격', 'Quy cách refill') }];
@@ -448,7 +474,7 @@
       let found; try { found = XL.detectSheet(name, ws); } catch (e) { console.error(e); found = []; }
       found.forEach(f => {
         try {
-          const M = matrix(ws, null, f.id === 'recipes' ? 70 : 40); const ctx = Object.assign({ sheet: name }, ctxOpt || {});
+          const M = matrix(ws, null, f.id === 'recipes' || f.id === 'recipes_usage' ? 90 : 40); const ctx = Object.assign({ sheet: name }, ctxOpt || {});
           let outs;
           if (f.id === 'generic') outs = [{ table: f.generic.table, rows: genericParse(M, f.generic), mode: 'upsert', label: ERP.tableLabel(f.generic.table) }];
           else outs = f.parse(M, ctx);
@@ -467,6 +493,10 @@
   // ---------------- apply ----------------
   XL.apply = function (job) {
     if (typeof job.apply === 'function') return job.apply(job);
+    const res = applyTable(job); if (typeof job.after === 'function') job.after(job, res);   // 11차: 반영 뒤 할 일 (예: 배합표 출처 기록)
+    return res;
+  };
+  function applyTable(job) {
     const DB = ERP.db; const t = job.table; let rows = job.rows.slice(); let res = { added: 0, updated: 0, removed: 0 };
     if (job.since && job.table === 'prod_log') rows = rows.filter(r => r.date >= job.since);
     const mode = job.mode;
@@ -507,5 +537,5 @@
     }
     else { const r2 = DB.upsert(t, rows); res.added = r2.added; res.updated = r2.updated; }
     return res;
-  };
+  }
 })();

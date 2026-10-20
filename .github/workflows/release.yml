@@ -1,5 +1,5 @@
 # 설치 파일을 빌드해 GitHub Release(태그 포함)를 만든다.
-# 실행: 저장소 → Actions → "Release — 설치 파일" → Run workflow → 버전(예: 1.5.0)
+# 실행: 저장소 → Actions → "Release — 설치 파일" → Run workflow → 버전(예: 1.6.0)
 # Claude Code 클라우드 세션은 태그 push · Release 쓰기가 막혀 있어서(403) 저장소 주인이 이 버튼으로 만든다.
 # Release 설명은 main 의 docs/releases/v<버전>.md, 설치 파일 SHA-256 은 빌드한 파일로 덧붙인다.
 name: Release — 설치 파일
@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '버전 (예: 1.5.0)'
+        description: '버전 (예: 1.6.0)'
         required: true
-        default: '1.5.0'
+        default: '1.6.0'
       commit:
         description: '빌드할 커밋 (비우면: 1.2.0~1.5.0 은 그 버전의 커밋, 그 밖은 main 최신)'
         required: false

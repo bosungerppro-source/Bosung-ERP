@@ -192,6 +192,7 @@
       { k: 'color', ko: '색상', vi: 'Màu', t: 't', list: 1 },
       { k: 'material', ko: '원료', vi: 'Nguyên liệu', t: 't', list: 1, req: 1 },
       { k: 'coef', ko: '배합량 (g/개)', vi: 'Định mức (g/cái)', t: 'n', list: 1 },
+      { k: 'note', ko: '비고 (향기오일 등)', vi: 'Ghi chú (tinh dầu…)', t: 't' },
     ] },
 
     refill_specs: { ko: '리필 규격', vi: 'Quy cách refill', nat: ['erp_code'], sort: ['erp_code', 1], cols: [
@@ -281,7 +282,9 @@
       { k: 'qty', ko: '재고수량', vi: 'Số lượng tồn', t: 'n', list: 1 },
       { k: 'sets', ko: 'Số Set', vi: 'Số Set', t: 'n', list: 1 },
       { k: 'pcs', ko: 'Số PCS', vi: 'Số PCS', t: 'n', list: 1 },
+      { k: 'grp', ko: '구분 (floor = 현장 실사)', vi: 'Nhóm (floor = kiểm kê hiện trường)', t: 't', list: 1 },
       { k: 'file', ko: '파일', vi: 'File', t: 't' },
+      { k: 'sheet', ko: '시트', vi: 'Sheet', t: 't' },
     ] },
 
     // 재고 수불 (입고·출고·이동·조정). 생산 실적 반영분은 생산일보에서 자동 계산되어 저장하지 않는다

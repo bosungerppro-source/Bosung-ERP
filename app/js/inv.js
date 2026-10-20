@@ -32,6 +32,7 @@
     { code: 'WIPx6', ko: '클릭펜 시스템·부품', vi: 'Hệ thống bút bấm', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP06 + WIP16·26·36·46·56' },
     { code: 'WIPx5', ko: '리필 컨테이너 부품', vi: 'Linh kiện hộp refill', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP15·25·35' },
     { code: 'WIP11', ko: '스탬핑 완료 배럴', vi: 'Barrel đã ép nhũ', proc: 'STP', etype: '반제품', guessed: true },
+    { code: 'WIPx1', ko: '가공 배럴', vi: 'Barrel gia công', proc: 'STP', etype: '반제품', guessed: true, note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차)' },
     { code: 'WIP55', ko: '클릭펜슬 조립품', vi: 'Bút bấm đã lắp', proc: 'ASM', etype: '반제품', guessed: true },
     { code: 'WIP', ko: '조립 완료', vi: 'Hoàn thành lắp ráp', proc: 'ASM', etype: '반제품' },
     { code: 'SG', ko: '마니라 포장 완료', vi: 'Đã đóng gói Manila', proc: 'PCK', etype: '반제품' },
@@ -100,6 +101,7 @@
   function stageOf(seg1) {
     const s = up(seg1); if (!s) return 'ETC';
     if (STAGE_IDX.has(s) && s !== 'WIPx6' && s !== 'WIPx5') return s;
+    if (/^WIP[2-9]1$/.test(s)) return 'WIPx1';      // 11차: WIP21 · 31 … = 배럴(WIP01) 계열 (WIP11 은 위에서 그대로)
     if (/^WIP[0-9]6$/.test(s)) return 'WIPx6';
     if (/^WIP[1-9]5$/.test(s)) return 'WIPx5';      // WIP55 is matched exactly above
     if (s === 'FD') return 'FG';                     // 접두어 FD- 는 FG 오타로 본다 (자료 점검에 표시)
@@ -176,27 +178,37 @@
   });
 
   const openRows = () => DB.memo('inv.open', ['stock_open'], () => {
-    const by = { WH: new Map(), FAC: new Map() }, date = { WH: null, FAC: null }, n = { WH: 0, FAC: 0 };
-    DB.rows('stock_open').forEach(r => {
-      const sc = r.scope === 'FAC' ? 'FAC' : 'WH'; const c = str(r.code); if (!c) return;
-      const o = by[sc].get(c) || { qty: 0, sets: null, pcs: null, unit: r.unit, name: r.name };
+    // 11차: grp 'floor' = 현장 실사(TỒN KHO) 로 올린 공정 중 재고 — ECOUNT 기초재고(창고 · 공장)와 따로 모은다
+    const by = { WH: new Map(), FAC: new Map() }, floor = new Map(), date = { WH: null, FAC: null, FLOOR: null }, n = { WH: 0, FAC: 0, FLOOR: 0 };
+    const add = (m, r, c) => {
+      const o = m.get(c) || { qty: 0, sets: null, pcs: null, unit: r.unit, name: r.name };
       o.qty += num(r.qty);
       if (r.sets !== undefined && r.sets !== null && r.sets !== '') o.sets = (o.sets || 0) + num(r.sets);
       if (r.pcs !== undefined && r.pcs !== null && r.pcs !== '') o.pcs = (o.pcs || 0) + num(r.pcs);
-      by[sc].set(c, o); n[sc]++;
+      m.set(c, o);
+    };
+    DB.rows('stock_open').forEach(r => {
+      const c = str(r.code); if (!c) return;
+      const sc = r.grp === 'floor' ? 'FLOOR' : r.scope === 'FAC' ? 'FAC' : 'WH';
+      add(sc === 'FLOOR' ? floor : by[sc], r, c); n[sc]++;
       if (r.date && (!date[sc] || r.date > date[sc])) date[sc] = r.date;
     });
-    return { by, max: date, n };
+    return { by, floor, max: date, n };
   });
   /** 기초재고: 범위별 수량 + 기준일. 기준일은 설정(meta.openDate, 기초재고를 올릴 때 저장)이 이기고, 없으면 행 날짜의 최댓값 —
-      행 하나를 나중 날짜로 더하거나 고쳐도 그 범위 전체의 기준일이 바뀌지 않는다 */
-  INV.opening = () => { const o = openRows(); const md = DB.meta.openDate || {}; return { by: o.by, n: o.n, max: o.max, date: { WH: md.WH || o.max.WH, FAC: md.FAC || o.max.FAC } }; };
+      행 하나를 나중 날짜로 더하거나 고쳐도 그 범위 전체의 기준일이 바뀌지 않는다. FLOOR = 현장 실사 기준일 (현장 실사 행이 있을 때만) */
+  INV.opening = () => { const o = openRows(); const md = DB.meta.openDate || {};
+    return { by: o.by, floor: o.floor, n: o.n, max: o.max, date: { WH: md.WH || o.max.WH, FAC: md.FAC || o.max.FAC, FLOOR: o.n.FLOOR ? (md.FLOOR || o.max.FLOOR) : null } }; };
+  /** 현장 실사(공정 중 재고)를 올렸는가 */
+  INV.floorActive = () => INV.opening().n.FLOOR > 0;
+  /** 이 품목의 기준일 {WH, FAC}: 현장 실사가 있으면 공정 중 품목은 현장 실사일, 그 밖(원부자재 · 포장품)은 ECOUNT 기초재고 기준일 */
+  INV.openDateFor = (m) => { const d = INV.opening().date; return d.FLOOR && m && INV.inProcess(m) ? { WH: d.FLOOR, FAC: d.FLOOR } : { WH: d.WH, FAC: d.FAC }; };
   /** 이동 전표 등 자동 수불의 날짜: 오늘 — 단, 오늘이 기초재고 기준일 이전 · 당일이면 기준일 다음 날 (기준일 당일 수불은 기초재고에 들어 있다고 보므로) */
   INV.suggestDate = () => { const od = INV.openDates(); const t = F.today(); return !od.any || t > od.any ? t : F.addDays(od.any, 1); };
-  /** 계산 캐시 키에 넣는 값: 기초재고 기준일 · 공정 단위 (설정만 바뀌어도 다시 계산되게) */
-  const calcSig = () => { const d = INV.opening().date; return (d.WH || '') + '/' + (d.FAC || '') + '|' + ERP.PROC.map(p => p.id + ':' + (p.unit || '')).join(','); };
-  /** {WH, FAC, any, all} opening dates */
-  INV.openDates = () => { const d = INV.opening().date; const arr = [d.WH, d.FAC].filter(Boolean).sort(); return { WH: d.WH, FAC: d.FAC, any: arr.length ? arr[arr.length - 1] : null, first: arr[0] || null }; };
+  /** 계산 캐시 키에 넣는 값: 기초재고 기준일(현장 실사 포함) · 공정 단위 (설정만 바뀌어도 다시 계산되게) */
+  const calcSig = () => { const d = INV.opening().date; return (d.WH || '') + '/' + (d.FAC || '') + '/' + (d.FLOOR || '') + '|' + ERP.PROC.map(p => p.id + ':' + (p.unit || '')).join(','); };
+  /** {WH, FAC, FLOOR, any, first} opening dates (any · first = ECOUNT 기초재고 기준일 중 가장 늦은 · 이른 날) */
+  INV.openDates = () => { const d = INV.opening().date; const arr = [d.WH, d.FAC].filter(Boolean).sort(); return { WH: d.WH, FAC: d.FAC, FLOOR: d.FLOOR, any: arr.length ? arr[arr.length - 1] : null, first: arr[0] || null }; };
 
   // ------------------------------------------------------------------ transaction effects
   /** signed effects of one transaction on the scopes: [[scope, qty], ...] */
@@ -215,7 +227,7 @@
   };
   /** does a dated effect on `scope` count after the opening stock? (same-day rows are part of the opening) */
   const counts = (date, scope, od) => { const d = od[scope]; return !d || !date || date > d; };
-  INV.countsAfterOpen = (date, scope) => counts(date, scope, INV.opening().date);
+  INV.countsAfterOpen = (date, scope, item) => counts(date, scope, item ? INV.openDateFor(item) : INV.opening().date);
 
   // ------------------------------------------------------------------ 7차: 원부자재 / 생산현장 구분
   const MAT_STAGES = new Set(['RM', 'SM', 'CM']);
@@ -226,7 +238,15 @@
     return 'floor';
   };
   INV.MAT_STAGES = ['RM', 'SM', 'CM'];
-  INV.FLOOR_STAGES = ['WIP00', 'WIP01', 'WIP02', 'WIP03', 'WIP04', 'WIPx6', 'WIPx5', 'WIP11', 'WIP55', 'WIP', 'SG', 'FG'];
+  INV.FLOOR_STAGES = ['WIP00', 'WIP01', 'WIP02', 'WIP03', 'WIP04', 'WIPx6', 'WIPx5', 'WIP11', 'WIPx1', 'WIP55', 'WIP', 'SG', 'FG'];
+  // 11차: 배럴 계열 = WIP01 + WIP11 + WIP21 · 31 … (WIPx1). 조립품(WIP) = 심(WIP00) + 배럴 계열 + 노즈콘(WIP02) + 그 밖의 WIP0x 부품
+  INV.BARREL_STAGES = ['WIP01', 'WIP11', 'WIPx1'];
+  INV.isBarrel = (st) => INV.BARREL_STAGES.includes(st);
+  // 11차: 공정 중 재고 = WIP 단계 (마니라 · 박스 포장은 아님). 현장 실사(TỒN KHO)를 올리면 이 단계는 현장 실사 기준일 · 수량을 쓴다
+  INV.WIP_STAGES = ['WIP00', 'WIP01', 'WIP02', 'WIP03', 'WIP04', 'WIPx6', 'WIPx5', 'WIP11', 'WIPx1', 'WIP55', 'WIP'];
+  const WIP_SET = new Set(INV.WIP_STAGES);
+  /** 공정 중 품목인가 (단계 코드 · 품목 행 · 재고 행 모두 받음) */
+  INV.inProcess = (x) => WIP_SET.has(typeof x === 'string' ? x : INV.info(x).stage);
 
   // ------------------------------------------------------------------ 7차: 코드 연결 (생산일보 코드 · 원료 이름 → ECOUNT 품목코드)
   const mk3 = (proc, div, src) => up(proc) + '|' + normName(div) + '|' + normName(src);
@@ -291,7 +311,7 @@
     if (proc === 'REF') { const p = pickPart(['WIP00'], (pinf && pinf.line) || line, name, pinf && pinf.sub, src); if (p && p.code) add(IT.get(p.code), p.conf, p.how); if (p && p.cands) p.cands.forEach(c => add(IT.get(c), 'review', 'code')); }
     else if (proc === 'INJ') { const stg = PART_OF_INJ[normName(src)]; if (stg) { const c = byStageLine().get(stg + '|' + line) || []; const w = LINE_WORD[line]; const named = w ? c.filter(x => toks(x.name).includes(w)) : [];
       if (c.length === 1) add(c[0], 'high', 'shared'); else if (named.length === 1) add(named[0], stg === 'WIP03' || stg === 'WIP04' ? 'high' : 'review', 'line-name'); c.slice(0, 5).forEach(x => add(x, 'review', 'line')); } }
-    else if (proc === 'STP') { const p = pickPart(['WIP11'], line, name, '', src); if (p && p.code) add(IT.get(p.code), p.conf, p.how); }
+    else if (proc === 'STP') { const p = pickPart(['WIP11', 'WIPx1'], line, name, '', src); if (p && p.code) add(IT.get(p.code), p.conf, p.how); }
     else if (proc === 'ASM' || proc === 'WRP') { const p = pickPart(['WIP', 'WIP55'], line, name, '', src); if (p && p.code) add(IT.get(p.code), p.conf === 'high' ? 'review' : p.conf, p.how); }
     else if (proc === 'PCK') { const k = normName(src); DB.rows('items').forEach(r => { const st = INV.info(r).stage; if ((st === 'SG' || st === 'FG') && k.length >= 4 && normName(r.erp_code).includes(k)) add(r, 'review', 'erp'); }); }
     INV.search(src, 4).forEach(r => add(r, 'review', 'search'));
@@ -318,7 +338,7 @@
 
   // ------------------------------------------------------------------ 7차: 조립 · 스탬핑 BOM 자동 구성 (ECOUNT 품목코드로)
   const ROLES = [
-    { role: 'refill', st: ['WIP00'], old: 'refill_code', ko: '심 (리필)', vi: 'Lõi' }, { role: 'barrel', st: ['WIP11', 'WIP01'], old: 'barrel_code', ko: '배럴', vi: 'Barrel' },
+    { role: 'refill', st: ['WIP00'], old: 'refill_code', ko: '심 (리필)', vi: 'Lõi' }, { role: 'barrel', st: ['WIP11', 'WIPx1', 'WIP01'], old: 'barrel_code', ko: '배럴', vi: 'Barrel' },
     { role: 'nose', st: ['WIP02'], old: 'nose_code', ko: '노즈콘', vi: 'Nose cone' }, { role: 'holder', st: ['WIP03'], old: 'holder', ko: '홀더', vi: 'Holder' }, { role: 'spoon', st: ['WIP04'], old: 'spoon', ko: '스푼', vi: 'Spoon' }];
   const STP_ROLES = [{ role: 'barrel', st: ['WIP01'], ko: '배럴 (스탬핑 전)', vi: 'Barrel (trước ép nhũ)' }];
   INV.ASM_ROLES = ROLES; INV.STP_ROLES = STP_ROLES;
@@ -363,7 +383,9 @@
 
   // ------------------------------------------------------------------ production postings (computed from prod_log)
   INV.prodMode = () => { const v = DB.setting('prodPost', 'in_bom'); return v === 'off' || v === 'in' ? v : 'in_bom'; };
-  INV.PROD_MODES = () => [{ v: 'in_bom', label: L('생산량 입고 + BOM 자재 차감', 'Nhập SX + trừ vật tư theo BOM') }, { v: 'in', label: L('생산량만 입고', 'Chỉ nhập sản lượng') }, { v: 'off', label: L('반영 안 함', 'Không cập nhật') }];
+  INV.PROD_MODES = () => [{ v: 'in_bom', label: L('생산량 입고 + BOM 현장 부품 차감 (원부자재 제외)', 'Nhập SX + trừ linh kiện hiện trường theo BOM (không trừ NVL)') }, { v: 'in', label: L('생산량만 입고', 'Chỉ nhập sản lượng') }, { v: 'off', label: L('반영 안 함', 'Không cập nhật') }];
+  /** 11차: 원부자재(원재료 · 부자재 · 소모품)인가 — 생산 반영은 이 품목을 절대 차감하지 않는다 */
+  const isMatItem = (it) => !!it && INV.groupOf(Object.assign({ m: it }, INV.info(it))) === 'mat';
 
   function bomIndex() {
     return DB.memo('inv.bomIdx', ['bom', 'bom_lines', 'recipes', 'products'], () => {
@@ -408,19 +430,24 @@
     return null;
   }
 
-  /** compute postings for prod_log-like rows. returns {rows, diag}. rows: stock_tx-like objects with kind PROD / USE */
+  /** compute postings for prod_log-like rows. returns {rows, diag}. rows: stock_tx-like objects with kind PROD / USE
+      11차: BOM 으로 차감하는 것은 현장 재고(반제품 · 완제품)뿐 — 원재료 · 부자재 · 소모품(사출 수지 · 배합표 원료 · BOM 의 부자재)은 절대 차감하지 않고 diag.matSkip 에만 남긴다.
+      현장 실사가 있으면 공정 중 품목은 현장 실사일 다음 날부터, 그 밖의 품목은 ECOUNT 기초재고 기준일 다음 날부터 반영한다. */
   INV.postRows = function (prodRows, opt) {
     opt = opt || {};
     const mode = opt.mode || INV.prodMode(); const od = INV.opening().date; const IT = INV.items(); const rmBy = INV.rmByName(); const MAP = INV.codeMap();
-    const diag = { mode, open: od.FAC || od.WH || null, considered: 0, before: 0, prod: 0, use: 0, mapped: 0, resin: 0, notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), similar: new Map(), bomSrc: {} };
-    // 원료 이름 → RM 품목: 사용자가 연결한 것(code_map raw)이 먼저, 그다음 이름이 같은 RM
+    const diag = { mode, open: od.FAC || od.WH || od.FLOOR || null, openFloor: od.FLOOR || null, considered: 0, before: 0, beforeFloor: 0, prod: 0, use: 0, mapped: 0, resin: 0,
+      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), similar: new Map(), bomSrc: {} };
+    // 원료 이름 → RM 품목: 사용자가 연결한 것(code_map raw)이 먼저, 그다음 이름이 같은 RM (차감하지 않고 진단에 이름만 쓴다)
     const rawItem = (name) => { const c = MAP.raw(name); const a = c ? IT.get(c) : null; return a || rmBy.get(normName(name)) || null; };
     const out = [];
     if (mode === 'off') return { rows: out, diag };
-    const openDate = od.FAC || od.WH;
+    const openDate = [od.FAC, od.WH, od.FLOOR].filter(Boolean).sort()[0];
     if (!openDate) { diag.noOpen = true; return { rows: out, diag }; }
     const bump = (m, k, q) => { const o = m.get(k) || { n: 0, qty: 0 }; o.n++; o.qty += q || 0; m.set(k, o); };
     const procOf = (id) => ERP.PROC.find(x => x.id === id);
+    /** 이 품목의 기준일 다음 날인가 (현장 실사 품목은 현장 실사일) */
+    const after = (date, it) => counts(date, 'FAC', INV.openDateFor(it));
     (prodRows || []).forEach(r => {
       if (!r || !r.date) return;
       if (r.date <= openDate) { diag.before++; return; }
@@ -431,12 +458,11 @@
       if (!item && src) { const mc = MAP.daily(r.process, r.division, src); if (mc) { item = IT.get(mc); if (item) diag.mapped++; } }
       const pcs = C.qty(r); const P = procOf(r.process); const setProc = r.process === 'PCK' || (P && P.unit === 'set');
       const base0 = { date: r.date, scope: 'FAC', proc: r.process, ref: r._id, src: 'daily:' + (r.process || '') + ':' + r.date };
-      // injection: the resin weight written on the report is used up (unless the part has its own BOM)
+      // injection: the resin weight written on the report is NOT deducted (11차: 원재료는 생산 반영으로 건드리지 않는다) — only noted
       const resin = () => {
         if (mode !== 'in_bom' || r.process !== 'INJ' || !str(r.raw_material) || !(num(r.raw_kg) > 0)) return;
         if (item && bomIndex().lines.get(item.code)) return;
-        const rm = rawItem(r.raw_material); if (!rm) { bump(diag.rawUnmatched, str(r.raw_material), num(r.raw_kg)); return; }
-        out.push(Object.assign({ kind: 'USE', from_scope: 'FAC', code: rm.code, name: rm.name, qty: r4(num(r.raw_kg)), unit: INV.unitShow(rm.unit) || 'kg', parent: item ? item.code : src }, base0)); diag.use++; diag.resin++;
+        const rm = rawItem(r.raw_material); bump(diag.matSkip, rm ? rm.code : str(r.raw_material), num(r.raw_kg));
       };
       if (!item) { bump(diag.notItem, (r.process || '') + '|' + str(r.division) + '|' + (src || '(' + L('코드 없음', 'không mã') + ')'), pcs); resin(); return; }
       const unit = INV.unitN(item.unit); const spc = num(item.set_per_ct), pps = num(item.pcs_per_set);
@@ -447,9 +473,10 @@
       else if (unit === 'kg') mainQ = num(r.weight_kg) || null;
       else mainQ = pcs;
       if (mainQ === null || !isFinite(mainQ)) { bump(diag.noConv, item.code, setProc ? num(r.ok_qty) : pcs); resin(); return; }
-      if (!mainQ) { resin(); return; }   // 양품 0 (전부 불량 · 시험 사출)이어도 사출 원료는 쓴 것
+      if (!mainQ) { resin(); return; }   // 양품 0 (전부 불량 · 시험 사출)
       const base = base0;
-      out.push(Object.assign({ kind: 'PROD', to_scope: 'FAC', code: item.code, name: item.name, qty: r4(mainQ), unit: INV.unitShow(item.unit) }, base)); diag.prod++;
+      if (after(r.date, item)) { out.push(Object.assign({ kind: 'PROD', to_scope: 'FAC', code: item.code, name: item.name, qty: r4(mainQ), unit: INV.unitShow(item.unit) }, base)); diag.prod++; }
+      else diag.beforeFloor++;   // 현장 실사일 이전 생산 — 실사 수량에 이미 들어 있다
       if (mode !== 'in_bom') return;
       if (r.process === 'INJ' && !bomIndex().lines.get(item.code)) { resin(); return; }
       const bm = bomOf(item, r.process, diag);
@@ -458,9 +485,11 @@
       bm.kids.forEach(k => {
         const basisQ = k.basis === 'main' ? mainQ : k.basis === 'set' ? (sets !== null ? sets : (pps ? pcs / pps : null)) : (pcs || (sets !== null && pps ? sets * pps : 0));
         if (!basisQ) return;
-        let kid;
-        if (k.raw) { kid = rawItem(k.raw); if (!kid) { bump(diag.rawUnmatched, k.raw, basisQ * k.per); return; } }
-        else { kid = IT.get(k.code); if (!kid) { bump(diag.missingPart, k.code, basisQ * k.per); return; } }
+        // 11차: 배합표 원료(g/개)는 원재료 — 차감하지 않는다 (소요량 · 신고서 계산용)
+        if (k.raw) { const rk = rawItem(k.raw); bump(diag.matSkip, rk ? rk.code : k.raw, basisQ * k.per); return; }
+        const kid = IT.get(k.code); if (!kid) { bump(diag.missingPart, k.code, basisQ * k.per); return; }
+        if (isMatItem(kid)) { bump(diag.matSkip, kid.code, basisQ * k.per); return; }   // 11차: BOM 에 원부자재가 있어도 차감하지 않는다
+        if (!after(r.date, kid)) return;   // 현장 실사일 이전 소모 — 실사 수량에 이미 빠져 있다
         out.push(Object.assign({ kind: 'USE', from_scope: 'FAC', code: kid.code, name: kid.name, qty: r4(basisQ * k.per), unit: INV.unitShow(kid.unit), parent: item.code }, base)); diag.use++;
       });
     });
@@ -480,17 +509,22 @@
     const mode = INV.prodMode();
     return DB.memo('stock6:' + (upTo || '') + ':' + mode + ':' + calcSig(), ['items', 'stock_open', 'stock_tx', 'prod_log', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_dict', 'code_map'], () => {
       const IT = INV.items(), op = INV.opening(), od = op.date, map = new Map();
+      // 11차: 현장 실사가 있으면 공정 중 품목은 현장 실사 수량 · 기준일만 쓴다 (ECOUNT 기초재고의 같은 품목 숫자는 쓰지 않음)
+      const fl = op.n.FLOOR > 0 && !!od.FLOOR; const odF = { WH: od.FLOOR, FAC: od.FLOOR };
+      const floorItem = (s) => fl && WIP_SET.has(s.stage);
       const get = (code) => { const m = IT.get(code); const key = m ? m.code : str(code); let s = map.get(key); if (!s) { s = mk(key, m); map.set(key, s); } return s; };
       IT.m.forEach((m, c) => { map.set(c, mk(c, m)); });
-      ['WH', 'FAC'].forEach(sc => op.by[sc].forEach((o, c) => {
-        const s = get(c); s.open[sc] += o.qty; s.by[sc] += o.qty;
+      const open = (s, sc, o) => {
+        s.open[sc] += o.qty; s.by[sc] += o.qty;
         if (o.sets !== null) s.openSets = (s.openSets || 0) + o.sets; if (o.pcs !== null) s.openPcs = (s.openPcs || 0) + o.pcs;
         if (!s.name && o.name) s.name = str(o.name); if (!s.unit && o.unit) { s.unit = INV.unitShow(o.unit); s.prim = s.unit || 'PCS'; }
-      }));
+      };
+      ['WH', 'FAC'].forEach(sc => op.by[sc].forEach((o, c) => { const s = get(c); if (!floorItem(s)) open(s, sc, o); }));
+      op.floor.forEach((o, c) => { const s = get(c); s.floorOpen = true; open(s, 'FAC', o); });
       const apply = (t) => {
         if (!t.code || (upTo && t.date > upTo)) return;
-        const s = get(t.code); let any = false;
-        INV.effects(t).forEach(([sc, q]) => { if (!counts(t.date, sc, od)) return; s.by[sc] += q; any = true; });
+        const s = get(t.code); let any = false; const odS = floorItem(s) ? odF : od;
+        INV.effects(t).forEach(([sc, q]) => { if (!counts(t.date, sc, odS)) return; s.by[sc] += q; any = true; });
         if (!any) return;
         const q = num(t.qty);
         if (t.kind === 'IN') s.in += q; else if (t.kind === 'OUT') s.out += q; else if (t.kind === 'MOVE') s.move += q; else if (t.kind === 'PROD') s.prod += q; else if (t.kind === 'USE') s.use += q; else if (t.kind === 'ADJ') s.adj += q;
@@ -534,14 +568,16 @@
 
   // ------------------------------------------------------------------ ledger (수불부)
   INV.ledger = function (code) {
-    const m = INV.item(code); const key = m ? m.code : str(code); const op = INV.opening(); const od = op.date;
+    const m = INV.item(code); const key = m ? m.code : str(code); const op = INV.opening();
+    // 11차: 현장 실사가 있는 공정 중 품목은 현장 실사 수량 · 기준일에서 시작한다
+    const fl = op.n.FLOOR > 0 && !!op.date.FLOOR && !!m && INV.inProcess(m); const od = fl ? { WH: op.date.FLOOR, FAC: op.date.FLOOR } : op.date;
     const evs = [];
     DB.rows('stock_tx').forEach(t => { const it = t.code ? INV.item(t.code) : null; if ((it ? it.code : str(t.code)) === key) evs.push(Object.assign({ _manual: true }, t)); });
     INV.prodPost().rows.forEach(t => { if (t.code === key) evs.push(t); });
     evs.sort((a, b) => String(a.date).localeCompare(String(b.date)) || ((a.kind === 'PROD' ? 0 : 1) - (b.kind === 'PROD' ? 0 : 1)));
-    const ow = op.by.WH.get(key), of = op.by.FAC.get(key);
+    const ow = fl ? null : op.by.WH.get(key), of = fl ? op.floor.get(key) : op.by.FAC.get(key);
     const bal = { WH: ow ? ow.qty : 0, FAC: of ? of.qty : 0 };
-    const rows = [{ open: true, date: od.WH || od.FAC || '', kind: 'OPEN', wh: bal.WH, fac: bal.FAC, balWH: bal.WH, balFAC: bal.FAC, bal: bal.WH + bal.FAC }];
+    const rows = [{ open: true, floor: fl, date: fl ? op.date.FLOOR : (od.WH || od.FAC || ''), kind: 'OPEN', wh: bal.WH, fac: bal.FAC, balWH: bal.WH, balFAC: bal.FAC, bal: bal.WH + bal.FAC }];
     evs.forEach(t => {
       const eff = { WH: 0, FAC: 0 }; let before = true;
       INV.effects(t).forEach(([sc, q]) => { if (counts(t.date, sc, od)) { eff[sc] += q; before = false; } });

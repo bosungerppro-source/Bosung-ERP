@@ -36,6 +36,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 
 ### 4. 도메인 규칙
 - 재고(6차) = ECOUNT 기초재고(기준일) + 기준일 이후 수불(입고·출고·이동·조정) + 생산일보 자동 반영(입고·BOM 차감). 범위는 창고 / 공장 2묶음. 자세한 규칙은 아래 2-5.
+- **11차부터**: 생산 반영의 BOM 차감은 현장 재고(반제품 · 완제품)만 — 원부자재(RM · SM · CM)는 절대 차감하지 않는다. 공정 중(WIP 단계) 품목은 현장 실사(TỒN KHO → `grp: 'floor'`)가 기초 · 기준일 (원부자재는 ECOUNT). 배럴 계열 = WIP01 · WIP11 · WIPx1. 아래 2-10.
 - 안전재고 상태: 정상 / 임박(<120%) / 미달 / 마이너스 / 기준없음.
 - 수주 상태: 완료 / 납기경과 / 생산중 / 대기. 포장 실적(set)은 포장일보의 PO 번호로 자동 집계.
 - 배합표 coef = 제품 1개당 원료 g. 원료 소요 kg = 수량 × coef ÷ 1000. 수량은 색상수로 균등 배분.
@@ -176,3 +177,14 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **설치 · 삭제 중 실행 감지**: 설치 폴더의 exe 를 쓰기 모드로 열어 보고 실패하면 "실행 중 — 닫고 다시 시도" (`CheckRunning` / `un.CheckRunning`).
 - **현장 일보 날짜**: `docs/GUIDE_EXCEL_DATES.md` (생산일자 칸 위치 · `2026-10-08` 또는 `08/10/2026` · 데이터 유효성 검사 · 지역 형식).
 - **SheetJS 0.20.3 은 보류**: cdn.sheetjs.com 이 작업 환경에서 막힘. 열리면 `app/lib/xlsx.full.min.js` + 개발용 `xlsx` 교체 후 v7 · v8 · import 시험.
+
+### 2-10. 11차: 공정 중(현장) 재고 · 원부자재 분리 · 배럴 계열 · BOM 사용량 (v1.6.0, 2026-10-20)
+자세한 요청 원문 · 해석 · 규칙은 `docs/PROMPT_v11_FLOOR.md`, 작업 기록은 `docs/history/v11_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **원부자재는 생산 반영으로 절대 차감하지 않는다**: `INV.postRows` 는 원부자재(`isMatItem` = `INV.groupOf` 'mat') USE 를 만들지 않고, 사출 수지(`raw_kg`) · 배합표 원료(recipe kid)도 차감하지 않는다 → `diag.matSkip` (코드 · 원료 이름별 행 · 수량)에만 남긴다. 8차의 "사출 원료 차감 · 원료 연결로 차감" 규칙은 이것으로 바뀌었다 (원료 연결 `code_map raw` 는 진단에 이름을 붙일 때만 쓴다). 원부자재 재고는 수불(입고 · 출고 · 이동 · 조정)로만 바뀐다.
+- **공정 중 재고 = 현장 실사**: 인식기 `floor_count` (머리글 `Mã mặt hàng · ERP CODE · SẢN XUẤT`, 시트마다 TOTAL). `stock_open` 행에 `grp: 'floor'` · scope FAC · `file` · `sheet`, 기준일 `meta.openDate.FLOOR` (파일 이름의 날짜, 화면에서 고칠 수 있음). WIP 단계(`INV.WIP_STAGES`)만 받고 원부자재 · 포장품 · ERP CODE 없는 행은 제외로 보인다. 품목 마스터에 없으면 ERP CODE 로 만든다(`src: 'floor'`).
+- **현장 실사가 있으면** 공정 중 품목의 기초 = 현장 실사 행만 (ECOUNT 의 같은 품목 숫자 무시), 기준일 = 현장 실사일 (`INV.openDateFor(item)` — 수불 · 생산 반영 · 수불부 · 수불 입력 경고 모두). ECOUNT 재고현황 "기초재고로 설정" 은 `grp: 'floor'` 행을 지우지 않는다. 현장 실사를 다시 올리면 다른 파일 · 기준일의 현장 실사 행을 모두 바꾼다 (같은 파일의 시트는 차례로 더함).
+- **배럴 계열**: `WIP[2-9]1` → 단계 `WIPx1` (가공 배럴), `INV.BARREL_STAGES = WIP01 · WIP11 · WIPx1`. 조립 BOM 배럴 후보 순서 WIP11 → WIPx1 → WIP01, 스탬핑 일보 제안 WIP11 · WIPx1. `DB.upgradeV11` 이 예전에 ETC 로 저장한 WIPn1 품목을 다시 분류.
+- **BOM 사용량(배합표)**: 인식기 `recipes_usage` (`components` 시트, 첫 칸 `code` + `item code` + `color`), 기본 전체 교체, 같은 code 는 첫 행, 글자 열 = `note`, `열N` · 빈 열 제외, `meta.recipeSrc` 기록(배합표 탭에 표시). 소요량 · 신고서용 — 재고 차감 없음. `XL.apply` 는 반영 뒤 `job.after` 를 부른다, 업로드 화면은 `job.onFile` 을 부른다.
+- 시험: `npm run test:v11` 50개 + v9 · v8 · v7 · assistant (사출 원료 · 원료 연결 기대값을 11차 규칙으로 고침).

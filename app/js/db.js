@@ -116,6 +116,7 @@
       if (!DB.meta.seeded) await DB.loadSeed(true);
       else if (!DB.meta.v6) await DB.upgradeV6();
       await DB.upgradeV8();
+      await DB.upgradeV11();
       DB.ready = true;
       // 창을 닫거나 새로 고칠 때 대기 중인 저장을 바로 보낸다 (설치형은 창 닫기 전에 electron 이 flush 를 기다림)
       window.addEventListener('beforeunload', (e) => {
@@ -197,6 +198,14 @@
       if (DB.meta.openDate || !DB.rows('stock_open').length) return;
       const od = {}; DB.rows('stock_open').forEach(r => { const sc = r.scope === 'FAC' ? 'FAC' : 'WH'; if (r.date && (!od[sc] || r.date > od[sc])) od[sc] = r.date; });
       DB.meta.openDate = od; await DB.saveMeta();
+    },
+    /** 11차(v1.6.0): WIP21 · 31 … 품목은 가공 배럴(WIPx1, 배럴 계열) — 예전 판이 '기타(ETC)'로 저장한 단계를 다시 매긴다 */
+    async upgradeV11() {
+      if (DB.meta.v11) return;
+      const INV = ERP.inv; let n = 0;
+      if (INV) DB.rows('items').forEach(r => { if (/^\s*WIP[2-9]1-/i.test(String(r.erp_code || '')) && r.stage !== 'WIPx1') { INV.classify(r); n++; } });
+      if (n) DB.touch('items');
+      DB.meta.v11 = new Date().toISOString(); await DB.saveMeta();
     },
     rows(n) { return DB.t[n] || (DB.t[n] = []); },
     onChange(fn) { DB._listeners.push(fn); },
@@ -458,6 +467,7 @@
       await DB.persistAll();
       if (!DB.meta.v6) await DB.upgradeV6(); // 5차 백업을 복원한 경우 ECOUNT 기준 자료를 더한다
       await DB.upgradeV8();
+      await DB.upgradeV11();
       DB.emit();
     },
 

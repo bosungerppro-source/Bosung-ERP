@@ -275,6 +275,13 @@
 
   const recipeTab = (host) => {
     const sum = DB.memo('bom.recsum', ['recipes'], () => { const m = new Map(); DB.rows('recipes').forEach(r => m.set(r.code, (m.get(r.code) || 0) + C.num(r.coef))); return m; });
+    // 11차: 지금 쓰는 배합표(BOM 사용량) 파일 — 최신 판을 올리면 통째로 바뀐다. 재고 차감에는 쓰지 않는다
+    const src = DB.meta.recipeSrc;
+    host.appendChild(h('p', { class: 'help', style: { marginTop: 0 } },
+      src ? [ERP.chip('info', L('지금 배합표: ', 'Đang dùng: ') + src.file), ' ', L('올린 날 ', 'Ngày tải ') + String(src.at || '').slice(0, 10) + L(' · 품목 ', ' · ') + F.n(src.products) + L('개 · 원료 행 ', ' mã · ') + F.n(src.rows) + L('', ' dòng NL'),
+        src.dups && src.dups.length ? [' · ', ERP.chip('warn', L('중복 코드 ' + src.dups.length + '개 (첫 행 사용)', src.dups.length + ' mã trùng (dùng dòng đầu)')), ' ', h('small', { class: 'muted' }, src.dups.slice(0, 12).join(', ') + (src.dups.length > 12 ? ' …' : ''))] : null]
+        : L('아직 BOM 사용량(배합표) 파일을 올리지 않았습니다.', 'Chưa tải file định mức NVL.'),
+      h('br'), L('최신 판은 엑셀 업로드에 올리면 "전체 교체"로 통째로 바뀝니다. 배합표는 원재료 소요량(MRP) · 신고서 계산에만 쓰고, 재고(원부자재)는 차감하지 않습니다.', 'Tải bản mới nhất ở Tải Excel → "Thay toàn bộ". Chỉ dùng tính nhu cầu NVL (MRP) · tờ khai; không trừ tồn NVL.')));
     host.appendChild(ERP.grid({ table: 'recipes', pageSize: 50, maxH: '66vh', extraCols: [{ label: () => L('색상 합계 g', 'Tổng g/màu'), render: r => F.n(sum.get(r.code), 3) }] }).el);
     host.appendChild(h('p', { class: 'help' }, L('배합량은 제품 1개당 원료 g 으로 해석합니다 (원료 소요 kg = 수량 × g ÷ 1000). 기준이 다르면 엑셀의 값을 환산해서 업로드하세요.', 'Định mức hiểu là g nguyên liệu cho 1 sản phẩm (kg cần = SL × g ÷ 1000). Nếu khác, hãy quy đổi trước khi tải lên.')));
   };

@@ -2,13 +2,13 @@
 
 ## 저장소 · 받기 / Kho mã nguồn · Tải về
 - 소스: GitHub `bosungerppro-source/Bosung-ERP` (브랜치 `main`). 차수별 결정 · 작업 기록은 `docs/`.
-- 설치 파일 · 데모: 저장소의 **Releases**. 새 Release 는 **Actions → "Release — 설치 파일" → Run workflow** 에서 버전(예: `1.5.0`)을 넣으면 GitHub 가 설치 파일과 데모를 빌드해 태그와 함께 만듭니다 (`.github/workflows/release.yml`, 설명은 `docs/releases/v<버전>.md`).
+- 설치 파일 · 데모: 저장소의 **Releases**. 새 Release 는 **Actions → "Release — 설치 파일" → Run workflow** 에서 버전(예: `1.6.0`)을 넣으면 GitHub 가 설치 파일과 데모를 빌드해 태그와 함께 만듭니다 (`.github/workflows/release.yml`, 설명은 `docs/releases/v<버전>.md`).
 
 ## 구성 / Thành phần
 | 경로 | 설명 |
 |---|---|
 | `ERP_Demo.html` | 설치 없이 브라우저로 여는 테스트용 단일 파일 (데이터는 브라우저에만 저장) |
-| `ColorPencil-ERP-Setup-1.5.0.exe` | Windows 설치 프로그램 (Windows 10 이상, 사용자 폴더 설치, 관리자 권한 불필요). 이전 버전(1.4.0 · 1.3.0 등)을 쓰던 PC에 덮어 설치하면 데이터·설정은 그대로이고 고친 내용만 더해집니다. ERP 가 켜져 있으면 닫으라고 알려 줍니다 |
+| `ColorPencil-ERP-Setup-1.6.0.exe` | Windows 설치 프로그램 (Windows 10 이상, 사용자 폴더 설치, 관리자 권한 불필요). 이전 버전(1.4.0 · 1.3.0 등)을 쓰던 PC에 덮어 설치하면 데이터·설정은 그대로이고 고친 내용만 더해집니다. ERP 가 켜져 있으면 닫으라고 알려 줍니다 |
 | `google/Code.gs` | 구글 시트/드라이브 연동용 Apps Script |
 | `docs/CLAUDE_PROMPT.md` | 개발·확장용 마스터 프롬프트 |
 | `docs/PROMPT_v6_ECOUNT.md` | 6차 개정 프롬프트 (ECOUNT 자료로 품목·창고·재고 재구성) |
@@ -16,6 +16,7 @@
 | `docs/PROMPT_v8_ACCURACY.md` | 8차 개정 프롬프트 (실제 사용 전 데이터 정확성: 주/야·층별 일보, 수주 줄, 취소·보류, 입출고장, 날짜·숫자, 구글 시트) |
 | `docs/PROMPT_v9_MULTIPC_AI.md` | 9차 개정 프롬프트 (여러 PC 동시 사용 · 사내망 PIN · PC 밖 자동 백업 · AI 비서 고치기) |
 | `docs/PROMPT_v10_PARTS.md` | 10차 개정 프롬프트 (Electron 44 · 빌드 도구 업데이트 · 설치 중 실행 감지 · 날짜 형식 안내) |
+| `docs/PROMPT_v11_FLOOR.md` | 11차 개정 프롬프트 (공정 중 현장 재고 실사 · 원부자재는 생산 반영으로 차감 안 함 · 배럴 계열 WIPx1 · BOM 사용량 교체) |
 | `docs/GUIDE_EXCEL_DATES.md` | **현장 일보 엑셀 날짜 칸 입력 안내** (한국어 · 베트남어, 반장 확인표 포함) |
 | `docs/history/` | 차수별 작업 기록 |
 | `app/` `server.js` `electron/` | 소스 코드 (비서: `app/js/assistant*.js`) |
@@ -26,7 +27,7 @@
 
 ## 사용 방법
 1. 설치 후 실행 → **ECOUNT 자료(2026-10-16)** 가 들어 있습니다: 품목 2,265 · 창고 11 · ERP CODE 사전 · 기초재고(창고 314 / 공장 962행). 예전 샘플(수주·생산일보·BOM 등)은 **"예시"** 로 표시되며, **설정 → 예시 데이터 한 번에 삭제**로 예시 행만 지울 수 있습니다 (새로 올리거나 입력한 행은 남음).
-   - 재고 = 기초재고 + 그 뒤의 수불(입고·출고·이동·조정) + 생산일보 자동 반영(입고 + BOM 자재 차감). 화면은 **품목 · 재고** 메뉴.
+   - 재고 = 기초재고 + 그 뒤의 수불(입고·출고·이동·조정) + 생산일보 자동 반영(입고 + BOM 현장 부품 차감 — 원부자재는 차감하지 않음). 공정 중 재고는 현장 실사(TỒN KHO)를 올리면 그 수량 · 기준일에서 시작합니다. 화면은 **품목 · 재고** 메뉴.
    - 매일: 생산일보와 수불(양식 또는 KHO NVL 입출고장)을 **엑셀 업로드**에 올리거나, 급한 건은 **품목·재고 → 수불 입력**.
    - ECOUNT와 맞춰 볼 때: ECOUNT 재고현황을 "비교만"으로 올리면 **품목·재고 → ECOUNT 비교**에 차이가 나옵니다.
 2. **종합 현황 꾸미기 (위젯)**: `✎ 화면 편집` → 위젯을 끌어서(또는 ◀ ▶) 순서 바꾸기, `1 2 3 4` 로 가로 크기, ⚙ 로 공정 고르기, ✕ 로 빼기, `+ 위젯 추가` 로 숫자·표·차트 추가 → `편집 완료`. `기본 배치로` 를 누르면 처음 배치로 돌아갑니다. 배치는 ERP 에 저장되어 같은 ERP 에 접속하는 모든 PC 가 같이 봅니다.
@@ -62,6 +63,7 @@ npm run server      # http://127.0.0.1:3210 (브라우저 테스트)
 npm start           # Electron 실행
 npm run demo        # dist/ERP_Demo.html
 npm run test:assistant   # 비서·화면·서버 자동 시험 (Playwright 필요: npm i -D playwright)
+npm run test:v11    # 11차 현장 실사 · 원부자재 차감 안 함 · 배럴 계열 · BOM 사용량
 npm run test:v9     # 9차 여러 PC 저장 합치기 · Host/Origin · 사내망 PIN · 자동 백업
 npm run test:electron   # Electron 실행 시험 (Linux + Xvfb)
 npm run test:v8     # 8차 데이터 정확성 재현 시험 (현장 엑셀: seed/factory)

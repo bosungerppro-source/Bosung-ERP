@@ -14,11 +14,13 @@
     { kinds: ['ecount_stock'], title: L('ECOUNT 재고현황 (창고 · 공장)', 'ECOUNT · Tồn kho (Kho · Xưởng)'), when: L('처음 1회 + 비교할 때', 'Lần đầu + khi đối chiếu'), text: L('처음에는 "기초재고로 설정". 그 뒤에는 "비교만"으로 올려 ERP 재고와 차이를 봅니다 (품목·재고 → ECOUNT 비교).', 'Lần đầu: "Đặt làm tồn đầu kỳ". Sau đó: "Chỉ đối chiếu".') },
     { kinds: ['ecount_wh', 'ecount_codes'], title: L('창고리스트 · ERP CODE 설명', 'Danh sách kho · Giải thích ERP CODE'), when: L('바뀔 때만', 'Khi có thay đổi'), text: L('창고 범위(창고/공장)와 코드 이름(한/베)을 정합니다.', 'Xác định phạm vi kho và tên mã (Hàn/Việt).') },
     { kinds: ['stock_tx'], title: L('재고 수불 (입고·출고·이동·조정)', 'Nhập · xuất · chuyển · điều chỉnh'), when: L('매일', 'Hằng ngày'), daily: true, text: L('수불 양식 또는 KHO NVL 입출고장을 그대로 올립니다. 급한 건은 품목·재고 → 수불 입력.', 'Tải mẫu nhập xuất hoặc sổ KHO NVL. Việc gấp: Hàng hóa · Tồn kho → Nhập phiếu.'), btn: [L('수불 양식 받기', 'Tải mẫu'), () => ERP.ecount.txTemplate()] },
-    { kinds: ['prod_log'], title: L('생산일보 (공정별)', 'Báo cáo sản xuất'), when: L('매일', 'Hằng ngày'), daily: true, text: L('올리면 생산량 입고 · BOM 자재 차감이 재고에 자동 반영됩니다 (설정에서 방식 변경).', 'Tự động nhập SX · trừ vật tư theo BOM vào tồn (đổi trong Cài đặt).'), btn: [L('일보 양식 받기', 'Tải mẫu báo cáo'), () => XL.dailyTemplate()] },
+    { kinds: ['prod_log'], title: L('생산일보 (공정별)', 'Báo cáo sản xuất'), when: L('매일', 'Hằng ngày'), daily: true, text: L('올리면 생산량 입고 · BOM 현장 부품 차감이 재고에 자동 반영됩니다. 원부자재는 차감하지 않습니다.', 'Tự động nhập SX · trừ linh kiện hiện trường theo BOM. Không trừ NVL.'), btn: [L('일보 양식 받기', 'Tải mẫu báo cáo'), () => XL.dailyTemplate()] },
+    { kinds: ['floor_count'], title: L('현장 재고 실사 (TỒN KHO · 공정 중)', 'Kiểm kê tồn hiện trường (TỒN KHO)'), when: L('실사할 때', 'Khi kiểm kê'), text: L('공정 중 부품 · 조립 색연필의 현장 수량. 파일 이름의 날짜가 현장 기초재고 기준일이 되고, 원부자재(ECOUNT)와 따로 관리합니다.', 'Số lượng linh kiện · bút đã lắp tại hiện trường. Ngày trong tên file = ngày tồn đầu hiện trường; quản lý riêng với NVL (ECOUNT).') },
+    { kinds: ['recipes_usage'], title: L('BOM 사용량 (배합표 · 원료 g/개)', 'Định mức NVL (g/cái)'), when: L('배합이 바뀔 때', 'Khi công thức thay đổi'), text: L('최신 판을 올리면 통째로 바뀝니다. 재고는 차감하지 않고 소요량(MRP) · 신고서 계산에만 씁니다.', 'Tải bản mới nhất sẽ thay toàn bộ. Không trừ tồn; chỉ dùng tính nhu cầu (MRP) · tờ khai.') },
     { kinds: ['po'], title: L('수주 (PO)', 'Đơn hàng (PO)'), when: L('수주가 바뀔 때', 'Khi PO thay đổi'), text: L('한 PO에 여러 품번 가능. 수주 관리 화면에서 직접 입력해도 됩니다.', 'Một PO có thể nhiều mã. Có thể nhập ở màn hình Đơn hàng.') },
   ];
   ERP.lastUpload = (kinds) => DB.rows('uploads').filter(u => kinds.includes(u.kind)).reduce((a, u) => (String(u.at) > a ? String(u.at) : a), '');
-  const BOM_SRC = ['bom', 'recipes', 'products', 'item_bom']; // 생산 반영(BOM 차감)이 참고하는 예시 표
+  const BOM_SRC = ['bom', 'products', 'item_bom']; // 생산 반영(BOM 차감)이 참고하는 예시 표 (11차: 배합표는 차감에 쓰지 않음)
   const SAMPLE_TABLES = ['po', 'prod_log', 'bom', 'item_bom', 'recipes', 'refill_specs', 'products', 'semi_items', 'sub_materials', 'materials', 'inout', 'returns', 'stocktake', 'semi_stock', 'machines', 'partners'];
   // 예시 행 = 예전 샘플(첨부 엑셀)에서 온 행 (_ex 표시). 새로 올리거나 손으로 고친 행은 예시가 아니다.
   ERP.sampleCount = (t) => DB.memo('sample:' + t, [t], () => DB.rows(t).reduce((a, r) => a + (r._ex ? 1 : 0), 0));
@@ -45,7 +47,7 @@
       try { fi.value = ''; } catch (e) { /* ignore */ }
       st.jobs = [];
       for (const f of files) {
-        try { const wb = await XL.readFile(f); const jobs = XL.analyze(wb, {}); jobs.forEach(j => { j.file = f.name; if (j.table && !j.mode) j.mode = 'upsert'; }); st.jobs.push(...jobs); }
+        try { const wb = await XL.readFile(f); const jobs = XL.analyze(wb, {}); jobs.forEach(j => { j.file = f.name; if (j.table && !j.mode) j.mode = 'upsert'; if (typeof j.onFile === 'function') j.onFile(j); }); st.jobs.push(...jobs); }
         catch (e) { console.error(e); ERP.toast(f.name + ': ' + e.message, 'bad'); }
       }
       show();
@@ -66,6 +68,12 @@
         const ds = j.rows.map(r => r.date).filter(Boolean).sort();
         let dateCell = j.custom === 'stock' ? F.d(j.date) : (ds.length ? F.d(ds[0]) + (ds[0] !== ds[ds.length - 1] ? ' ~ ' + F.d(ds[ds.length - 1]) : '') : '');
         const fd = XL.fileDate(j.file);
+        // 11차: 현장 재고 실사 — 기준일(파일 이름의 날짜)을 고칠 수 있게. 같은 파일의 다른 시트도 같은 날짜로
+        if (j.custom === 'floor') {
+          const setFloorDate = (d) => { st.jobs.filter(x => x.custom === 'floor' && x.file === j.file).forEach(x => { x.date = d || null; x.needDate = !d; if (d) x.include = x.rows.length > 0; }); show(); };
+          dateCell = [h('input', { class: 'inp', type: 'date', value: j.date || '', title: L('현장 실사 기준일', 'Ngày kiểm kê'), onchange: (e) => setFloorDate(e.target.value) }),
+            !j.date ? h('div', { class: 'help', style: { color: '#B3261E' } }, L('현장 실사 기준일을 넣으세요', 'Hãy nhập ngày kiểm kê')) : (fd && fd !== j.date ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 파일명 날짜(' + fd + ')와 다름 ', '⚠ Khác ngày trong tên file (' + fd + ') '), h('button', { class: 'btn sm', onclick: () => setFloorDate(fd) }, L('파일명 날짜 적용', 'Dùng ngày tên file'))) : null)];
+        }
         if (j.table === 'prod_log' && (j.needDate || (ds.length && ds[0] === ds[ds.length - 1]))) {
           const setDate = (d) => { j.rows.forEach(r => { r.date = d; }); if (j.needDate) { j.needDate = false; j.include = true; j.note = ''; } show(); };
           const di = h('input', { class: 'inp', type: 'date', value: ds[0] || '', onchange: (e) => { if (e.target.value) setDate(e.target.value); } });
@@ -96,9 +104,15 @@
       const noScope = sel.filter(j => j.custom === 'stock' && !j.scope); if (noScope.length) { ERP.toast(L('재고현황의 범위(창고/공장)를 고르세요', 'Hãy chọn phạm vi cho file tồn kho'), 'warn'); return; }
       const reopen = sel.filter(j => j.custom === 'stock' && j.mode === 'open' && DB.rows('stock_open').some(r => r.scope === j.scope));
       if (reopen.length && !(await ERP.confirm(L('기초재고를 다시 설정합니다: ', 'Đặt lại tồn đầu: ') + reopen.map(j => ERP.scopeName(j.scope) + ' ' + j.date).join(', ') + L('\n그 날짜까지의 수불은 기초재고에 포함된 것으로 보고 재고에 더하지 않습니다. 계속할까요?', '\nPhiếu đến ngày này coi như đã nằm trong tồn đầu. Tiếp tục?'), L('재설정', 'Đặt lại'), true))) return;
+      // 11차: 현장 재고 실사 — 기준일 필수, 이전 실사를 바꿀 때는 확인
+      const floorJobs = sel.filter(j => j.custom === 'floor');
+      if (floorJobs.some(j => !j.date)) { ERP.toast(L('현장 재고의 실사 기준일을 넣으세요', 'Hãy nhập ngày kiểm kê tồn hiện trường'), 'warn'); return; }
+      const oldFloor = DB.rows('stock_open').filter(r => r.grp === 'floor' && !floorJobs.some(j => r.file === j.file && r.date === j.date));
+      if (floorJobs.length && oldFloor.length && !(await ERP.confirm(L('현장 재고(공정 중)를 다시 설정합니다: 기준일 ', 'Đặt lại tồn hiện trường (đang SX): ngày ') + floorJobs[0].date + L('\n이전 현장 실사(' + oldFloor.length + '행)는 지우고, 그 날짜까지의 생산 · 소모는 실사 수량에 들어 있다고 봅니다. 원부자재 재고는 그대로입니다. 계속할까요?', '\nXóa kiểm kê cũ (' + oldFloor.length + ' dòng). SX · tiêu hao đến ngày này coi như đã nằm trong số kiểm kê. Tồn NVL giữ nguyên. Tiếp tục?'), L('재설정', 'Đặt lại'), true))) return;
       sel.sort((a, b) => (a.prio === undefined ? 9 : a.prio) - (b.prio === undefined ? 9 : b.prio));
       // undo snapshot of every touched table
       const touched = new Set(sel.map(j => j.table)); if (sel.some(j => j.custom === 'stock')) { touched.add('items'); touched.add('ecount_snap'); }
+      if (floorJobs.length) touched.add('items');   // 현장 실사로 새로 만든 품목도 되돌린다
       touched.add('uploads');   // 되돌리면 업로드 이력(마지막 업로드일)도 되돌린다
       st.undo = { at: new Date().toISOString(), tables: {} }; touched.forEach(t => { st.undo.tables[t] = JSON.parse(JSON.stringify(DB.rows(t))); });
       const log = []; const at = F.now();
@@ -220,8 +234,9 @@
       const samples = SAMPLE_TABLES.filter(t => ERP.isSample(t));
       return h('div', { class: 'card' }, h('h3', L('재고 · 생산 반영', 'Tồn kho · cập nhật sản xuất')),
         h('div', { class: 'field' }, h('span', L('생산일보 → 재고 반영 방식', 'Báo cáo SX → cập nhật tồn')), sel),
-        h('p', { class: 'help' }, L('기본은 "생산량 입고 + BOM 자재 차감"입니다. BOM이 없는 품목은 입고만 되고 수불 내역에 경고가 나옵니다. 일보에서 매번 다시 계산하므로 같은 일보를 다시 올려도 중복되지 않습니다.', 'Mặc định: nhập sản lượng + trừ vật tư theo BOM. Mã chưa có BOM chỉ được nhập và có cảnh báo. Tính lại từ báo cáo mỗi lần nên không bị trùng.')),
-        h('dl', { class: 'kv' }, h('dt', L('기초재고 · 창고', 'Tồn đầu · Kho')), h('dd', od.WH ? od.WH + ' · ' + F.n(n.WH) + L('행', ' dòng') : '–'), h('dt', L('기초재고 · 공장', 'Tồn đầu · Xưởng')), h('dd', od.FAC ? od.FAC + ' · ' + F.n(n.FAC) + L('행', ' dòng') : '–')),
+        h('p', { class: 'help' }, L('기본은 "생산량 입고 + BOM 현장 부품 차감"입니다. BOM 으로 차감하는 것은 현장 재고(반제품 · 완제품)뿐이고, 원부자재(원재료 · 부자재 · 소모품)는 차감하지 않습니다. BOM이 없는 품목은 입고만 되고 수불 내역에 경고가 나옵니다. 일보에서 매번 다시 계산하므로 같은 일보를 다시 올려도 중복되지 않습니다.', 'Mặc định: nhập sản lượng + trừ linh kiện hiện trường theo BOM. Không trừ NVL. Mã chưa có BOM chỉ được nhập và có cảnh báo. Tính lại từ báo cáo mỗi lần nên không bị trùng.')),
+        h('dl', { class: 'kv' }, h('dt', L('기초재고 · 창고', 'Tồn đầu · Kho')), h('dd', od.WH ? od.WH + ' · ' + F.n(n.WH) + L('행', ' dòng') : '–'), h('dt', L('기초재고 · 공장', 'Tồn đầu · Xưởng')), h('dd', od.FAC ? od.FAC + ' · ' + F.n(n.FAC) + L('행', ' dòng') : '–'),
+          h('dt', L('현장 실사 (공정 중)', 'Kiểm kê hiện trường')), h('dd', od.FLOOR ? od.FLOOR + ' · ' + F.n(n.FLOOR) + L('행', ' dòng') : '–')),
         h('p', { class: 'help' }, L('기초재고를 다시 잡으려면 시작일에 ECOUNT 재고현황을 내려받아 엑셀 업로드에서 "기초재고로 설정"으로 올리세요.', 'Để đặt lại tồn đầu: tải "Tồn kho" ECOUNT vào ngày bắt đầu và chọn "Đặt làm tồn đầu kỳ".')),
         h('div', { class: 'toolbar' }, h('button', { class: 'btn', disabled: !samples.length, onclick: () => sampleDialog(samples) }, L('예시 데이터 한 번에 삭제', 'Xóa toàn bộ dữ liệu mẫu') + (samples.length ? ' (' + samples.length + ')' : ''))));
     }

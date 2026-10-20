@@ -87,7 +87,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const cm = await page.$$eval('.flow .st', a => a.map(x => x.querySelector('code').textContent));
     await ev(() => { ERP.state.matTab = 'floor'; ERP.render(); }); await page.waitForTimeout(300);
     const cf = await page.$$eval('.flow .st', a => a.map(x => x.querySelector('code').textContent));
-    eq('원부자재 탭 흐름 카드 = 원재료·부자재·소모품', cm, ['RM', 'SM', 'CM']); ok('생산현장 탭 흐름 카드 = 심 … 박스 포장 (12칸)', cf.length === 12 && cf[0] === 'WIP00' && cf[cf.length - 1] === 'FG', cf);
+    eq('원부자재 탭 흐름 카드 = 원재료·부자재·소모품', cm, ['RM', 'SM', 'CM']); ok('생산현장 탭 흐름 카드 = 심 … 박스 포장 (13칸 · 11차 가공 배럴 포함)', cf.length === 13 && cf[0] === 'WIP00' && cf[cf.length - 1] === 'FG' && cf.includes('WIP21·31…'), cf);
     await page.click('.flow .st:has-text("배럴")'); await page.waitForTimeout(300);
     const r = await ev(() => ({ stage: ERP.state.stk_floor.stage, rows: document.querySelectorAll('main table.tbl tbody tr').length }));
     eq('배럴 카드 → WIP01 필터', r.stage, 'WIP01'); ok('배럴 표에 행', r.rows > 0, r.rows);
@@ -208,21 +208,23 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
       const d = ERP.inv.prodPost().diag; const S = (c) => { const s = ERP.calc.stock().get(c); return s ? { prod: s.prod, use: s.use } : null; };
       const si = ERP.inv.suggestDaily('INJ', 'Mini', 'holder', 'holder')[0], sr = ERP.inv.suggestDaily('REF', 'Mini', 'RM01012', 'Apricot', 'BM:BM01012')[0];
       const ppItem = ERP.inv.rmByName().get('PP');
-      return { notItem: Array.from(d.notItem.keys()), raw: Array.from(d.rawUnmatched.keys()), bm: S('BM01002'), sug: [si.code, si.conf, sr.code, sr.conf], pp: ERP.inv.suggestRaw('PP').map(x => x.code), ppItem: ppItem ? ppItem.code : null, ppUse: ppItem ? S(ppItem.code).use : null, resin: d.resin }; });
+      return { notItem: Array.from(d.notItem.keys()), raw: Array.from(d.rawUnmatched.keys()), skip: Object.fromEntries(Array.from(d.matSkip.entries()).map(([k, v]) => [k, v.qty])), bm: S('BM01002'), sug: [si.code, si.conf, sr.code, sr.conf], pp: ERP.inv.suggestRaw('PP').map(x => x.code), ppItem: ppItem ? ppItem.code : null, ppUse: ppItem ? S(ppItem.code).use : null, resin: d.resin }; });
     ok('품목코드가 아닌 일보 코드 목록 (INJ Mini holder · REF RM01012)', base.notItem.includes('INJ|Mini|holder') && base.notItem.includes('REF|Mini|RM01012'), base.notItem);
-    ok('사출 원료 PP 는 예전 마스터 이름으로 바로 연결 → ' + base.ppItem + ' 50 kg 차감', base.ppItem && base.ppUse >= 50 && base.resin >= 1, base);
-    ok('모르는 원료(TEST RESIN K)는 원료 연결 목록에', base.raw.includes('TEST RESIN K') && !base.raw.includes('PP'), base.raw);
+    // 11차: 원부자재는 생산 반영으로 차감하지 않는다 — 사출 원료는 이름만 알아보고 진단(matSkip)에 남긴다
+    ok('사출 원료 PP 는 예전 마스터 이름으로 알아보지만 차감하지 않음 → ' + base.ppItem + ' 50 kg 은 진단에만', base.ppItem && !base.ppUse && base.skip[base.ppItem] >= 50 && base.resin === 0, base);
+    ok('모르는 원료(TEST RESIN K)도 차감하지 않고 진단에만 (원료 연결 목록 없음)', base.skip['TEST RESIN K'] >= 30 && !base.raw.length, base);
     eq('제안: Mini holder → MH (확실) · RM01012 → RM112 (확실)', base.sug, ['MH', 'high', 'RM112', 'high']);
     ok('제안: PP → R-100 POLYPROPYLENE', base.pp.includes('R-100'), base.pp);
     eq('조립 BM01002 입고 1,000 (BOM 만들기 전)', base.bm.prod, 1000);
     await ev(() => { ERP.state.matTab = 'post'; ERP.goto('materials'); ERP.render(); document.querySelectorAll('main details').forEach(d => { d.open = true; }); }); await page.waitForTimeout(300);
     const clickLink = async (src) => { await page.click(`xpath=//main//tr[td/b[normalize-space()="${src}"]]//button[normalize-space()="연결"]`); await page.waitForTimeout(300); await ev(() => document.querySelectorAll('main details').forEach(d => { d.open = true; })); };
     await clickLink('holder'); await clickLink('RM01012');
-    await ev(() => { const tr = Array.from(document.querySelectorAll('main tr')).find(t => t.querySelector('td > b') && t.querySelector('td > b').textContent === 'TEST RESIN K'); tr.querySelector('input').value = 'R-102'; tr.querySelector('button.primary').click(); }); await page.waitForTimeout(300);
-    const m = await ev(() => { const S = (c) => { const s = ERP.calc.stock().get(c); return s ? { prod: s.prod, use: s.use } : null; }; const d = ERP.inv.prodPost().diag; return { maps: ERP.db.rows('code_map').map(x => [x.kind, x.proc || '', x.div || '', x.src, x.item].join('/')).sort(), mh: S('MH'), rm112: S('RM112'), r102: S('R-102'), notItem: Array.from(d.notItem.keys()), raw: Array.from(d.rawUnmatched.keys()) }; });
+    // 11차: 원료 연결 화면은 차감하지 않으므로 나오지 않는다 — 연결(code_map raw)은 진단에 품목코드를 붙일 때만 쓴다
+    await ev(() => { ERP.db.add('code_map', { kind: 'raw', src: 'TEST RESIN K', item: 'R-102' }); }); await page.waitForTimeout(100);
+    const m = await ev(() => { const S = (c) => { const s = ERP.calc.stock().get(c); return s ? { prod: s.prod, use: s.use } : null; }; const d = ERP.inv.prodPost().diag; return { maps: ERP.db.rows('code_map').map(x => [x.kind, x.proc || '', x.div || '', x.src, x.item].join('/')).sort(), mh: S('MH'), rm112: S('RM112'), r102: S('R-102'), notItem: Array.from(d.notItem.keys()), raw: Array.from(d.rawUnmatched.keys()), skip: Object.fromEntries(Array.from(d.matSkip.entries()).map(([k, v]) => [k, v.qty])), rawUi: Array.from(document.querySelectorAll('main summary')).some(s => /원료 이름 → 원재료/.test(s.textContent)) }; });
     eq('코드 연결 3건 저장', m.maps, ['daily/INJ/Mini/holder/MH', 'daily/REF//RM01012/RM112', 'raw///TEST RESIN K/R-102']);
     eq('연결 후 입고: MH 5,000 · RM112 2,000', [m.mh.prod, m.rm112.prod], [5000, 2000]);
-    ok('연결한 원료 R-102 30 kg 차감 · 목록에서 사라짐', m.r102.use >= 30 && !m.raw.includes('TEST RESIN K'), [m.r102, m.raw]);
+    ok('연결한 원료 R-102 도 차감하지 않음 (진단에 30 kg) · 원료 연결 목록 없음', (!m.r102 || !m.r102.use) && m.skip['R-102'] >= 30 && !m.raw.length && !m.rawUi, [m.r102, m.skip, m.raw, m.rawUi]);
     ok('연결한 코드는 목록에서 사라짐', !m.notItem.includes('INJ|Mini|holder') && !m.notItem.includes('REF|Mini|RM01012'), m.notItem);
     const plan = await ev(() => { const x = ERP.inv.asmPlan().find(p => p.parent === 'BM01002'); return [x.conf, x.parts.map(p => p.role + '=' + p.code + ':' + p.conf)]; });
     eq('BM01002 조립 BOM 제안 = RM102 · AB102 · MH · MS (모두 확실)', plan, ['high', ['refill=RM102:high', 'barrel=AB102:high', 'holder=MH:high', 'spoon=MS:high']]);
@@ -323,11 +325,11 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     await ev(() => { ERP.goto('settings'); ERP.render(); }); await page.waitForTimeout(200);
     await page.click('main button:has-text("예시 데이터 한 번에 삭제")'); await page.waitForSelector('.modal');
     const unchecked = await ev(() => Array.from(document.querySelectorAll('.modal label')).filter(l => !l.querySelector('input').checked).map(l => l.textContent.split(' (')[0].trim()));
-    eq('BOM 차감에 쓰는 예시 표 4개는 기본 해제', unchecked.length, 4);
+    eq('BOM 차감에 쓰는 예시 표 3개는 기본 해제 (11차: 배합표는 차감에 안 씀)', unchecked.length, 3);
     await page.click('.modal .modal-foot button.danger'); await page.waitForTimeout(400);
     const b = await ev(() => { const DB = ERP.db; return { prod: DB.rows('prod_log').length, po: DB.rows('po').length, inout: DB.rows('inout').length, items: DB.rows('items').length, open: DB.rows('stock_open').length, tx: DB.rows('stock_tx').length, fg: ERP.calc.stock().get('52-9724-K-000').by.FAC, left: ['po', 'prod_log', 'bom', 'recipes', 'materials', 'inout'].filter(t => ERP.isSample(t)), up: DB.rows('uploads').slice(-1)[0] }; });
     eq('삭제 후: 일보 2 · PO 1 (고친 행) · 입출고장 0', [b.prod, b.po, b.inout], [2, 1, 0]); eq('ECOUNT 품목·기초재고 · 수불은 그대로', [b.items, b.open, b.tx], [2265, 1276, 6]);
-    eq('새 일보의 생산 반영은 그대로 (FG 공장 640)', b.fg, 640); eq('남은 예시 = BOM·배합표 (BOM 차감용으로 남김)', b.left, ['bom', 'recipes']); ok('업로드 이력에 삭제 행 수', b.up && b.up.kind === 'sample_delete' && b.up.removed > 30000, b.up);
+    eq('새 일보의 생산 반영은 그대로 (FG 공장 640)', b.fg, 640); eq('남은 예시 = 색상별 BOM (BOM 차감용으로 남김 · 11차: 배합표는 지움)', b.left, ['bom']); ok('업로드 이력에 삭제 행 수', b.up && b.up.kind === 'sample_delete' && b.up.removed > 30000, b.up);
   }
 
   section('16. 5차에서 쓰던 데이터 폴더 → 6차 첫 실행 (자동 보강)');
@@ -384,7 +386,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const p2 = await browser.newPage(); const e2 = []; p2.on('pageerror', e => e2.push(e.message));
     await p2.goto('file://' + path.join(ROOT, 'dist/ERP_Demo.html') + '#/materials'); await p2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 }); await p2.waitForTimeout(800);
     const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.state.matTab = 'floor'; ERP.render(); const b = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b], widgets: document.querySelectorAll('.wgrid .w').length }; });
-    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 생산현장 12) · 위젯 12', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 12], 12]); ok('데모 오류 0', e2.length === 0, e2);
+    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 생산현장 13) · 위젯 12', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 13], 12]); ok('데모 오류 0', e2.length === 0, e2);
   }
 
   section('18. 저장 표시 · 닫기 전 저장 · 베트남어 빈 글자');

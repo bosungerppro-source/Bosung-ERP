@@ -8,7 +8,7 @@ BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부�
 - 화면 글자는 한국어 / 베트남어 둘 다 넣는다 (`L(ko, vi)`, 베트남어에서 숨길 글자는 `L(ko, '')`).
 - 규칙과 지금까지의 결정은 문서에 있다. 작업 전에 읽는다.
   - `docs/CLAUDE_PROMPT.md` — 마스터 규칙 (1차부터 지금까지 모든 결정, 숫자 정의)
-  - `docs/PROMPT_v6_ECOUNT.md` (6차 v1.1.0), `docs/PROMPT_v7_WIDGETS.md` (7차 v1.2.0), `docs/PROMPT_v8_ACCURACY.md` (8차 v1.3.0), `docs/PROMPT_v9_MULTIPC_AI.md` (9차 v1.4.0), `docs/PROMPT_v10_PARTS.md` (10차 v1.5.0) …
+  - `docs/PROMPT_v6_ECOUNT.md` (6차 v1.1.0), `docs/PROMPT_v7_WIDGETS.md` (7차 v1.2.0), `docs/PROMPT_v8_ACCURACY.md` (8차 v1.3.0), `docs/PROMPT_v9_MULTIPC_AI.md` (9차 v1.4.0), `docs/PROMPT_v10_PARTS.md` (10차 v1.5.0), `docs/PROMPT_v11_FLOOR.md` (11차 v1.6.0) …
   - `docs/history/*_work_log.md` — 차수별 작업 기록 (결정 · 숫자 · 검증)
 - 기존 숫자 정의(납기 경과 60일 등)와 사용자 설정(`ai*`, 위젯 배치)은 바꾸지 않는다. 바꿀 때는 문서에 이유를 남긴다.
 
@@ -17,6 +17,7 @@ BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부�
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci     # 의존성 (Electron 실행 파일은 빌드할 때 받음)
 export NODE_PATH=/opt/node22/lib/node_modules   # 전역 Playwright 사용 (Chromium: /opt/pw-browsers/chromium)
 npm run server                              # http://127.0.0.1:3210
+npm run test:v11                            # 현장 실사 · 원부자재 차감 안 함 · 배럴 계열 · BOM 사용량 (11차)
 npm run test:v9                             # 여러 PC 저장 합치기 · Host/Origin · 사내망 PIN · 자동 백업 (9차)
 npm run test:v8                             # 데이터 정확성 · 현장 엑셀 (8차)
 npm run test:v7                             # 재고 · 위젯 · 화면 (ERP_PREV=<이전 버전 소스 폴더> 를 주면 업그레이드 시험 포함)

@@ -184,6 +184,11 @@
     if (job.mode === 'open' && ex.length) detail += L(' · ⚠ 이 범위의 기존 기초재고(' + ex.length + '행, 기준일 ' + exDate + ')를 바꿉니다 (기초재고 재설정)', ' · ⚠ Thay tồn đầu hiện có (' + ex.length + ' dòng, ngày ' + exDate + ')');
     if (job.mode === 'compare' && !ex.length) detail += L(' · 이 범위에 기초재고가 없습니다 — "기초재고로 설정"을 고르세요', ' · Chưa có tồn đầu cho phạm vi này — hãy chọn "Đặt làm tồn đầu kỳ"');
     if (!job.scope) detail += L(' · 재고 범위를 고르세요', ' · Hãy chọn phạm vi');
+    // 11차: 현장 실사가 있으면 공정 중 품목은 현장 실사 수량을 쓴다 (이 파일의 그 품목 숫자는 기초에 쓰지 않음)
+    if (INV.floorActive()) {
+      const wip = job.rows.filter(r => { const it = IT.get(r.code); return it && INV.inProcess(it); }).length;
+      if (wip) detail += L(' · 공정 중 품목 ' + wip + '개는 현장 실사(기준일 ' + INV.opening().date.FLOOR + ') 수량을 그대로 씁니다', ' · ' + wip + ' mã đang SX dùng số kiểm kê hiện trường (ngày ' + INV.opening().date.FLOOR + ')');
+    }
     return { parts, detail, needScope: true };
   }
   function applyStock(job) {
@@ -193,7 +198,8 @@
       DB.t.ecount_snap = keep; DB.addMany('ecount_snap', job.rows.map(r => pick({ date: job.date, scope: job.scope, code: r.code, qty: r.qty, sets: r.sets, pcs: r.pcs })));
       return { added: job.rows.length, removed };
     }
-    const all = DB.rows('stock_open'); const keep = all.filter(r => r.scope !== job.scope); const removed = all.length - keep.length;
+    // 11차: 현장 실사(grp 'floor') 행은 ECOUNT 재고현황으로 바꾸지 않는다 — 공정 중 재고는 원부자재와 따로 관리
+    const all = DB.rows('stock_open'); const keep = all.filter(r => r.scope !== job.scope || r.grp === 'floor'); const removed = all.length - keep.length;
     DB.t.stock_open = keep; DB.addMany('stock_open', job.rows.map(r => pick(Object.assign({ date: job.date, scope: job.scope, file: job.file }, r))));
     DB.meta.openDate = Object.assign({}, DB.meta.openDate, { [job.scope]: job.date }); DB.saveMeta();   // 기준일은 범위마다 하나 (INV.opening)
     // CT·SET 환산 비율 (ECOUNT 가 계산한 Số Set / Số PCS 에서 역산) — 비어 있는 품목만 채운다
@@ -205,6 +211,68 @@
     });
     if (conv) DB.touch('items');
     return { added: job.rows.length, removed, conv };
+  }
+
+  // ------------------------------------------------------------------ 11차: 현장 재고 실사 (TỒN KHO · 공정 중 부품 · 조립 색연필)
+  // 머리글: Mã mặt hàng · Tên mặt hàng · ERP CODE · Thông số · SẢN XUẤT (시트마다 TOTAL 행). 공정 중(WIP 단계) 품목만 받고, 원부자재 · 포장품은 빼고 알린다.
+  const FLOOR_RE = { code: /^(mamathang|mahang|품목코드)$/, name: /^(tenmathang|tenhang|품명)$/, erp: /^erpcode$/, spec: /^(thongso|규격)$/, qty: /^(sanxuat|tonkho|tonhientruong|soluong|현장재고|수량)$/ };
+  const floorHdr = (r) => { const n = (r || []).map(x => XL.norm(x)); return n.some(x => FLOOR_RE.code.test(x)) && n.some(x => FLOOR_RE.erp.test(x)) && n.some(x => FLOOR_RE.qty.test(x)); };
+  XL.addDetector('floor_count', (n, M) => findRow(M, floorHdr, 0, 6) >= 0, (M, ctx) => {
+    const hi = findRow(M, floorHdr, 0, 6); const H = M[hi].map(x => XL.norm(x)); const ci = {};
+    Object.keys(FLOOR_RE).forEach(k => { ci[k] = H.findIndex(x => FLOOR_RE[k].test(x)); });
+    const rows = [], excluded = [], seen = new Map(); let total = null, skipped = 0;
+    for (let i = hi + 1; i < M.length; i++) {
+      const r = M[i]; if (!r) continue;
+      const code = str(T(S(r, ci.code))); const q = N(S(r, ci.qty));
+      if (!code) continue;
+      if (/^(total|tong cong|tổng cộng|tổng|합계|cộng)$/i.test(code)) { total = q; continue; }
+      if (q === null) { skipped++; continue; }
+      const erp = str(T(S(r, ci.erp))); const p = INV.parse(erp, code);
+      const o = { code, name: clean(T(S(r, ci.name))), erp_code: erp || undefined, spec: ci.spec >= 0 ? clean(T(S(r, ci.spec))) : undefined, qty: q, stage: p.stage };
+      if (!INV.inProcess(p.stage)) { o.why = INV.MAT_STAGES.includes(p.stage) ? 'mat' : p.stage === 'ETC' ? 'etc' : 'pack'; excluded.push(o); continue; }
+      const e = seen.get(up(code)); if (e) { e.qty += q; continue; }
+      seen.set(up(code), o); rows.push(o);
+    }
+    return [EC.floorJob(rows, { sheet: ctx.sheet, total, excluded, skipped })];
+  });
+  EC.floorJob = function (rows, o) {
+    const job = { table: 'stock_open', rows, custom: 'floor', prio: 3, kind: 'floor_count', sheet: o.sheet, total: o.total, excluded: o.excluded || [], skipped: o.skipped || 0, mode: 'open', date: o.date || null,
+      modes: () => ({ open: L('현장 재고(공정 중) 기초로 설정', 'Đặt tồn hiện trường (đang SX) làm tồn đầu') }),
+      /** 기준일 = 파일 이름의 날짜 (TỒN KHO 20.10.2026) — 없으면 화면에서 넣는다 */
+      onFile: (j) => { if (!j.date) j.date = XL.fileDate(j.file) || null; j.needDate = !j.date; if (j.needDate) j.include = false; },
+      apply: applyFloor, preview: previewFloor };
+    job.label = L('현장 재고 실사 (공정 중 부품 · 조립품)', 'Kiểm kê tồn hiện trường (linh kiện · bút đã lắp)');
+    return job;
+  };
+  const WHY = () => ({ mat: L('원부자재', 'NVL'), pack: L('포장품', 'Đóng gói'), etc: L('ERP CODE 없음', 'Không có ERP CODE') });
+  function previewFloor(job) {
+    const sum = job.rows.reduce((a, r) => a + num(r.qty), 0), exSum = job.excluded.reduce((a, r) => a + num(r.qty), 0); const parts = [];
+    const by = {}; job.rows.forEach(r => { by[r.stage] = (by[r.stage] || 0) + 1; });
+    Object.keys(by).forEach(st => parts.push([INV.labelShort('stage', st), by[st], 'info']));
+    if (job.total !== null && job.total !== undefined) { const okT = Math.abs(sum + exSum - job.total) < 0.005; parts.push([L('원본 TOTAL 과 ', 'Khớp TOTAL gốc ') + (okT ? L('일치', '✓') : L('불일치', '✗')), F.n(sum + exSum), okT ? 'ok' : 'bad']); }
+    else parts.push([L('수량 합계', 'Tổng SL'), F.n(sum), 'neutral']);
+    if (job.excluded.length) parts.push([L('제외 (공정 중 품목 아님)', 'Bỏ qua (không phải đang SX)'), job.excluded.length, 'warn']);
+    if (job.skipped) parts.push([L('수량 없음 (건너뜀)', 'Không có SL (bỏ qua)'), job.skipped, 'neutral']);
+    const IT = INV.items(); const nu = job.rows.filter(r => !IT.get(r.code)).length;
+    if (nu) parts.push([L('품목 마스터에 없음 → ERP CODE 로 만듦', 'Chưa có mã → tạo từ ERP CODE'), nu, 'info']);
+    const W = WHY(); const old = DB.rows('stock_open').filter(r => r.grp === 'floor' && (r.file !== job.file || r.date !== job.date)); const oldDate = old.reduce((a, r) => (r.date > a ? r.date : a), '');
+    let detail = L('현장 실사 기준일 ', 'Ngày kiểm kê ') + (job.date || L('(없음 — 날짜를 넣으세요)', '(chưa có — hãy nhập ngày)')) + L(' · 원부자재(ECOUNT) 재고와 따로 관리합니다', ' · quản lý riêng với tồn NVL (ECOUNT)');
+    if (old.length) detail += L(' · 이전 현장 실사(' + oldDate + ', ' + old.length + '행)를 바꿉니다', ' · thay kiểm kê cũ (' + oldDate + ', ' + old.length + ' dòng)');
+    if (job.excluded.length) detail += L(' · 제외: ', ' · Bỏ qua: ') + job.excluded.slice(0, 5).map(r => r.code + ' (' + W[r.why] + ')').join(', ');
+    return { parts, detail };
+  }
+  function applyFloor(job) {
+    if (!job.date) throw new Error(L('현장 실사 기준일을 넣으세요', 'Hãy nhập ngày kiểm kê'));
+    // 같은 파일 · 같은 기준일의 다른 시트 행은 남기고(여러 시트를 차례로 반영), 이전 실사 · 같은 시트의 예전 행은 바꾼다
+    const all = DB.rows('stock_open'); const keep = all.filter(r => r.grp !== 'floor' || (r.file === job.file && r.date === job.date && r.sheet !== job.sheet));
+    const removed = all.length - keep.length; DB.t.stock_open = keep;
+    const IT = INV.items(); const add = [];
+    job.rows.forEach(r => { if (!IT.get(r.code) && !add.some(x => up(x.code) === up(r.code))) add.push(INV.classify(pick({ code: r.code, name: r.name, erp_code: r.erp_code, unit: 'PCS', src: 'floor' }))); });
+    if (add.length) DB.addMany('items', add);
+    const IT2 = INV.items();
+    DB.addMany('stock_open', job.rows.map(r => pick({ date: job.date, scope: 'FAC', grp: 'floor', code: (IT2.get(r.code) || {}).code || r.code, name: r.name, unit: 'PCS', qty: r.qty, file: job.file, sheet: job.sheet })));
+    DB.meta.openDate = Object.assign({}, DB.meta.openDate, { FLOOR: job.date }); DB.saveMeta();
+    return { added: job.rows.length, removed, created: add.length, skipped: job.excluded.length + job.skipped };
   }
 
   // ------------------------------------------------------------------ stock-transaction template (수불 엑셀 양식)
@@ -312,7 +380,7 @@
     if (d.noOpen) return { parts: [[L('기초재고가 없어 재고에 반영하지 않음', 'Chưa có tồn đầu nên không cập nhật tồn'), '', 'neutral']] };
     if (!d.considered) return { parts: [[L('기초재고 기준일(' + d.open + ') 이전 일보 — 재고 변동 없음', 'Báo cáo trước ngày tồn đầu (' + d.open + ') — tồn không đổi'), '', 'neutral']] };
     parts.push([L('생산입고', 'Nhập SX'), d.prod, 'info']);
-    if (d.mode === 'in_bom') parts.push([L('자재 차감', 'Trừ vật tư'), d.use, 'info']);
+    if (d.mode === 'in_bom') parts.push([L('현장 부품 차감', 'Trừ linh kiện hiện trường'), d.use, 'info']);
     if (d.noBom.size) parts.push([L('BOM 없음', 'Chưa có BOM'), d.noBom.size + L('품목', ' mã'), 'warn']);
     if (d.missingPart.size) parts.push([L('BOM 부품코드가 마스터에 없음', 'Mã linh kiện BOM chưa có'), d.missingPart.size, 'warn']);
     if (d.rawUnmatched.size) parts.push([L('배합 원료명 미연결', 'Tên NVL phối liệu chưa khớp'), d.rawUnmatched.size, 'warn']);
