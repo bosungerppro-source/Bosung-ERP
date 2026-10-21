@@ -2,9 +2,14 @@
 const { app, BrowserWindow, Menu, shell, dialog, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const server = require('../server.js');
+const updater = require('./updater.js');
 
-let win = null; let info = null;
+// 시험용: 실제 데이터와 따로 띄운다 (자동 업데이트 시험 · tools/update_e2e.js). 보통은 %APPDATA%\ColorPencil ERP
+if (process.env.ERP_USER_DATA_DIR) app.setPath('userData', path.resolve(process.env.ERP_USER_DATA_DIR));
+
+let win = null; let info = null; let up = null;
 const cfgFile = () => path.join(app.getPath('userData'), 'config.json');
 function readCfg() { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch (e) { return { lan: false, port: 3210 }; } }
 function writeCfg(c) { fs.mkdirSync(path.dirname(cfgFile()), { recursive: true }); fs.writeFileSync(cfgFile(), JSON.stringify(c, null, 2)); }
@@ -13,14 +18,24 @@ if (!app.requestSingleInstanceLock()) { app.quit(); }
 else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(async () => {
-    const cfg = readCfg();
+    const cfg = readCfg(); const ud = app.getPath('userData');
+    // 15차: 자동 업데이트 — 설치형(Windows)에서만 설치한다. 개발 실행(npm start)은 확인 · 받기까지만
+    up = updater.create({ version: app.getVersion(), dir: path.join(ud, 'update'), backupDir: path.join(ud, 'update_backup'), dataDir: path.join(ud, 'data'),
+      installDir: app.isPackaged && process.platform === 'win32' ? path.dirname(process.execPath) : null,
+      fetch: (url, init) => net.fetch(url, init), spawn, auto: cfg.autoUpdate !== false,
+      saveAuto: (v) => { const c = readCfg(); c.autoUpdate = v; writeCfg(c); buildMenu(readCfg()); },
+      base: process.env.ERP_UPDATE_BASE || undefined, firstCheck: process.env.ERP_UPDATE_FIRST_CHECK ? Number(process.env.ERP_UPDATE_FIRST_CHECK) : undefined,
+      beforeInstall: () => flushRenderer(), quit: () => { if (info) info.close(); app.exit(0); }, log: (m) => console.log('[update] ' + m) });
+    // 받아 둔 새 버전이 있으면 ERP 를 띄우기 전에 설치한다 (설치 프로그램이 끝나면 새 버전을 다시 켠다)
+    if (up.startup()) { app.exit(0); return; }
     info = await server.start({
-      dataDir: path.join(app.getPath('userData'), 'data'),
+      dataDir: path.join(ud, 'data'),
       appDir: path.join(__dirname, '..', 'app'),
       host: cfg.lan ? '0.0.0.0' : '127.0.0.1',
       port: cfg.port || 3210,
       // AI · 구글 호출은 Chromium 네트워크(net.fetch)로 → Windows 의 회사 프록시 · 인증서 설정을 그대로 따른다
       fetch: (url, init) => net.fetch(url, init),
+      update: up,
     });
     buildMenu(cfg);
     win = new BrowserWindow({ width: 1480, height: 920, minWidth: 1100, minHeight: 700, backgroundColor: '#F2F3F5',
@@ -34,14 +49,33 @@ else {
     let flushed = false;
     win.on('close', (e) => { if (flushed) return; e.preventDefault(); flushRenderer().then(() => { flushed = true; if (win && !win.isDestroyed()) win.close(); }); });
     win.on('closed', () => { win = null; });
+    up.schedule();
   });
-  app.on('window-all-closed', () => { if (info) info.close(); app.quit(); });
+  app.on('window-all-closed', () => { if (up) up.stop(); if (info) info.close(); app.quit(); });
 }
 
 /** 화면(ERP.db)에서 대기 중인 저장을 보내고 끝날 때까지 기다린다 (최대 5초) */
 async function flushRenderer() {
   if (!win || win.isDestroyed()) return;
   try { await Promise.race([win.webContents.executeJavaScript('(window.ERP && ERP.db && ERP.db.flush) ? ERP.db.flush() : 0', true), new Promise(r => setTimeout(r, 5000))]); } catch (e) { /* 화면이 이미 닫힘 */ }
+}
+
+/** 메뉴 → 업데이트 확인: 새 버전이 있으면 받기를 시작하고, 받아 둔 것이 있으면 지금 설치할지 묻는다 */
+async function checkDialog() {
+  const s = await Promise.race([up.check(), new Promise(r => setTimeout(() => r(up.status()), 15000))]);
+  const pct = Math.round((s.progress || 0) * 100);
+  if (s.state === 'ready' && s.ready) {
+    const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['지금 업데이트 / Cập nhật ngay', '나중에 / Để sau'], defaultId: 0, cancelId: 1,
+      message: '새 버전 ' + s.ready.version + ' 을 받아 두었습니다 (지금 ' + s.current + ').\nĐã tải bản mới ' + s.ready.version + '.',
+      detail: '지금 업데이트하면 ERP 가 닫히고 설치가 끝나면 새 버전으로 다시 켜집니다. 나중에 하면 다음에 ERP 를 켤 때 설치합니다.\nCập nhật ngay: ERP đóng lại và mở lại bản mới sau khi cài. Để sau: cài khi mở ERP lần sau.' });
+    if (r.response === 0) { try { await up.installNow(); } catch (e) { await dialog.showMessageBox(win, { type: 'error', message: e.message }); } }
+    return;
+  }
+  const text = s.state === 'latest' ? '최신 버전입니다 (' + s.current + ').\nĐang dùng bản mới nhất.'
+    : s.state === 'none' ? '아직 GitHub 에 업데이트 정보(Release)가 없습니다. 지금 ' + s.current + '.\nChưa có thông tin cập nhật.'
+      : s.state === 'downloading' ? '새 버전 ' + s.latest + ' 을 받는 중입니다 (' + pct + '%). 다 받으면 다음에 켤 때 설치합니다.\nĐang tải bản mới ' + s.latest + ' (' + pct + '%).'
+        : '업데이트를 확인하지 못했습니다 / Không kiểm tra được cập nhật\n' + (s.error || s.state);
+  await dialog.showMessageBox(win, { type: s.state === 'error' ? 'warning' : 'info', message: text });
 }
 
 function buildMenu(cfg) {
@@ -64,6 +98,11 @@ function buildMenu(cfg) {
           await dialog.showMessageBox({ type: res.error ? 'warning' : 'info', message: res.error ? '백업 실패 / Sao lưu thất bại\n' + res.error : '매일 이 폴더에 백업합니다 (방금 1회 저장).\nSao lưu mỗi ngày vào thư mục này (vừa lưu 1 lần).\n\n' + res.file });
           if (win && !win.isDestroyed()) win.webContents.executeJavaScript("(location.hash.indexOf('settings') >= 0 && window.ERP && ERP.refresh) ? ERP.refresh() : 0", true).catch(() => {});
         } },
+      { type: 'separator' },
+      // 15차: 자동 업데이트
+      { label: '업데이트 확인… / Kiểm tra cập nhật…', click: () => checkDialog().catch(() => {}) },
+      { label: '자동 업데이트 / Tự động cập nhật', type: 'checkbox', checked: cfg.autoUpdate !== false, click: (mi) => up.setAuto(mi.checked) },
+      { label: 'ColorPencil ERP ' + app.getVersion(), enabled: false },
       { type: 'separator' }, { role: 'quit', label: '종료 / Thoát' } ] },
     { label: '보기 / Xem', submenu: [ { role: 'reload' }, { role: 'togglefullscreen' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'toggleDevTools' } ] },
   ];

@@ -34,7 +34,7 @@
   function quiet() {
     const a = document.activeElement;
     const typing = a && (a.tagName === 'TEXTAREA' || a.isContentEditable || (a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|range|color)$/i.test(a.type || '')));
-    return !document.querySelector('.modal-back, .login-gate') && !typing && !pdown && !document.hidden && Date.now() - lastInput > 3000;
+    return !document.querySelector('.modal-back, .login-gate, .upd-gate') && !typing && !pdown && !document.hidden && Date.now() - lastInput > 3000;
   }
   /** 같은 화면을 다시 그린다 — 창 스크롤과 표 안 스크롤 위치를 유지 */
   ERP.refresh = function () {
@@ -52,6 +52,34 @@
   };
 
   function current() { const m = location.hash.match(/^#\/([a-z_]+)/); return m && ERP.pages[m[1]] ? m[1] : 'dashboard'; }
+
+  // 15차: 프로그램 자동 업데이트 (설치형). 새 버전을 받아 두었으면 이 PC 화면 위에 알린다 — 다음에 켤 때 설치, [지금 업데이트]
+  ERP.upd = null;
+  function updBar() {
+    const s = ERP.upd; if (!s || !s.local || !s.canInstall || !s.ready) return null;
+    const v = s.ready.version;
+    return h('div', { class: 'upd-bar', role: 'status' }, h('span', '⬆ ' + L('새 버전 ' + v + ' 을 받아 두었습니다 — 다음에 ERP 를 켤 때 설치됩니다 (지금 ' + s.current + ').', 'Đã tải bản mới ' + v + ' — sẽ cài khi mở ERP lần sau (đang dùng ' + s.current + ').')),
+      h('button', { class: 'btn sm primary', onclick: () => ERP.updateNow(v) }, L('지금 업데이트', 'Cập nhật ngay')));
+  }
+  /** 업데이트 상태를 다시 묻고 화면 위 알림을 맞춘다 */
+  ERP.updateStatus = function () {
+    return fetch('/api/update', { cache: 'no-store' }).then(r => r.json()).then(s => {
+      ERP.upd = s;
+      const m = $('#main'); const bar = m && m.querySelector(':scope > .upd-bar'); const nb = updBar();
+      if (bar && !nb) bar.remove(); else if (nb && m) { if (bar) bar.replaceWith(nb); else m.prepend(nb); }
+      return s;
+    });
+  };
+  ERP.updateNow = async function (ver) {
+    if (!(await ERP.confirm(L('ERP 를 닫고 새 버전 ' + ver + ' 을 설치한 뒤 다시 켭니다 (1분쯤). 사내망으로 접속한 다른 PC 도 그동안 끊깁니다. 지금 할까요?', 'ERP sẽ đóng, cài bản ' + ver + ' rồi mở lại (khoảng 1 phút). Máy khác trong mạng nội bộ cũng bị ngắt trong lúc đó. Cập nhật ngay?')))) return;
+    try {
+      await DB.flush();
+      const r = await fetch('/api/update/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      document.body.appendChild(h('div', { class: 'upd-gate' }, h('div', { class: 'card' }, h('h2', L('업데이트 설치 중…', 'Đang cài bản cập nhật…')),
+        h('p', { class: 'help' }, L('ERP 가 곧 닫히고, 설치가 끝나면 새 버전 ' + ver + ' 으로 다시 켜집니다 (1분쯤).', 'ERP sẽ đóng và mở lại bản ' + ver + ' sau khi cài (khoảng 1 phút).')))));
+    } catch (e) { ERP.toast(L('업데이트를 시작하지 못했습니다: ', 'Không bắt đầu cập nhật được: ') + e.message, 'bad'); }
+  };
 
   function badge(id) {
     let n = 0, tone = '#C77700';
@@ -87,16 +115,18 @@
     ERP.state.remoteStale = false; clearTimeout(staleT); staleT = null;
     const id = current(); const page = ERP.pages[id];
     const app = $('#app'); app.replaceChildren();
+    // 15차: 휴대폰 (좁은 화면) 은 메뉴를 접어 두고 [☰ 지금 화면] 으로 연다
+    const navToggle = h('button', { type: 'button', class: 'nav-toggle', 'aria-expanded': 'false', onclick: (e) => { const o = e.currentTarget.closest('nav.side').classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', o ? 'true' : 'false'); } }, '☰ ' + L(page.ko, page.vi));
     const nav = h('nav', { class: 'side', 'aria-label': L('주 메뉴', 'Menu chính') },
-      h('div', { class: 'brand' }, ERP.svg('M4 20l1-4L16 5l3 3L8 19zM14 7l3 3', 30, 1.8), h('div', h('b', L('생산관리 시스템', 'Quản lý sản xuất')), h('small', L('수주 · 생산 · 재고 · 원부자재', 'Đơn hàng · SX · Kho · NVL')))),
+      h('div', { class: 'brand' }, ERP.svg('M4 20l1-4L16 5l3 3L8 19zM14 7l3 3', 30, 1.8), h('div', h('b', L('생산관리 시스템', 'Quản lý sản xuất')), h('small', L('수주 · 생산 · 재고 · 원부자재', 'Đơn hàng · SX · Kho · NVL'))), navToggle),
       h('div', { class: 'nav' }, NAV.map(n => n.sep ? h('div', { class: 'sep' }, L(n.ko, n.vi)) : h('a', { class: id === n.id ? 'on' : '', href: '#/' + n.id }, ERP.svg(n.icon, 20), h('span', L(n.ko, n.vi)), badge(n.id)))),
-      h('div', { style: { padding: '0 14px 10px' } }, h('button', { class: 'btn', style: { width: '100%', justifyContent: 'space-between', background: '#2F3742', color: '#C9CFD6', borderColor: '#3b4452' }, onclick: () => ERP.search() }, L('통합 검색', 'Tìm nhanh'), h('small', 'Ctrl+K'))),
+      h('div', { class: 'side-search', style: { padding: '0 14px 10px' } }, h('button', { class: 'btn', style: { width: '100%', justifyContent: 'space-between', background: '#2F3742', color: '#C9CFD6', borderColor: '#3b4452' }, onclick: () => ERP.search() }, L('통합 검색', 'Tìm nhanh'), h('small', 'Ctrl+K'))),
       h('div', { class: 'side-foot' },
         h('div', { class: 'lang', role: 'group', 'aria-label': 'language' }, h('button', { class: ERP.lang === 'ko' ? 'on' : '', onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: ERP.lang === 'vi' ? 'on' : '', onclick: () => ERP.setLang('vi') }, 'Tiếng Việt')),
         h('div', { id: 'savestate', class: 'saved' }, h('i'), h('span', L('저장됨', 'Đã lưu'))),
         h('a', { id: 'remote', href: '#', style: { display: 'none' }, onclick: (e) => { e.preventDefault(); ERP.refresh(); } }, '↻ ' + L('다른 PC 변경 있음 · 새로 고침', 'Có thay đổi từ máy khác · Làm mới')),
         h('div', DB.mode === 'server' ? L('서버 저장 모드 (PC 설치형)', 'Lưu trên máy chủ (bản cài đặt)') : L('브라우저 저장 모드 (테스트)', 'Lưu trong trình duyệt (bản thử)'))));
-    const main = h('main', { class: 'main', id: 'main' });
+    const main = h('main', { class: 'main', id: 'main' }, updBar());
     app.append(nav, main); DB._state && DB._state();
     document.title = L(page.ko, page.vi) + ' · ColorPencil ERP';
     try { page.render(main); } catch (e) { console.error(e); main.appendChild(h('div', { class: 'card' }, h('h2', 'Error'), h('pre', String(e.stack || e)))); }
@@ -114,6 +144,17 @@
       if (!(b.dir || b.google) || !b.lastTry) return;
       if (!b.lastOk || Date.now() - Date.parse(b.lastOk) > 2 * 86400000) ERP.toast(L('자동 백업이 이틀 넘게 되지 않았습니다 — 설정 → 사내망 접속 · 자동 백업에서 확인하세요', 'Sao lưu tự động đã hơn 2 ngày không thành công — kiểm tra ở Cài đặt → Mạng nội bộ · Sao lưu') + (b.lastError ? ' (' + b.lastError + ')' : ''), 'bad');
     }).catch(() => { /* ignore */ });
+    // 15차: 업데이트 상태 (설치형 · 이 PC) — 켤 때와 10분마다. 방금 새 버전으로 바뀌었으면 한 번 알린다
+    if (DB.mode === 'server' && DB.ping && DB.ping.loopback) {
+      const tick = () => ERP.updateStatus().then(s => {
+        const u = s && s.justUpdated; if (!u || !u.to) return;
+        let seen = null; try { seen = localStorage.getItem('erp_updated'); } catch (e) { /* 저장소 없음 */ }
+        if (seen === u.to) return; try { localStorage.setItem('erp_updated', u.to); } catch (e) { /* 저장소 없음 */ }
+        ERP.toast(L('ColorPencil ERP 를 새 버전으로 바꿨습니다: ', 'Đã cập nhật ColorPencil ERP: ') + (u.from ? u.from + ' → ' : '') + u.to, 'ok');
+      }).catch(() => { /* 설치형이 아님 */ });
+      tick(); const t = setInterval(tick, 10 * 60000); t.unref && t.unref();
+      ERP.mobileAuto();   // 휴대폰 보기(구글 웹 앱) 를 켰으면 요약을 15분마다 보낸다
+    }
   }
   ERP.boot = boot;
   window.addEventListener('DOMContentLoaded', boot);

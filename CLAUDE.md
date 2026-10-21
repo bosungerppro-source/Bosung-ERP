@@ -10,7 +10,7 @@ BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부�
 - 사용자에게 하는 설명 · 질문은 한국어로 쓴다.
 - 규칙과 지금까지의 결정은 문서에 있다. 작업 전에 읽는다.
   - `docs/CLAUDE_PROMPT.md` — 마스터 규칙 (1차부터 지금까지 모든 결정, 숫자 정의)
-  - `docs/PROMPT_v6_ECOUNT.md` (6차 v1.1.0), `docs/PROMPT_v7_WIDGETS.md` (7차 v1.2.0), `docs/PROMPT_v8_ACCURACY.md` (8차 v1.3.0), `docs/PROMPT_v9_MULTIPC_AI.md` (9차 v1.4.0), `docs/PROMPT_v10_PARTS.md` (10차 v1.5.0), `docs/PROMPT_v11_FLOOR.md` (11차 v1.6.0), `docs/PROMPT_v12_MENUS.md` (12차 v1.7.0 · 1.7.1), `docs/PROMPT_v13_PO_DONE.md` (13차 v1.8.0), `docs/PROMPT_v14_WAREHOUSE.md` (14차 v1.9.0) …
+  - `docs/PROMPT_v6_ECOUNT.md` (6차 v1.1.0), `docs/PROMPT_v7_WIDGETS.md` (7차 v1.2.0), `docs/PROMPT_v8_ACCURACY.md` (8차 v1.3.0), `docs/PROMPT_v9_MULTIPC_AI.md` (9차 v1.4.0), `docs/PROMPT_v10_PARTS.md` (10차 v1.5.0), `docs/PROMPT_v11_FLOOR.md` (11차 v1.6.0), `docs/PROMPT_v12_MENUS.md` (12차 v1.7.0 · 1.7.1), `docs/PROMPT_v13_PO_DONE.md` (13차 v1.8.0), `docs/PROMPT_v14_WAREHOUSE.md` (14차 v1.9.0), `docs/PROMPT_v15_UPDATE_MOBILE.md` (15차 v1.10.0) …
   - `docs/history/*_work_log.md` — 차수별 작업 기록 (결정 · 숫자 · 검증)
 - 기존 숫자 정의(납기 경과 60일 등)와 사용자 설정(`ai*`, 위젯 배치)은 바꾸지 않는다. 바꿀 때는 문서에 이유를 남긴다.
 
@@ -19,6 +19,7 @@ BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부�
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci     # 의존성 (Electron 실행 파일은 빌드할 때 받음)
 export NODE_PATH=/opt/node22/lib/node_modules   # 전역 Playwright 사용 (Chromium: /opt/pw-browsers/chromium)
 npm run server                              # http://127.0.0.1:3210
+npm run test:v15                            # 자동 업데이트 · 휴대폰으로 보기 · 구글 웹 앱 4판 (15차)
 npm run test:v14                            # 창고 입출고장 → 원부자재 · ECOUNT 재고현황 보완 (14차)
 npm run test:v13                            # 수주 강제 완료 · 완료 버튼 · 납기 기준 일괄 완료 (13차)
 npm run test:v12                            # 메뉴 3개 · ECOUNT 비교 없음 · 이름 미정은 코드만 (12차)
@@ -48,7 +49,8 @@ npm run dist                                # dist/win-unpacked + 설치 파일 
 2. `package.json` · `app/js/core.js` (`ERP.v`) · `build/installer.nsi` 기본값 · `npm run dist` 스크립트의 버전 번호를 함께 올린다.
 3. `npm run demo` · `npm run dist` → 설치 파일 SHA-256 기록.
 4. 문서: README, `docs/CLAUDE_PROMPT.md` 새 차수 항목, `docs/PROMPT_v<차수>_*.md`, `docs/history/<차수>_work_log.md`.
-5. `docs/releases/v<버전>.md` (Release 설명) 작성 → 커밋 → `main` push → 사용자에게 **Actions → "Release — 설치 파일" → Run workflow** (버전 입력) 실행을 안내. 워크플로가 설치 파일 · 데모를 빌드해 태그와 Release 를 만든다.
+5. `docs/releases/v<버전>.md` (Release 설명) 작성 → 커밋 → `main` push → 사용자에게 **Actions → "Release — 설치 파일" → Run workflow** (버전 입력) 실행을 안내. 워크플로가 설치 파일 · 데모 · `latest.json` 을 빌드해 태그와 Release 를 만든다.
+   - **15차부터 Release = 모든 PC 배포**: 1.10.0 이상이 설치된 PC 는 latest.json 을 보고 다음에 켤 때 새 버전을 설치한다. 시험이 모두 통과한 main 만 Release 로 만든다. 업데이트 관련 파일(electron · installer.nsi · server.js · package.json)을 바꾸면 Actions "자동 업데이트 시험 (Windows)" 결과도 확인한다.
    - Claude Code 클라우드 세션은 태그 push · Release 쓰기 · 저장소 설정 변경이 막혀 있고(403), GitHub GraphQL 도 쓸 수 없다 (`gh api repos/<owner>/<repo>/...` REST 만).
    - 만든 설치 파일은 세션에서 사용자에게 바로 보낼 수도 있다 (28MB 조각 + `join_installer.bat` 방식도 가능).
 6. 사용자에게: 바뀐 점, PC에서 확인할 것, 사용자가 할 일.

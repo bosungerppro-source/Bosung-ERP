@@ -230,3 +230,15 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **ECOUNT 재고현황**: ERP CODE · Mã XNK 칸이 있으면 품목 작업(`ecount_items_stock`, 있는 칸만 · 숨김 후보 없음). 창고 입출고장과 같이 올리거나 `grp: 'wh'` 기초재고가 있으면 방식 `fill` — 기초재고가 있는 품목은 그대로, 없는 품목만 (마이너스 0, 현장 실사가 있으면 공정 중 품목은 뺌), `grp: 'fill'`.
 - 업로드 화면은 파일을 모두 읽은 뒤 `job.onBatch(jobs, self)` 를 부른다 (XL.analyze 가 작업을 복사하므로 self 를 고친다).
 - 시험: `npm run test:v14` 42개 + v13 · v12 · v11 · v9 · v8 · v7 · assistant.
+
+### 2-14. 15차: 자동 업데이트 · 휴대폰으로 보기 (v1.10.0, 2026-10-21)
+자세한 요청 · 결정은 `docs/PROMPT_v15_UPDATE_MOBILE.md`, 작업 기록은 `docs/history/v15_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **Release = 모든 PC 배포**: Release 워크플로가 설치 파일과 함께 `latest.json` `{version, file, sha256, size}` 를 올리고, 1.10.0 이상이 설치된 PC 는 `<releases>/latest/download/latest.json` 을 보고 자동 업데이트한다. main 버전의 Release 만 latest. latest.json 이름 · 형식 · 설치 파일 이름 규칙(`ColorPencil-ERP-Setup-<버전>.exe`)을 바꾸지 않는다.
+- **자동 업데이트** (`electron/updater.js`): 켠 뒤 1분 · 4시간마다 확인 → 받기 (크기 · SHA-256) → **다음에 켤 때** 또는 **[지금 업데이트]** 로 설치. 일하는 중에 저절로 다시 시작하지 않는다. 설치 전 데이터 폴더 복사 (`update_backup`, 최근 5). 같은 설치가 두 번 안 되면 저절로 다시 하지 않음. 설치형(Windows · packaged)만 설치. 설정 `config.json` `autoUpdate`.
+- **설치 프로그램 `/UPDATE`**: 진행 막대만 · ERP 가 닫히기를 30초 기다림 · 끝나면 ERP 다시 켬 · 바탕화면 바로가기를 다시 만들지 않음. ERP 는 `/UPDATE /D=<설치 폴더>` 로 부른다 (`/D=` 는 맨 끝 · 따옴표 없음 → `windowsVerbatimArguments`).
+- **업데이트 API**: `GET /api/update` (보기 — 다른 PC 도), `PUT /api/update` · `POST /api/update/check` · `POST /api/update/install` 은 loopback 만.
+- **휴대폰 (공장 Wi-Fi)**: 사내망 접속 그대로. 화면은 휴대폰 폭(390)에서 옆으로 밀리지 않게 만든다 — 새 화면 · 카드를 만들면 `npm run test:v15` 의 휴대폰 폭 시험에 넣는다 (`white-space: nowrap` 은 좁은 화면에서 풀리게, 넓은 표는 `.tbl-wrap` 안에서 옆으로). 900px 이하는 메뉴를 [☰] 로 접는다.
+- **휴대폰 (공장 밖, 구글 웹 앱 Code.gs 4판)**: 요약 `ERP.mobileSummary()` 는 종합 현황과 같은 계산 (`ERP.dashCtx`) — 종합 현황 숫자를 바꾸면 요약도 같이 바뀐다. 이 PC 만 15분마다 보냄 (`mobileOn`). 비밀번호는 구글 쪽 해시로만, ERP 에 남기지 않는다. 휴대폰 화면 글자는 textContent 로만.
+- 시험: `npm run test:v15` 138개 + GitHub Actions "자동 업데이트 시험 (Windows)" (`tools/update_e2e.js` — 실제 설치 프로그램 · Electron) + v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.

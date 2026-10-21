@@ -244,6 +244,7 @@
   const DEFAULT = () => [['kpi_pck_day', 1], ['kpi_pck_month', 1], ['kpi_due', 1], ['kpi_low', 1], ['procs', 4], ['asm_daily', 4], ['po_monthly', 2], ['due_list', 2], ['low_list', 2], ['flow', 2], ['fresh', 2], ['input7', 2]]
     .map(([id, w], i) => ({ k: id + '-' + i, id, w, o: W[id].defaults ? JSON.parse(JSON.stringify(W[id].defaults)) : undefined }));
   ERP.dashDefault = DEFAULT;
+  ERP.dashCtx = makeCtx; ERP.dashPrevMonth = prevMonthWindow;   // 15차: 휴대폰 요약(mobile.js)이 같은 숫자를 쓰게
   const clampW = (w, def) => { const s = def.sizes; if (s.includes(w)) return w; return s.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a), s[0]); };
   function layout() { const l = DB.setting('dash', null); const arr = Array.isArray(l) && l.length ? l.filter(x => x && W[x.id]) : DEFAULT(); return arr.map(x => Object.assign({}, x, { o: x.o ? Object.assign({}, x.o) : (W[x.id].defaults ? JSON.parse(JSON.stringify(W[x.id].defaults)) : undefined) })); }
   function save(l) { DB.setSetting('dash', l.map(x => { const o = { k: x.k, id: x.id, w: x.w }; if (x.o && Object.keys(x.o).length) o.o = x.o; return o; })); }

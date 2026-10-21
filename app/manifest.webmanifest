@@ -1,0 +1,14 @@
+{
+  "name": "ColorPencil ERP",
+  "short_name": "ERP",
+  "description": "BOSUNG VINA 수주 · 생산 · 재고 / Đơn hàng · Sản xuất · Tồn kho",
+  "start_url": "./#/dashboard",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F2F3F5",
+  "theme_color": "#1E2329",
+  "icons": [
+    { "src": "icon-256.png", "sizes": "256x256", "type": "image/png" },
+    { "src": "favicon.png", "sizes": "64x64", "type": "image/png" }
+  ]
+}

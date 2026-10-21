@@ -1,7 +1,9 @@
-; ColorPencil ERP - Windows installer (NSIS 3, Unicode). Compile: makensis -DVERSION=1.9.0 build/installer.nsi
+; ColorPencil ERP - Windows installer (NSIS 3, Unicode). Compile: makensis -DVERSION=1.10.0 build/installer.nsi
+; 15차(v1.10.0): /UPDATE = ERP 자동 업데이트가 실행 — 첫 화면 · 폴더 · 마침 화면 없이 진행 막대만, ERP 가 닫히기를 기다리고, 끝나면 ERP 를 다시 켠다.
+;   ERP 는 "ColorPencil-ERP-Setup-<버전>.exe /UPDATE /D=<지금 설치 폴더>" 로 실행한다 (/D= 는 NSIS 규칙대로 맨 끝 · 따옴표 없음)
 Unicode true
 !ifndef VERSION
-  !define VERSION "1.9.0"
+  !define VERSION "1.10.0"
 !endif
 !define APPNAME "ColorPencil ERP"
 !define EXENAME "ColorPencil ERP.exe"
@@ -19,16 +21,22 @@ BrandingText "ColorPencil ERP ${VERSION}"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 !define MUI_ICON "icon.ico"
 !define MUI_UNICON "icon.ico"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
 !define MUI_FINISHPAGE_RUN_TEXT "ColorPencil ERP 실행 / Chạy ngay"
 
+Var UPD   ; 1 = 자동 업데이트 (/UPDATE)
+
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipInUpdate
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipInUpdate
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirLeave
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipInUpdate
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -50,8 +58,10 @@ LangString KEEPDATA ${LANG_ENGLISH} "Your data is kept: %APPDATA%\ColorPencil ER
 ; 10차(v1.5.0): ERP 가 실행 중이면 설치 · 삭제 전에 닫으라고 알린다.
 ; 실행 중인 프로그램 파일(exe)은 Windows 가 쓰기를 막으므로, 설치 폴더의 exe 를 쓰기 모드로 열어 보고 열리지 않으면 실행 중으로 본다
 ; (다른 Windows 사용자의 ERP 는 상관없음 · 플러그인 없이 동작). [다시 시도] / [취소] — 취소하면 설치(삭제)를 멈춘다
+; 15차: 자동 업데이트는 ERP 가 스스로 닫히는 중이므로 먼저 최대 30초 기다린 뒤에 묻는다
 !macro CHECK_RUNNING_FN un
 Function ${un}CheckRunning
+  StrCpy $R9 0
   retry:
     IfFileExists "$INSTDIR\${EXENAME}" 0 done
     ClearErrors
@@ -60,6 +70,12 @@ Function ${un}CheckRunning
     FileClose $0
     Goto done
   locked:
+    ${If} $UPD == 1
+    ${AndIf} $R9 < 60
+      IntOp $R9 $R9 + 1
+      Sleep 500
+      Goto retry
+    ${EndIf}
     MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(RUNNING)" IDRETRY retry
     Abort
   done:
@@ -75,7 +91,21 @@ Function .onInit
   StrCmp $R0 0 +3
     MessageBox MB_OK|MB_ICONEXCLAMATION "Setup is already running."
     Abort
+  StrCpy $UPD 0
+  ${GetParameters} $R1
+  ClearErrors
+  ${GetOptions} $R1 "/UPDATE" $R2
+  ${IfNot} ${Errors}
+    StrCpy $UPD 1
+  ${EndIf}
   Call CheckRunning
+FunctionEnd
+
+; 자동 업데이트는 첫 화면 · 폴더 · 마침 화면을 건너뛴다 (진행 막대만)
+Function SkipInUpdate
+  ${If} $UPD == 1
+    Abort
+  ${EndIf}
 FunctionEnd
 
 ; 설치 폴더를 바꿨을 때도 그 폴더의 ERP 가 실행 중인지 본다 (취소 = 이 화면에 머묾)
@@ -83,19 +113,34 @@ Function DirLeave
   Call CheckRunning
 FunctionEnd
 
+; 자동 업데이트가 끝나면 새 버전을 다시 켠다
+Function .onInstSuccess
+  ${If} $UPD == 1
+    Exec '"$INSTDIR\${EXENAME}"'
+  ${EndIf}
+FunctionEnd
+
 Function un.onInit
+  StrCpy $UPD 0
   Call un.CheckRunning
 FunctionEnd
 
 Section "Install"
   SetOutPath "$INSTDIR"
+  ${If} $UPD == 1
+    SetAutoClose true
+  ${EndIf}
   Call CheckRunning
   File /r "${SRCDIR}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
   CreateShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
+  ; 자동 업데이트는 바탕화면 바로가기를 지운 PC 에 다시 만들지 않는다
+  ${If} $UPD != 1
+  ${OrIf} ${FileExists} "$DESKTOP\${APPNAME}.lnk"
+    CreateShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
+  ${EndIf}
   WriteRegStr HKCU "Software\ColorPencilERP" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${REGKEY}" "DisplayName" "${APPNAME}"
   WriteRegStr HKCU "${REGKEY}" "DisplayVersion" "${VERSION}"

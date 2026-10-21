@@ -152,6 +152,7 @@
     else r = await fetch(g.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
     const j = await r.json(); if (!j.ok) throw new Error(j.error || 'error'); return j;
   }
+  ERP.gcall = gcall;   // 15차: 휴대폰 요약 보내기 (mobile.js)
   const CHUNK = 2000;
   async function gpush(names, prog) {
     for (const n of names) {
@@ -191,7 +192,8 @@
     // Code.gs 2판부터: 글자 · 날짜 열을 텍스트 형식으로 써서 0 으로 시작하는 코드 · 523034E200 같은 코드가 숫자로 바뀌지 않는다
     const oldScript = () => say(L('⚠ 구글 Apps Script 가 옛 버전입니다. 설치 폴더의 google/Code.gs 를 다시 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요 (코드 · 날짜가 숫자로 바뀌는 문제 수정).', '⚠ Apps Script là bản cũ. Hãy dán lại google/Code.gs và triển khai phiên bản mới (sửa lỗi mã bị đổi thành số).'));
     const noBackup = () => say(L('ⓘ 구글 드라이브 자동 백업을 쓰려면 google/Code.gs 3판을 다시 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn sao lưu tự động lên Google Drive, hãy dán lại google/Code.gs bản 3 và triển khai phiên bản mới.'));
-    bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); if (!(j.ver >= 2)) oldScript(); else if (!(j.ver >= 3)) noBackup(); });
+    const noMobile = () => say(L('ⓘ 휴대폰 보기(설정 → 휴대폰으로 보기)를 쓰려면 google/Code.gs 4판을 다시 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn xem trên điện thoại, hãy dán lại google/Code.gs bản 4 và triển khai phiên bản mới.'));
+    bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); if (!(j.ver >= 2)) oldScript(); else if (!(j.ver >= 3)) noBackup(); else if (!(j.ver >= 4)) noMobile(); });
     bPush.onclick = busy(bPush, async () => { const n = names(); if (!n.length) return; const pj = await gcall({ action: 'ping' }); if (!(pj.ver >= 2)) oldScript(); say(L('업로드 시작', 'Bắt đầu đẩy')); await gpush(n, prog); say('✓ ' + L('완료', 'Xong')); });
     bPull.onclick = busy(bPull, async () => { const n = names(); if (!n.length) return; if (!(await ERP.confirm(L('선택한 표의 현재 데이터를 구글 시트 내용으로 교체합니다. 계속할까요?', 'Dữ liệu các bảng đã chọn sẽ bị thay bằng nội dung Google Sheet. Tiếp tục?')))) return; await gpull(n, prog); say('✓ ' + L('완료', 'Xong')); ERP.toast(L('구글 시트 데이터를 가져왔습니다', 'Đã lấy dữ liệu từ Google Sheet'), 'ok'); });
     bSnap.onclick = busy(bSnap, async () => { const j = await gcall({ action: 'snapshot' }); say('✓ Drive: ' + j.name + ' ' + j.url); });
@@ -304,6 +306,45 @@
       }
       return box;
     }
+    // 15차: 프로그램 자동 업데이트 (설치형). 확인 · 설치 · 켜고 끄기는 ERP 가 실행 중인 PC 에서만 (서버도 막음)
+    function updateCard() {
+      const box = h('div', { class: 'card', id: 'updCard' }, h('h3', L('프로그램 업데이트', 'Cập nhật chương trình')), h('p', { class: 'help' }, '…'));
+      const pad = (x) => String(x).padStart(2, '0');
+      const when = (s) => { if (!s) return '–'; const d = new Date(s); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+      const call = (url, method, body) => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
+      let t = null, shown = false;
+      const load = () => ERP.updateStatus().then(fill).catch(e => { box.lastChild.textContent = String(e.message || e); });
+      function fill(s) {
+        clearTimeout(t); if (shown && !box.isConnected) return; shown = true;   // 다른 화면으로 가면 그만 묻는다
+        const title = h('h3', L('프로그램 업데이트', 'Cập nhật chương trình'));
+        if (!s.desktop) { box.replaceChildren(title, h('p', { class: 'help' }, L('자동 업데이트는 PC 설치형 ERP 에만 있습니다 (지금은 서버 · 브라우저로 실행 중).', 'Tự động cập nhật chỉ có ở bản cài đặt trên PC (đang chạy bằng máy chủ · trình duyệt).'))); return; }
+        const busy = s.state === 'checking' || s.state === 'downloading'; if (busy) t = setTimeout(load, 2000);
+        const pct = Math.round((s.progress || 0) * 100), rv = s.ready ? s.ready.version : '';
+        const chip = { idle: ['neutral', L('아직 확인 전', 'Chưa kiểm tra')], checking: ['info', L('확인 중…', 'Đang kiểm tra…')],
+          downloading: ['info', L('새 버전 ' + (s.latest || '') + ' 받는 중 ' + pct + '%', 'Đang tải bản ' + (s.latest || '') + ' ' + pct + '%')],
+          ready: ['info', L('새 버전 ' + rv + ' 준비됨', 'Bản mới ' + rv + ' đã sẵn sàng')], latest: ['ok', L('최신 버전', 'Bản mới nhất')],
+          none: ['neutral', L('업데이트 정보 없음', 'Chưa có thông tin cập nhật')], error: ['bad', L('오류', 'Lỗi')], installing: ['info', L('설치 시작…', 'Đang bắt đầu cài…')] }[s.state] || ['neutral', s.state];
+        const own = !!s.local;
+        const auto = h('input', { type: 'checkbox', checked: !!s.auto, disabled: !own, onchange: async (e) => {
+          try { fill(await call('/api/update', 'PUT', { auto: e.target.checked })); ERP.toast(e.target.checked ? L('자동 업데이트를 켰습니다', 'Đã bật tự động cập nhật') : L('자동 업데이트를 껐습니다 — [지금 확인] 으로만 받습니다', 'Đã tắt tự động cập nhật'), 'ok'); } catch (x) { ERP.toast(x.message, 'bad'); load(); } } });
+        box.replaceChildren(); ERP.put(box, title,
+          h('dl', { class: 'kv' }, h('dt', L('지금 버전', 'Phiên bản hiện tại')), h('dd', s.current),
+            h('dt', L('상태', 'Trạng thái')), h('dd', ERP.chip(chip[0], chip[1])),
+            h('dt', L('마지막 확인', 'Kiểm tra lần cuối')), h('dd', when(s.checkedAt)),
+            h('dt', L('마지막 업데이트', 'Cập nhật lần cuối')), h('dd', s.last ? (s.last.from || '?') + ' → ' + s.last.to + ' · ' + when(s.last.at) : '–')),
+          s.state === 'error' && s.error ? h('p', { class: 'warn-text' }, s.error) : null,
+          s.state === 'none' ? h('p', { class: 'help' }, L('아직 GitHub 에 새 버전(Release)이 없습니다. 생기면 저절로 받습니다.', 'Chưa có bản phát hành trên GitHub. Khi có sẽ tự tải.')) : null,
+          h('label', { class: 'nowrap', style: { display: 'block', margin: '8px 0' } }, auto, ' ', L('자동 업데이트 (새 버전을 받아 두었다가 다음에 켤 때 설치)', 'Tự động cập nhật (tải sẵn, cài khi mở lần sau)')),
+          own ? h('div', { class: 'toolbar' },
+            h('button', { class: 'btn', disabled: busy, onclick: async (e) => { e.currentTarget.disabled = true; try { fill(await call('/api/update/check', 'POST')); } catch (x) { ERP.toast(x.message, 'bad'); load(); } } }, L('지금 확인', 'Kiểm tra ngay')),
+            s.ready && s.canInstall ? h('button', { class: 'btn primary', onclick: () => ERP.updateNow(rv) }, L('지금 업데이트', 'Cập nhật ngay') + ' (' + rv + ')') : null)
+            : h('p', { class: 'help' }, L('업데이트는 ERP 가 실행 중인 PC 에서 합니다.', 'Cập nhật trên máy đang chạy ERP.')),
+          h('p', { class: 'help' }, L('새 버전이 나오면 GitHub 에서 받아 두었다가 다음에 ERP 를 켤 때 설치합니다 — 진행 막대가 잠깐 보이고 새 버전으로 켜집니다. 일하는 중에는 저절로 다시 시작하지 않습니다. 설치 전에 데이터 폴더를 따로 복사해 둡니다 (데이터 폴더 옆 update_backup, 최근 5번).',
+            'Khi có bản mới, ERP tải sẵn từ GitHub và cài khi mở lần sau — thấy thanh tiến trình rồi mở bản mới. Không tự khởi động lại khi đang làm việc. Trước khi cài, thư mục dữ liệu được sao chép (update_backup, 5 lần gần nhất).')));
+      }
+      load();
+      return box;
+    }
     root.append(h('div', { class: 'grid2' },
       h('div', { class: 'card' }, h('h3', L('일반', 'Chung')),
         h('div', { class: 'field' }, h('span', L('언어', 'Ngôn ngữ')), h('div', { class: 'toolbar' }, h('button', { class: 'btn' + (ERP.lang === 'ko' ? ' primary' : ''), onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: 'btn' + (ERP.lang === 'vi' ? ' primary' : ''), onclick: () => ERP.setLang('vi') }, 'Tiếng Việt'))),
@@ -317,6 +358,8 @@
           h('button', { class: 'btn danger', onclick: async () => { if (!(await ERP.confirm(L('모든 데이터를 삭제합니다 (빈 상태에서 엑셀로 새로 시작). 먼저 백업하세요.', 'Xóa TOÀN BỘ dữ liệu (bắt đầu mới từ Excel). Hãy sao lưu trước.')))) return; await DB.wipe(); ERP.toast(L('모두 삭제했습니다', 'Đã xóa hết'), 'ok'); ERP.render(); } }, L('전체 삭제 (빈 상태)', 'Xóa toàn bộ')))),
       stockCard(),
       DB.mode === 'server' ? lanCard() : null,
+      DB.mode === 'server' ? updateCard() : null,
+      DB.mode === 'server' ? ERP.phoneCard() : null,
       h('div', { class: 'card' }, h('h3', L('정보', 'Thông tin')), h('p', { class: 'help' }, 'ColorPencil ERP v' + ERP.v + ' · ' + L('색연필 제조 수주 · 생산 · 재고 · 원부자재 관리', 'Quản lý đơn hàng · sản xuất · kho · NVL ngành bút chì màu')),
         h('p', { class: 'help' }, L('마스터 데이터(품목·BOM·배합·거래처·설비·안전재고)는 화면에서 직접 수정하거나 엑셀로 업로드하여 언제든 변경할 수 있습니다.', 'Dữ liệu gốc (mã hàng, BOM, công thức, đối tác, máy, tồn an toàn) có thể sửa trực tiếp trên màn hình hoặc tải Excel bất kỳ lúc nào.')))));
   } };

@@ -373,7 +373,7 @@ function startMockGas() {
       SpreadsheetApp: { getActiveSpreadsheet: () => ({ getName: () => 'S', getUrl: () => 'u' }) } };
     vm.createContext(sb); vm.runInContext(fs.readFileSync(path.join(ROOT, 'google', 'Code.gs'), 'utf8').replace("var TOKEN = 'CHANGE-ME'", "var TOKEN = 't'"), sb);
     const call = (b) => JSON.parse(sb.doPost({ postData: { contents: JSON.stringify(Object.assign({ token: 't' }, b)) } }));
-    eq('ping ver 3', call({ action: 'ping' }).ver, 3);
+    ok('ping ver 3 이상 (15차부터 4판)', call({ action: 'ping' }).ver >= 3, call({ action: 'ping' }).ver);
     for (let d = 1; d <= 5; d++) mkFile('ERP_backup_2026-02-0' + d + '.json.gz', null);
     mkFile('ERP_20260101_0900', null);
     const b64 = zlib.gzipSync('{"tables":{}}').toString('base64');

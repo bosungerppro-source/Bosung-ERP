@@ -8,7 +8,7 @@ if (seed.movements) seed.movements = seed.movements.filter(r => !r.date || r.dat
 const html = fs.readFileSync(path.join(app, 'index.html'), 'utf8');
 const safe = (s) => s.replace(/<\/script/gi, '<\\/script');
 let out = html.replace(/<link rel="stylesheet" href="([^"]+)">/g, (m, f) => '<style>' + fs.readFileSync(path.join(app, f), 'utf8') + '</style>')
-  .replace(/<link rel="icon"[^>]*>/, '');
+  .replace(/<link rel="(icon|apple-touch-icon|manifest)"[^>]*>\n?/g, '');   // 15차: 한 파일 데모에는 아이콘 · 홈 화면 설정 없음
 const seedTag = '<script>window.ERP_SEED=' + safe(JSON.stringify(seed)) + ';</script>';
 out = out.replace(/<script src="([^"]+)"><\/script>/g, (m, f) => '<script>' + safe(fs.readFileSync(path.join(app, f), 'utf8')) + '</script>');
 out = out.replace('<script>/* Storage', seedTag + '<script>/* Storage'); // seed before db.js

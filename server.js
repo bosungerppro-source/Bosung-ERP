@@ -11,7 +11,7 @@ const zlib = require('zlib');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+  '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json; charset=utf-8', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 
 function safeName(n) { return /^[a-z0-9_]{1,40}$/i.test(n) ? n : null; }
 /** local date (the factory's day, not UTC) */
@@ -231,6 +231,7 @@ function start(opts) {
   const store = createStore(dataDir);
   const auth = createAuth(dataDir);
   const backup = createBackup(dataDir, store, opts.googleHosts, doFetch);
+  const up = opts.update || null;   // 15차: electron/updater.js (설치형에서만)
 
   /** 다른 웹사이트(DNS rebinding · 다른 출처의 요청)는 막는다: Host 는 이 PC 이름, Origin 이 있으면 같은 곳, 쓰기 요청은 JSON 만 */
   function guard(req, isApi) {
@@ -310,6 +311,18 @@ function start(opts) {
       try { return send(200, backup.set(JSON.parse(await readBody(req, 1e5)))); } catch (e) { return send(400, { error: e.message }); }
     }
     if (p === '/api/backup/run' && req.method === 'POST') return send(200, await backup.run());
+    // ---- 15차: 프로그램 자동 업데이트 (설치형 Electron 만 opts.update 가 있음). 보기는 누구나, 확인 · 설치 · 켜고 끄기는 ERP 가 실행 중인 PC 에서만 ----
+    if (p === '/api/update' && req.method === 'GET') return send(200, up ? Object.assign(up.status(), { desktop: true, local: loop }) : { desktop: false, local: loop });
+    if (p === '/api/update' || p.startsWith('/api/update/')) {
+      if (!up) return send(404, { error: 'not desktop' });
+      if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
+      const out = (s) => send(200, Object.assign(s, { desktop: true, local: true }));
+      if (p === '/api/update' && req.method === 'PUT') { const b = JSON.parse(await readBody(req, 1e4) || '{}'); return out(b.auto === undefined ? up.status() : up.setAuto(!!b.auto)); }
+      // 확인은 길어도 몇 초만 기다린다 — 받기(설치 파일)는 뒤에서 이어지고 화면은 상태를 다시 묻는다
+      if (p === '/api/update/check' && req.method === 'POST') return out(await Promise.race([up.check(), new Promise(r => setTimeout(() => r(up.status()), opts.updateWait || 8000))]));
+      if (p === '/api/update/install' && req.method === 'POST') { try { return send(200, await up.installNow()); } catch (e) { return send(400, { error: e.message }); } }
+      return send(404, { error: 'unknown api' });
+    }
     // ---- AI assistant: API key is kept in <data>/ai.json and never sent to the browser ----
     const aiFile = path.join(dataDir, 'ai.json'), usageFile = path.join(dataDir, 'ai_usage.json');
     const aiCfg = () => { try { return JSON.parse(fs.readFileSync(aiFile, 'utf8')); } catch (e) { return {}; } };

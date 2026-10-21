@@ -1,16 +1,18 @@
 # 설치 파일을 빌드해 GitHub Release(태그 포함)를 만든다.
-# 실행: 저장소 → Actions → "Release — 설치 파일" → Run workflow → 버전(예: 1.9.0)
+# 실행: 저장소 → Actions → "Release — 설치 파일" → Run workflow → 버전(예: 1.10.0)
 # Claude Code 클라우드 세션은 태그 push · Release 쓰기가 막혀 있어서(403) 저장소 주인이 이 버튼으로 만든다.
 # Release 설명은 main 의 docs/releases/v<버전>.md, 설치 파일 SHA-256 은 빌드한 파일로 덧붙인다.
+# 15차(v1.10.0): latest.json(버전 · 파일 · SHA-256 · 크기)도 올린다 → 1.10.0 이상이 설치된 PC 는 이것을 보고 자동 업데이트한다.
+#   즉 이 버튼으로 main 버전의 Release 를 만들면 모든 PC 에 그 버전이 퍼진다 (다음에 ERP 를 켤 때 설치).
 name: Release — 설치 파일
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: '버전 (예: 1.9.0)'
+        description: '버전 (예: 1.10.0) — main 버전으로 만들면 모든 PC 가 자동 업데이트'
         required: true
-        default: '1.9.0'
+        default: '1.10.0'
       commit:
         description: '빌드할 커밋 (비우면: 1.2.0~1.5.0 은 그 버전의 커밋, 그 밖은 main 최신)'
         required: false
@@ -76,14 +78,18 @@ jobs:
           set -euo pipefail
           exe="dist/ColorPencil-ERP-Setup-${VER}.exe"
           sum=$(sha256sum "$exe" | cut -d' ' -f1)
+          size=$(stat -c %s "$exe")
+          # 15차: 자동 업데이트가 보는 파일 (electron/updater.js) — 이름 · 형식을 바꾸지 말 것
+          node -e 'const [v, s, n] = process.argv.slice(1); require("fs").writeFileSync("dist/latest.json", JSON.stringify({ version: v, file: "ColorPencil-ERP-Setup-" + v + ".exe", sha256: s, size: Number(n), date: new Date().toISOString() }) + "\n")' "$VER" "$sum" "$size"
+          cat dist/latest.json
           printf '\n---\n설치 파일 SHA-256 `%s` · GitHub Actions 빌드 (커밋 %s)\n' "$sum" "$(git rev-parse --short HEAD)" >> "$RUNNER_TEMP/notes.md"
           title=$(grep -m1 '^## ' "$RUNNER_TEMP/notes.md" | sed 's/^## //' || true)
           [ -n "$title" ] || title="ColorPencil ERP v${VER}"
           latest=false; [ "$VER" = "$MAIN_VER" ] && latest=true
           if gh release view "v${VER}" > /dev/null 2>&1; then
-            gh release upload "v${VER}" "$exe" dist/ERP_Demo.html --clobber
+            gh release upload "v${VER}" "$exe" dist/ERP_Demo.html dist/latest.json --clobber
             gh release edit "v${VER}" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "v${VER}" "$exe" dist/ERP_Demo.html --target "$(git rev-parse HEAD)" --title "$title" --notes-file "$RUNNER_TEMP/notes.md" --latest="$latest"
+            gh release create "v${VER}" "$exe" dist/ERP_Demo.html dist/latest.json --target "$(git rev-parse HEAD)" --title "$title" --notes-file "$RUNNER_TEMP/notes.md" --latest="$latest"
           fi
           echo "### v${VER} · SHA-256 \`${sum}\`" >> "$GITHUB_STEP_SUMMARY"

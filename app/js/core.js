@@ -1,7 +1,7 @@
 /* ColorPencil ERP - core helpers (namespace, i18n, DOM builder, formatting, modal/toast) */
 (function (g) {
   'use strict';
-  const ERP = g.ERP = { v: '1.9.0', lang: 'ko', pages: {}, state: {} };
+  const ERP = g.ERP = { v: '1.10.0', lang: 'ko', pages: {}, state: {} };
 
   // ---------- language ----------
   try { ERP.lang = localStorage.getItem('erp_lang') || 'ko'; } catch (e) { /* ignore */ }
