@@ -1,5 +1,5 @@
 'use strict';
-/* 12차(v1.7.0) 자동 시험: 메뉴 3개 (품목 / 현장 재고 / 원부자재 재고) · ECOUNT 비교 없앰 · 이름 미정 코드는 코드만
+/* 12차(v1.7.0 · 1.7.1) 자동 시험: 메뉴 3개 (품목 / 현장 재고 / 원부자재 재고) · ECOUNT 비교 없앰 · 이름 미정 코드는 코드만 · 사용자가 정한 단계 이름
    1 왼쪽 메뉴 · 탭 · 배지 · 2 예전 방식(ERP.state.matTab) · ERP.goStock · ERP.openStock · 3 수불 입력 / 수불 내역은 메뉴마다 자기 품목만 ·
    4 이름 미정(짐작한 이름 없음) → 코드만 · 5 코드 사전에서 이름 넣기 / 지우기 · 6 ECOUNT 비교 없음 · 7 종합 현황 · AI 비서 · 자료 올리기 결과 버튼 →
    맞는 메뉴 · 8 모든 탭 (한국어 / Tiếng Việt) 오류 없음
@@ -63,7 +63,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
       ok('[' + title[id] + '] ECOUNT 비교 탭 없음', !r.tabs.some(t => /비교/.test(t)), r.tabs);
     }
     const txt = await ev(() => document.querySelector('main').innerText);
-    ok('원부자재 재고 안내: 생산 반영으로 차감하지 않음 · 짐작한 이름(소모품) 없음', /차감하지 않습니다/.test(txt) && !/소모품/.test(txt), txt.slice(0, 300));
+    ok('원부자재 재고 안내: 생산 반영으로 차감하지 않음 · 소모품(CM) (1.7.1 사용자 확인)', /차감하지 않습니다/.test(txt) && /소모품\(CM\)/.test(txt), txt.slice(0, 300));
   });
 
   // ------------------------------------------------------------------------------------------
@@ -109,46 +109,56 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
   });
 
   // ------------------------------------------------------------------------------------------
-  await sec('4. 이름 미정 코드는 코드만 (짐작한 이름 · 물음표 없음)', async () => {
+  await sec('4. 단계 이름: 사용자가 정한 이름 (1.7.1) · 이름 미정 코드는 코드만 (짐작한 이름 · 물음표 없음)', async () => {
     const r = await ev(() => { const I = ERP.inv; const lab = () => ({ wip11: I.label('stage', 'WIP11'), x6: I.label('stage', 'WIPx6'), x5: I.label('stage', 'WIPx5'), x1: I.label('stage', 'WIPx1'), w55: I.label('stage', 'WIP55'), cm: I.label('stage', 'CM'), w01: I.label('stage', 'WIP01'), rm: I.label('stage', 'RM'), lb: I.label('cat', 'LB', 'CM'), gra: I.label('line', 'GRA'), neon: I.label('sub', 'NEON'), sup: I.label('sub', 'SUP') });
       const ko = lab(); ERP.lang = 'vi'; const vi = lab(); ERP.lang = 'ko';
-      return { ko, vi, blank: I.BUILTIN_DICT.filter(x => x.guessed && (x.ko || x.vi)).map(x => x.level + ':' + x.code), nGuessed: I.BUILTIN_DICT.filter(x => x.guessed).length }; });
-    eq('이름 미정 단계 → 코드만 (WIP11 · WIP06·x6 · WIP15·25·35 · WIP21·31… · WIP55 · CM)', [r.ko.wip11, r.ko.x6, r.ko.x5, r.ko.x1, r.ko.w55, r.ko.cm], ['WIP11', 'WIP06·x6', 'WIP15·25·35', 'WIP21·31…', 'WIP55', 'CM']);
-    eq('베트남어도 코드만', [r.vi.wip11, r.vi.x1, r.vi.cm], ['WIP11', 'WIP21·31…', 'CM']);
+      return { ko, vi, title: ['WIP11', 'WIPx1', 'WIPx6', 'CM', 'WIP01'].map(c => I.stageTitle(c)), blank: I.BUILTIN_DICT.filter(x => x.guessed && (x.ko || x.vi)).map(x => x.level + ':' + x.code), nGuessed: I.BUILTIN_DICT.filter(x => x.guessed).length, gStage: I.BUILTIN_DICT.filter(x => x.guessed && x.level === 'stage').map(x => x.code) }; });
+    // 2026-10-21 사용자 확인: CM = 소모품, WIP06·x6 · WIP15·25·35 · WIP11 · WIP21·31… · WIP55 = 부품 (베트남어 Vật tư tiêu hao · Linh kiện)
+    eq('사용자가 정한 단계 이름 (WIP11 · WIP06·x6 · WIP15·25·35 · WIP21·31… · WIP55 = 부품, CM = 소모품)', [r.ko.wip11, r.ko.x6, r.ko.x5, r.ko.x1, r.ko.w55, r.ko.cm], ['부품', '부품', '부품', '부품', '부품', '소모품']);
+    eq('베트남어 이름 (Linh kiện · Vật tư tiêu hao)', [r.vi.wip11, r.vi.x1, r.vi.cm], ['Linh kiện', 'Linh kiện', 'Vật tư tiêu hao']);
+    eq('목록 · 필터용 이름 · 코드 (같은 이름 "부품" 을 코드로 구분)', r.title, ['부품 · WIP11', '부품 · WIP21·31…', '부품 · WIP06·x6', '소모품 · CM', '배럴 · WIP01']);
     eq('확인된 이름은 그대로 (WIP01 배럴 · RM 원재료 · SUP 스매쉬업)', [r.ko.w01, r.ko.rm, r.ko.sup], ['배럴', '원재료', '스매쉬업']);
-    eq('이름 미정 분류 · 제품군 · 세부도 코드만 (CM-LB · GRA · NEON)', [r.ko.lb, r.ko.gra, r.ko.neon], ['LB', 'GRA', 'NEON']);
-    ok('내장 사전에 짐작한 이름 없음 (이름 미정 ' + r.nGuessed + '개 모두 빈칸)', r.nGuessed > 20 && !r.blank.length, r.blank);
+    eq('이름 미정 분류 · 제품군 · 세부는 코드만 (CM-LB · GRA · NEON)', [r.ko.lb, r.ko.gra, r.ko.neon], ['LB', 'GRA', 'NEON']);
+    ok('내장 사전에 짐작한 이름 없음 (이름 미정 ' + r.nGuessed + '개 모두 빈칸 · 이름 미정 단계 없음)', r.nGuessed === 34 && !r.blank.length && !r.gStage.length, r);
     await ev(() => { ERP.state.stk_floor = null; ERP.goStock('floor'); ERP.render(); }); await settle();
-    const cards = await ev(() => Array.from(document.querySelectorAll('main .flow .st')).map(b => ({ t: b.innerText.replace(/\s+/g, ' '), code: !!b.querySelector('code'), tip: b.getAttribute('title') || '' })));
+    const cardsOf = () => ev(() => Array.from(document.querySelectorAll('main .flow .st')).map(b => ({ t: b.innerText.replace(/\s+/g, ' '), code: !!b.querySelector('code'), tip: b.getAttribute('title') || '' })));
+    let cards = await cardsOf();
     ok('현장 재고 흐름 카드에 물음표 없음', cards.length === 13 && !cards.some(c => /\?/.test(c.t)), cards.map(c => c.t));
-    const unnamed = cards.filter(c => /이름 없음/.test(c.tip)).map(c => c.t.split(' ')[0]);
-    eq('이름 없는 카드 = 코드만 (코드 줄 없음 · 안내 말풍선)', unnamed, ['WIP11', 'WIP21·31…', 'WIP06·x6', 'WIP15·25·35', 'WIP55']);
-    ok('이름 있는 카드는 이름 + 코드 줄 (배럴 / WIP01)', cards.some(c => c.code && /^배럴/.test(c.t) && /WIP01/.test(c.t)), cards.map(c => c.t));
+    ok('모든 카드 = 이름 + 코드 줄 (부품 / WIP11, 부품 / WIP21·31…, 배럴 / WIP01)', cards.every(c => c.code) && cards.some(c => /^부품 WIP11/.test(c.t)) && cards.some(c => /^부품 WIP21·31…/.test(c.t)) && cards.some(c => /^배럴 WIP01/.test(c.t)), cards.map(c => c.t));
+    // 이름을 지운 단계 (코드 사전에서 이름을 모두 지우면 이름 미정) → 코드만 · 코드 줄 없음 · 안내 말풍선
+    await ev(() => { ERP.db.add('code_dict', { level: 'stage', code: 'WIP55', ko: '', vi: '', guessed: true }); ERP.render(); }); await settle();
+    cards = await cardsOf();
+    eq('이름 미정 단계 카드 = 코드만 (코드 줄 없음 · 안내 말풍선)', cards.filter(c => /이름 없음/.test(c.tip)).map(c => [c.t.split(' ')[0], c.code]), [['WIP55', false]]);
+    await ev(() => { const DB = ERP.db; DB.remove('code_dict', DB.rows('code_dict').filter(x => x.level === 'stage' && x.code === 'WIP55').map(x => x._id)); ERP.render(); }); await settle();
+    eq('되돌리면 다시 이름 (부품)', await ev(() => ERP.inv.label('stage', 'WIP55')), '부품');
     const page = await ev(() => document.querySelector('main').innerText);
-    ok('화면에 짐작했던 이름 없음 (스탬핑 완료 배럴 · 클릭펜 · 리필 컨테이너 · 소모품 · 가공 배럴)', !/스탬핑 완료 배럴|클릭펜 시스템|클릭펜슬 조립품|리필 컨테이너|소모품|가공 배럴/.test(page), page.match(/.{0,20}(스탬핑 완료|클릭펜|리필 컨테이너|소모품|가공 배럴).{0,20}/));
+    ok('화면에 짐작했던 이름 없음 (스탬핑 완료 배럴 · 클릭펜 · 리필 컨테이너 · 가공 배럴)', !/스탬핑 완료 배럴|클릭펜 시스템|클릭펜슬 조립품|리필 컨테이너|가공 배럴/.test(page), page.match(/.{0,20}(스탬핑 완료|클릭펜|리필 컨테이너|가공 배럴).{0,20}/));
   });
 
   // ------------------------------------------------------------------------------------------
   await sec('5. 코드 사전: 이름 넣으면 이름, 지우면 다시 코드만', async () => {
     await ev(() => { ERP.state.cod = { level: 'stage', b: { stage: 'WIPx6', line: 'MINI', cat: '', sub: '', code: '' } }; ERP.goStock('codes'); ERP.render(); }); await settle();
     const row = (code) => ev((c) => { const tr = Array.from(document.querySelectorAll('main table tbody tr')).find(x => x.querySelector('td b') && x.querySelector('td b').textContent === c); if (!tr) return null; const ins = tr.querySelectorAll('input'); return { ko: ins[0].value, vi: ins[1].value, ph: ins[0].placeholder, flag: tr.querySelector('td').innerText.includes('이름 미정') }; }, code);
-    let r = await row('WIP11'); eq('WIP11 줄: 이름 칸 비어 있음 · 코드 옆 "이름 미정" 표시', r, { ko: '', vi: '', ph: '이름 미정', flag: true });
+    let r = await row('WIP11'); eq('WIP11 줄: 사용자가 정한 이름 (부품 · Linh kiện)', [r.ko, r.vi, r.flag], ['부품', 'Linh kiện', false]);
     r = await row('WIP01'); eq('WIP01 줄: 확인된 이름 그대로', [r.ko, r.flag], ['배럴', false]);
     const opt = await ev(() => Array.from(document.querySelectorAll('main select option')).map(o => o.textContent));
-    ok('ERP CODE 도우미 단계 목록: WIP06·x6 · WIP11 은 코드만, WIP01 은 이름', opt.includes('WIP06·x6') && opt.includes('WIP11') && opt.includes('WIP01 · 배럴') && !opt.some(o => / · $/.test(o)), opt.slice(0, 18));
-    const fill = (code, i, v) => ev((a) => { const tr = Array.from(document.querySelectorAll('main table tbody tr')).find(x => x.querySelector('td b') && x.querySelector('td b').textContent === a[0]); const inp = tr.querySelectorAll('input')[a[1]]; inp.focus(); inp.value = a[2]; inp.dispatchEvent(new Event('change', { bubbles: true })); return document.activeElement === inp; }, [code, i, v]);
-    const focusKept = await fill('WIP11', 0, '시험 배럴'); await settle();
-    r = await ev(() => { const I = ERP.inv; const d = ERP.db.rows('code_dict').find(x => x.level === 'stage' && x.code === 'WIP11'); const ko = I.label('stage', 'WIP11'); ERP.lang = 'vi'; const vi = I.label('stage', 'WIP11'); ERP.lang = 'ko'; return { ko, vi, g: I.isGuessed('stage', 'WIP11'), d: d && { ko: d.ko, vi: d.vi, guessed: d.guessed } }; });
-    eq('한국어 이름을 넣으면 이름 미정이 풀림 (베트남어는 한국어로 대신)', r, { ko: '시험 배럴', vi: '시험 배럴', g: false, d: { ko: '시험 배럴', vi: '', guessed: false } });
-    r = await row('WIP11'); eq('표시: 이름 칸 · "이름 미정" 사라짐 (다시 그리지 않아 입력 포커스 유지)', [r.ko, r.flag, focusKept], ['시험 배럴', false, true]);
-    await fill('WIP11', 1, 'Barrel thử'); await settle();
-    eq('베트남어 이름도 넣기', await ev(() => { ERP.lang = 'vi'; const v = ERP.inv.label('stage', 'WIP11'); ERP.lang = 'ko'; return [ERP.inv.label('stage', 'WIP11'), v]; }), ['시험 배럴', 'Barrel thử']);
-    await fill('WIP11', 0, ''); await fill('WIP11', 1, ''); await settle();
-    r = await ev(() => ({ l: ERP.inv.label('stage', 'WIP11'), g: ERP.inv.isGuessed('stage', 'WIP11') }));
-    eq('이름을 모두 지우면 다시 코드만 (이름 미정)', r, { l: 'WIP11', g: true });
-    await ev(() => { ERP.render(); }); r = await row('WIP11'); eq('다시 그려도 빈칸 · "이름 미정"', [r.ko, r.vi, r.flag], ['', '', true]);
+    ok('ERP CODE 도우미 목록: 단계는 코드 · 이름 (WIP06·x6 · 부품, WIP11 · 부품, WIP01 · 배럴), 이름 미정 제품군은 코드만 (GRA)', opt.includes('WIP06·x6 · 부품') && opt.includes('WIP11 · 부품') && opt.includes('WIP01 · 배럴') && opt.includes('GRA') && !opt.some(o => / · $/.test(o)), opt.slice(0, 24));
     const fit = await ev(() => { const t = document.querySelector('main .grid2 table'); const w = t.closest('.tbl-wrap') || t.parentElement; return { table: t.scrollWidth, box: w.clientWidth }; });
     ok('코드 사전 표가 칸 안에 들어감 (가로로 잘리지 않음)', fit.table <= fit.box + 2, fit);
+    // 이름 미정 코드(세부 NEON)에 이름 넣기 / 지우기
+    await ev(() => { ERP.state.cod.level = 'sub'; ERP.render(); }); await settle();
+    r = await row('NEON'); eq('NEON 줄: 이름 칸 비어 있음 · 코드 옆 "이름 미정" 표시', r, { ko: '', vi: '', ph: '이름 미정', flag: true });
+    const fill = (code, i, v) => ev((a) => { const tr = Array.from(document.querySelectorAll('main table tbody tr')).find(x => x.querySelector('td b') && x.querySelector('td b').textContent === a[0]); const inp = tr.querySelectorAll('input')[a[1]]; inp.focus(); inp.value = a[2]; inp.dispatchEvent(new Event('change', { bubbles: true })); return document.activeElement === inp; }, [code, i, v]);
+    const focusKept = await fill('NEON', 0, '시험 이름'); await settle();
+    r = await ev(() => { const I = ERP.inv; const d = ERP.db.rows('code_dict').find(x => x.level === 'sub' && x.code === 'NEON'); const ko = I.label('sub', 'NEON'); ERP.lang = 'vi'; const vi = I.label('sub', 'NEON'); ERP.lang = 'ko'; return { ko, vi, g: I.isGuessed('sub', 'NEON'), d: d && { ko: d.ko, vi: d.vi, guessed: d.guessed } }; });
+    eq('한국어 이름을 넣으면 이름 미정이 풀림 (베트남어는 한국어로 대신)', r, { ko: '시험 이름', vi: '시험 이름', g: false, d: { ko: '시험 이름', vi: '', guessed: false } });
+    r = await row('NEON'); eq('표시: 이름 칸 · "이름 미정" 사라짐 (다시 그리지 않아 입력 포커스 유지)', [r.ko, r.flag, focusKept], ['시험 이름', false, true]);
+    await fill('NEON', 1, 'Tên thử'); await settle();
+    eq('베트남어 이름도 넣기', await ev(() => { ERP.lang = 'vi'; const v = ERP.inv.label('sub', 'NEON'); ERP.lang = 'ko'; return [ERP.inv.label('sub', 'NEON'), v]; }), ['시험 이름', 'Tên thử']);
+    await fill('NEON', 0, ''); await fill('NEON', 1, ''); await settle();
+    r = await ev(() => ({ l: ERP.inv.label('sub', 'NEON'), g: ERP.inv.isGuessed('sub', 'NEON') }));
+    eq('이름을 모두 지우면 다시 코드만 (이름 미정)', r, { l: 'NEON', g: true });
+    await ev(() => { ERP.render(); }); r = await row('NEON'); eq('다시 그려도 빈칸 · "이름 미정"', [r.ko, r.vi, r.flag], ['', '', true]);
   });
 
   // ------------------------------------------------------------------------------------------

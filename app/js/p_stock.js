@@ -91,7 +91,7 @@
   // ===================================================================== 원부자재 재고 / 생산현장 재고 (7차: 탭 분리)
   const GROUPS = () => ({
     mat: { title: L('원부자재 재고', 'Tồn nguyên vật liệu'), flow: FLOW.filter(g => g.st.some(x => INV.MAT_STAGES.includes(x))),
-      help: L('원재료(RM) · 부자재(SM) · CM 입니다. 창고 입고 · 출고 · 창고 → 공장 이동 같은 수불로만 바뀌고, 생산 반영(생산일보 · BOM · 배합표 · 사출 원료)으로는 차감하지 않습니다.', 'Nguyên liệu (RM) · vật liệu phụ (SM) · CM. Chỉ thay đổi theo phiếu nhập · xuất · chuyển Kho → Xưởng; cập nhật SX (báo cáo · BOM · công thức · nhựa ép) không trừ NVL.') },
+      help: L('원재료(RM) · 부자재(SM) · 소모품(CM) 입니다. 창고 입고 · 출고 · 창고 → 공장 이동 같은 수불로만 바뀌고, 생산 반영(생산일보 · BOM · 배합표 · 사출 원료)으로는 차감하지 않습니다.', 'Nguyên liệu (RM) · vật liệu phụ (SM) · vật tư tiêu hao (CM). Chỉ thay đổi theo phiếu nhập · xuất · chuyển Kho → Xưởng; cập nhật SX (báo cáo · BOM · công thức · nhựa ép) không trừ NVL.') },
     floor: { title: L('현장 재고', 'Tồn hiện trường'), flow: FLOW.filter(g => g.st.some(x => INV.FLOOR_STAGES.includes(x))),
       help: L('공정 중 재고(심 · 배럴 · 노즈콘 · 홀더 · 스푼 → 스탬핑 → 조립)와 포장품입니다. 배럴 = WIP01 + WIP11 + WIP21 … (같은 배럴 계열), 조립품 = 심 + 배럴 + 노즈콘 + 그 밖의 부품. 생산일보를 올리면 생산량이 입고되고, 조립 수량만큼 현장 부품이 차감됩니다 (원부자재는 차감 안 함).', 'Tồn đang SX (lõi · barrel · nose · holder · spoon → ép nhũ → lắp ráp) và hàng đóng gói. Barrel = WIP01 + WIP11 + WIP21 … ; bút lắp = lõi + barrel + nose + linh kiện khác. Báo cáo SX: nhập sản lượng, trừ linh kiện hiện trường theo số lượng lắp (không trừ NVL).') },
   });
@@ -167,7 +167,7 @@
     const statusOpts = [['neg', L('마이너스', 'Âm')], ['low', L('안전재고 미달·임박', 'Dưới / sắp dưới tồn AT')], ['susp', L('이동 누락 의심', 'Nghi thiếu phiếu chuyển')], ['moved', L('기초 이후 수불 있음', 'Có phát sinh sau tồn đầu')], ['prod', L('생산 반영 있음', 'Có cập nhật SX')], ['safety', L('안전재고 설정됨', 'Đã cài tồn AT')], ['zero', L('재고 0', 'Tồn = 0')]];
     const tb = h('div', { class: 'toolbar' },
       h('label', { class: 'search' }, ERP.svg('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z', 17), q),
-      st.stage ? h('button', { class: 'btn sm', onclick: () => { st.stage = ''; st.line = st.sub = st.cat = ''; ERP.render(); } }, INV.stageName(st.stage) + ' ×') : null,
+      st.stage ? h('button', { class: 'btn sm', onclick: () => { st.stage = ''; st.line = st.sub = st.cat = ''; ERP.render(); } }, INV.stageTitle(st.stage) + ' ×') : null,
       lines.length ? sel('line', L('제품군', 'Dòng SP'), lines.map(v => [v, INV.label('line', v) + (INV.label('line', v) !== v ? ' (' + v + ')' : '')])) : null,
       cats.length ? sel('cat', L('분류', 'Phân loại'), cats.map(v => [v, INV.label('cat', v, st.stage) + (INV.label('cat', v, st.stage) !== v ? ' (' + v + ')' : '')])) : null,
       subs.length ? sel('sub', L('세부/고객', 'Chi tiết/KH'), subs.map(v => [v, INV.label('sub', v) + (INV.label('sub', v) !== v ? ' (' + v + ')' : '')])) : null,
@@ -213,7 +213,7 @@
         h('p', { class: 'help', style: { margin: 0 } }, d.mode === 'off' ? L('반영하지 않습니다. 재고는 수불만으로 계산됩니다.', 'Không cập nhật. Tồn chỉ tính theo phiếu.') : d.noOpen ? L('기초재고가 없어 반영하지 않습니다.', 'Chưa có tồn đầu nên chưa cập nhật.')
           : [L('기초재고 기준일(', 'Sau ngày chốt (') + d.open + L(') 다음 날부터의 생산일보를 반영합니다: 생산량 → 현장 재고 입고, 조립 · 스탬핑 · 포장은 BOM 의 현장 부품(반제품 · 완제품)만큼 차감. 일보를 다시 올려도 중복되지 않습니다 (매번 다시 계산). ', ') được cập nhật: sản lượng → nhập tồn hiện trường; lắp ráp · ép nhũ · đóng gói trừ linh kiện hiện trường theo BOM. Tải lại báo cáo không bị trùng. '),
             d.openFloor ? L('공정 중 품목은 현장 실사일(' + d.openFloor + ') 다음 날부터. ', 'Mã đang SX tính từ sau ngày kiểm kê (' + d.openFloor + '). ') : '',
-            h('b', L('원부자재(원재료 · 부자재 · CM)는 차감하지 않습니다', 'Không trừ NVL (nguyên liệu · vật liệu phụ · CM)')), L(' — 사출 수지 · 배합표 원료 · BOM 에 들어 있는 부자재도 그대로입니다.', ' — kể cả nhựa ép · NL theo công thức · vật liệu phụ trong BOM.')])),
+            h('b', L('원부자재(원재료 · 부자재 · 소모품)는 차감하지 않습니다', 'Không trừ NVL (nguyên liệu · vật liệu phụ · vật tư tiêu hao)')), L(' — 사출 수지 · 배합표 원료 · BOM 에 들어 있는 부자재도 그대로입니다.', ' — kể cả nhựa ép · NL theo công thức · vật liệu phụ trong BOM.')])),
       h('section', { class: 'kpis', style: { margin: '0 0 14px' } },
         ERP.kpi(L('반영 대상 일보', 'Dòng báo cáo xét'), F.n(d.considered), L('행', 'dòng'), 'neutral', d.open ? L('기준일 ', 'Sau ') + d.open : null,
           (d.before || d.beforeFloor) ? [d.before ? L('기준일 이전 ', 'Trước ngày chốt ') + F.n(d.before) + L('행은 기초재고에 포함', ' dòng đã nằm trong tồn đầu') : '', d.beforeFloor ? (d.before ? ' · ' : '') + L('현장 실사일 이전 생산 ', 'SX trước ngày kiểm kê ') + F.n(d.beforeFloor) + L('행은 실사 수량에 포함', ' dòng đã nằm trong số kiểm kê') : ''].join('') : null),
@@ -245,7 +245,7 @@
     const goAsm = () => { ERP.state.asm = Object.assign(ERP.state.asm || {}, { kind: 'asm', stat: '', page: 0 }); ERP.goto('bom', { tab: 'asm' }); };
     put(host, section(L('BOM 없는 생산품 (입고만 되고 부품은 차감 안 됨)', 'Sản phẩm chưa có BOM (chỉ nhập, chưa trừ linh kiện)'), nb.length, 'warn', () => h('div',
       h('div', { class: 'toolbar' }, h('button', { class: 'btn primary', onclick: goAsm }, L('조립 BOM 자동 구성 (ECOUNT 코드) →', 'Tự tạo BOM lắp ráp (mã ECOUNT) →')), h('span', { class: 'muted' }, L('바로 적용 가능한 조립품 ', 'Có thể áp dụng ngay: ') + F.n(ready) + L('개', ' mã'))),
-      ERP.simpleTable([{ label: L('품목', 'Mã hàng'), render: x => h('b', x.code) }, { label: L('품명', 'Tên'), render: x => x.name }, { label: L('단계', 'Công đoạn'), render: x => x.stage ? INV.stageName(x.stage) : '' }, { label: L('행', 'Dòng'), num: 1, render: x => F.n(x.n) }, { label: L('생산량', 'Sản lượng'), num: 1, render: x => F.n(x.qty) },
+      ERP.simpleTable([{ label: L('품목', 'Mã hàng'), render: x => h('b', x.code) }, { label: L('품명', 'Tên'), render: x => x.name }, { label: L('단계', 'Công đoạn'), render: x => x.stage ? INV.stageTitle(x.stage) : '' }, { label: L('행', 'Dòng'), num: 1, render: x => F.n(x.n) }, { label: L('생산량', 'Sản lượng'), num: 1, render: x => F.n(x.qty) },
         { label: '', render: x => h('button', { class: 'btn sm', onclick: () => ERP.bomEditor && ERP.bomEditor(x.code) }, L('BOM 편집', 'Sửa BOM')) }], nb.slice(0, 200), { maxH: '300px' }))));
     put(host, section(L('예시 BOM의 부품코드가 ECOUNT 품목에 없음 (차감 안 됨)', 'Mã linh kiện của BOM mẫu không có trong ECOUNT'), mp.length, 'warn', () => h('div',
       h('p', { class: 'help' }, L('예전 색상별 BOM은 옛 부품코드(NM01064, H001 …)를 씁니다. "조립 BOM 자동 구성"으로 ECOUNT 코드(RM164, MH …) BOM을 만들면 이 목록이 사라집니다.', 'BOM mẫu dùng mã cũ (NM01064, H001…). Dùng "Tự tạo BOM lắp ráp" để tạo BOM theo mã ECOUNT (RM164, MH…).')),
@@ -256,7 +256,7 @@
     if (ms.length) put(host, h('details', { class: 'card', style: { marginBottom: '12px', padding: '12px 16px' } },
       h('summary', { style: { cursor: 'pointer', fontWeight: 700 } }, ERP.chip('neutral', F.n(ms.length)), ' ', L('원부자재는 차감하지 않음 (규칙)', 'Không trừ NVL (quy tắc)'), h('span', { class: 'muted', style: { fontWeight: 400, marginLeft: '8px' } }, L('BOM · 배합표 · 사출 일보에 나온 원재료 · 부자재 — 정보만', 'NL · VL phụ trong BOM · công thức · báo cáo ép — chỉ để xem'))),
       h('p', { class: 'help' }, L('원부자재 재고는 창고 입고 · 출고 · 이동 수불로만 바뀝니다. 아래 수량은 생산 반영이 차감했을 양으로, 재고에는 반영하지 않습니다.', 'Tồn NVL chỉ thay đổi theo phiếu nhập · xuất · chuyển. Số dưới đây là lượng lẽ ra bị trừ — không cập nhật vào tồn.')),
-      ERP.simpleTable([{ label: L('품목 · 원료', 'Mã · NL'), render: x => h('b', x.code) }, { label: L('품명', 'Tên'), render: x => (x.name || '').slice(0, 36) }, { label: L('단계', 'Công đoạn'), render: x => x.stage ? INV.stageName(x.stage) : L('원료 이름', 'Tên NL') }, { label: L('행', 'Dòng'), num: 1, render: x => F.n(x.n) }, { label: L('수량', 'SL'), num: 1, render: x => F.n(x.qty, 2) }], ms.slice(0, 200), { maxH: '260px' })));
+      ERP.simpleTable([{ label: L('품목 · 원료', 'Mã · NL'), render: x => h('b', x.code) }, { label: L('품명', 'Tên'), render: x => (x.name || '').slice(0, 36) }, { label: L('단계', 'Công đoạn'), render: x => x.stage ? INV.stageTitle(x.stage) : L('원료 이름', 'Tên NL') }, { label: L('행', 'Dòng'), num: 1, render: x => F.n(x.n) }, { label: L('수량', 'SL'), num: 1, render: x => F.n(x.qty, 2) }], ms.slice(0, 200), { maxH: '260px' })));
     // 3-2) raw-material names (예전: 배합표 · 사출 원료 차감용 — 11차부터 차감하지 않으므로 보통 비어 있다)
     const ru = Array.from(d.rawUnmatched.entries()).map(([k, v]) => ({ src: k, n: v.n, qty: v.qty })).sort((a, b) => b.qty - a.qty);
     if (ru.length) put(host, section(L('원료 이름 → 원재료(RM) 품목 연결', 'Tên nguyên liệu → mã RM'), ru.length, 'warn', () => {
@@ -637,7 +637,7 @@
     const opt = { table: st.t, pageSize: 50, maxH: '62vh' };
     if (st.t === 'items') Object.assign(opt, { cols: ['code', 'name', 'erp_code', 'xnk', 'etype', 'unit', 'safety', 'set_per_ct', 'pcs_per_set'].map(IC), beforeSave: itemBeforeSave, defaults: () => ({ src: 'local' }),
       searchKeys: ['code', 'name', 'erp_code', 'xnk'], extraCols: [{ label: () => L('분류', 'Phân loại'), render: r => ERP.codeChips(INV.info(r)) }, { label: () => '', render: r => (r.hidden ? ERP.chip('neutral', L('숨김', 'Ẩn')) : (r.missing ? ERP.chip('warn', L('파일에 없음', 'Không có trong file')) : '')) }],
-      filters: [{ id: 'st', label: L('단계', 'Công đoạn'), test: (r, v) => INV.info(r).stage === v, options: () => INV.STAGES.concat(INV.EXTRA_STAGES).map(s => ({ v: s.code, label: INV.stageName(s.code) })) }, { id: 'h', label: L('숨김', 'Ẩn'), test: (r, v) => (v === '1' ? !!r.hidden : !r.hidden), options: () => [{ v: '0', label: L('표시 중', 'Đang hiện') }, { v: '1', label: L('숨김', 'Ẩn') }] }] });
+      filters: [{ id: 'st', label: L('단계', 'Công đoạn'), test: (r, v) => INV.info(r).stage === v, options: () => INV.STAGES.concat(INV.EXTRA_STAGES).map(s => ({ v: s.code, label: INV.stageTitle(s.code) })) }, { id: 'h', label: L('숨김', 'Ẩn'), test: (r, v) => (v === '1' ? !!r.hidden : !r.hidden), options: () => [{ v: '0', label: L('표시 중', 'Đang hiện') }, { v: '1', label: L('숨김', 'Ẩn') }] }] });
     if (st.t === 'uploads') Object.assign(opt, { canAdd: false, sortKey: 'at', sortDir: -1 });
     host.appendChild(ERP.grid(opt).el);
     if (st.t === 'items') put(host, h('p', { class: 'help' }, L('ECOUNT 품목등록을 다시 올리면 신규는 추가, 바뀐 값은 갱신됩니다. 여기서 직접 추가한 품목(출처 local)은 그대로 남습니다. ERP CODE 를 고치면 단계·분류가 자동으로 다시 나뉩니다.', 'Tải lại danh mục ECOUNT: thêm mã mới, cập nhật thay đổi. Mã tự thêm (nguồn local) được giữ. Sửa ERP CODE sẽ tự phân loại lại.')));

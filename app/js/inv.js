@@ -20,21 +20,22 @@
 
   // ------------------------------------------------------------------ ERP CODE dictionary (built-in; code_dict table overrides)
   // 12차: 확인되지 않은 코드(guessed · 끝의 1)는 이름을 비워 둔다 — 짐작한 이름을 쓰지 않고 코드만 보인다. 이름은 사용자가 정한다 (코드 사전 · ERP CODE 설명 파일)
+  // 1.7.1 (2026-10-21 사용자 확인): CM = 소모품 (Vật tư tiêu hao), WIP06·x6 · WIP15·25·35 · WIP11 · WIP21·31… · WIP55 = 부품 (Linh kiện)
   // g: 'mat' = 자재 단계 (2번째 칸 = 분류), 그 외는 2번째 칸 = 제품군
   const STAGES = [
     { code: 'RM', ko: '원재료', vi: 'Nguyên vật liệu', g: 'mat', etype: '원재료' },
     { code: 'SM', ko: '부자재', vi: 'Vật liệu phụ', g: 'mat', etype: '부재료' },
-    { code: 'CM', ko: '', vi: '', g: 'mat', etype: '부재료', guessed: true },
+    { code: 'CM', ko: '소모품', vi: 'Vật tư tiêu hao', g: 'mat', etype: '부재료' },
     { code: 'WIP00', ko: '심 (리필)', vi: 'Lõi (refill)', proc: 'REF', etype: '반제품' },
     { code: 'WIP01', ko: '배럴', vi: 'Barrel', proc: 'INJ', etype: '반제품' },
     { code: 'WIP02', ko: '노즈콘', vi: 'Nose cone', proc: 'INJ', etype: '반제품' },
     { code: 'WIP03', ko: '홀더/플러그', vi: 'Holder/plug', proc: 'INJ', etype: '반제품' },
     { code: 'WIP04', ko: '스푼', vi: 'Spoon', proc: 'INJ', etype: '반제품' },
-    { code: 'WIPx6', ko: '', vi: '', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP06 + WIP16·26·36·46·56' },
-    { code: 'WIPx5', ko: '', vi: '', proc: 'INJ', etype: '반제품', guessed: true, note: 'WIP15·25·35' },
-    { code: 'WIP11', ko: '', vi: '', proc: 'STP', etype: '반제품', guessed: true },
-    { code: 'WIPx1', ko: '', vi: '', proc: 'STP', etype: '반제품', guessed: true, note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차, 이름은 사용자가 정함)' },
-    { code: 'WIP55', ko: '', vi: '', proc: 'ASM', etype: '반제품', guessed: true },
+    { code: 'WIPx6', ko: '부품', vi: 'Linh kiện', proc: 'INJ', etype: '반제품', note: 'WIP06 + WIP16·26·36·46·56' },
+    { code: 'WIPx5', ko: '부품', vi: 'Linh kiện', proc: 'INJ', etype: '반제품', note: 'WIP15·25·35' },
+    { code: 'WIP11', ko: '부품', vi: 'Linh kiện', proc: 'STP', etype: '반제품' },
+    { code: 'WIPx1', ko: '부품', vi: 'Linh kiện', proc: 'STP', etype: '반제품', note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차)' },
+    { code: 'WIP55', ko: '부품', vi: 'Linh kiện', proc: 'ASM', etype: '반제품' },
     { code: 'WIP', ko: '조립 완료', vi: 'Hoàn thành lắp ráp', proc: 'ASM', etype: '반제품' },
     { code: 'SG', ko: '마니라 포장 완료', vi: 'Đã đóng gói Manila', proc: 'PCK', etype: '반제품' },
     { code: 'FG', ko: '박스 포장 완료', vi: 'Đã đóng thùng (thành phẩm)', proc: 'PCK', etype: '제품' },
@@ -101,6 +102,8 @@
   INV.stageList = () => STAGES.map(s => s.code);
   INV.stageInfo = (code) => STAGE_IDX.get(code) || STAGE_IDX.get('ETC');
   INV.stageName = (code) => INV.label('stage', code);
+  /** 목록 · 필터용: 이름 · 코드 (여러 단계가 같은 이름 — 예: 부품 — 을 쓸 수 있어 코드를 같이 보인다). 이름이 없으면 코드만 */
+  INV.stageTitle = (code) => { const n = INV.label('stage', code), c = INV.stageCodeShow(code); return !code ? '' : (n === c ? c : n + ' · ' + c); };
 
   // ------------------------------------------------------------------ ERP CODE parser
   function stageOf(seg1) {

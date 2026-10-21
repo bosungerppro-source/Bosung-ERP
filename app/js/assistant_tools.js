@@ -44,7 +44,7 @@
     const row = { code: clean(s.code), name: clean(s.name), unit: s.prim, balance: r1(s.bal), safety_stock: s.safety,
       pct_of_safety: s.safety ? Math.round(s.bal / s.safety * 100) : null, status: s.status, days_cover: s.cover === null || s.cover === undefined ? null : Math.round(s.cover) };
     if (s.by) { row.warehouse = r1(s.by.WH); row.factory = r1(s.by.FAC); }
-    if (s.stage && ERP.inv) row.stage = ERP.inv.stageName(s.stage);
+    if (s.stage && ERP.inv) row.stage = ERP.inv.stageTitle(s.stage);
     if (s.sets !== null && s.sets !== undefined) row.sets = Math.round(s.sets);
     if (s.susp) row.transfer_missing_suspected = true;
     if (below && s.safety > 0) row.recommended_order = r1(Math.max(0, s.safety * (mult || 1) - s.bal));

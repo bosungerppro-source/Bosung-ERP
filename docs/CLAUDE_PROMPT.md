@@ -203,4 +203,5 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **자료 올리기 결과 버튼**: 현장 실사 · 생산일보 → 현장 재고, 재고현황 · 수불 → 원부자재 재고, 품목 · 창고 · 코드 → 품목.
 - **화면에 "null" 글자 금지**: `Element.append` · `replaceChildren` 에 null 을 넘기면 "null" 글자가 붙는다. 빈 값이 섞일 수 있으면 `ERP.put(el, ...)` (빈 값은 빼고 붙임) 를 쓰거나 `.filter(Boolean)` 으로 거른다. `h()` 는 null 을 건너뛴다. 공용 표(`ERP.grid`)의 빈 표 · 재고 · 수불 내역 · 외주 · 예시 자료 · 조립 BOM 에서 "null" 이 보이던 것을 12차에서 고쳤다.
 - 물음표 표시도 쓰지 않는다: 이동 누락 의심은 "이동 누락" (말풍선에 "이동 누락 의심").
-- 시험: `npm run test:v12` 120개 (모든 화면 null · undefined 글자 검사 포함) + v11 · v9 · v8 · v7 · assistant (v7 의 ECOUNT 비교 시험은 "비교 없음 · 기초재고 재설정 경고" 로 바꿈).
+- **1.7.1 (2026-10-21)**: 사용자가 단계 이름을 정함 — CM = 소모품 (Vật tư tiêu hao), WIP06·x6 · WIP15·25·35 · WIP11 · WIP21·31… · WIP55 = 부품 (Linh kiện). 내장 사전에 넣음 (이름 미정은 34개: 제품군 2 · 세부 14 · 분류 18). 여러 단계가 같은 이름을 쓸 수 있으므로 목록 · 필터 · 미리보기는 `INV.stageTitle(code)` ("부품 · WIP11"), 단계 카드는 이름 아래 코드 줄.
+- 시험: `npm run test:v12` 123개 (모든 화면 null · undefined 글자 검사 포함) + v11 · v9 · v8 · v7 · assistant (v7 의 ECOUNT 비교 시험은 "비교 없음 · 기초재고 재설정 경고" 로 바꿈).

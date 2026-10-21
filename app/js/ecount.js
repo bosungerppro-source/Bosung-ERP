@@ -241,7 +241,7 @@
   function previewFloor(job) {
     const sum = job.rows.reduce((a, r) => a + num(r.qty), 0), exSum = job.excluded.reduce((a, r) => a + num(r.qty), 0); const parts = [];
     const by = {}; job.rows.forEach(r => { by[r.stage] = (by[r.stage] || 0) + 1; });
-    Object.keys(by).forEach(st => parts.push([INV.labelShort('stage', st), by[st], 'info']));
+    Object.keys(by).forEach(st => parts.push([INV.stageTitle(st), by[st], 'info']));
     if (job.total !== null && job.total !== undefined) { const okT = Math.abs(sum + exSum - job.total) < 0.005; parts.push([L('원본 TOTAL 과 ', 'Khớp TOTAL gốc ') + (okT ? L('일치', '✓') : L('불일치', '✗')), F.n(sum + exSum), okT ? 'ok' : 'bad']); }
     else parts.push([L('수량 합계', 'Tổng SL'), F.n(sum), 'neutral']);
     if (job.excluded.length) parts.push([L('제외 (공정 중 품목 아님)', 'Bỏ qua (không phải đang SX)'), job.excluded.length, 'warn']);

@@ -210,7 +210,7 @@
       const neg = rowsS.filter(x => x.negative).length, susp = rowsS.filter(x => x.susp).length;
       const flow = h('div', { class: 'flow' }, INV.STAGES.map((sg, i) => { const o = by.get(sg.code) || { items: 0, withStock: 0, negative: 0 }; return [i && ['WIP00', 'WIP55', 'SG'].includes(sg.code) ? h('span', { class: 'arrow' }, '›') : null,
         h('button', { type: 'button', class: 'st', style: { flexBasis: '104px', minHeight: '84px' }, onclick: () => ERP.openStock(sg.code) },
-          h('b', { style: { fontSize: '12px' }, title: INV.stageName(sg.code) }, INV.labelShort('stage', sg.code)), h('div', { class: 'n', style: { fontSize: '16px' } }, F.n(o.withStock), h('small', ' / ' + F.n(o.items))), h('div', { class: 'fl' }, o.negative ? h('span', { style: { background: '#FBE6E4', color: '#9F1F18' } }, '−' + o.negative) : null))]; }));
+          h('b', { style: { fontSize: '12px' }, title: INV.stageName(sg.code) }, INV.labelShort('stage', sg.code)), INV.isGuessed('stage', sg.code) ? null : h('code', INV.stageCodeShow(sg.code)), h('div', { class: 'n', style: { fontSize: '16px' } }, F.n(o.withStock), h('small', ' / ' + F.n(o.items))), h('div', { class: 'fl' }, o.negative ? h('span', { style: { background: '#FBE6E4', color: '#9F1F18' } }, '−' + o.negative) : null))]; }));
       return box(L('재고 · 공정 흐름', 'Tồn kho · dòng chảy sản xuất'), h('a', { href: '#/floor' }, L('현장 재고 →', 'Tồn hiện trường →')), flow,
         h('div', { class: 'toolbar', style: { margin: '8px 0 0' } }, ERP.chip(neg ? 'bad' : 'ok', L('마이너스 ', 'Âm ') + F.n(neg)), ERP.chip(susp ? 'warn' : 'ok', L('이동 누락 의심 ', 'Nghi thiếu phiếu chuyển ') + F.n(susp)), h('span', { class: 'muted' }, L('숫자 = 재고 있는 품목 / 전체', 'Số = mã có tồn / tổng'))));
     } });

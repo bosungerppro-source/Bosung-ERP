@@ -236,7 +236,7 @@
       const samples = SAMPLE_TABLES.filter(t => ERP.isSample(t));
       return h('div', { class: 'card' }, h('h3', L('재고 · 생산 반영', 'Tồn kho · cập nhật sản xuất')),
         h('div', { class: 'field' }, h('span', L('생산일보 → 재고 반영 방식', 'Báo cáo SX → cập nhật tồn')), sel),
-        h('p', { class: 'help' }, L('기본은 "생산량 입고 + BOM 현장 부품 차감"입니다. BOM 으로 차감하는 것은 현장 재고(반제품 · 완제품)뿐이고, 원부자재(원재료 · 부자재 · CM)는 차감하지 않습니다. BOM이 없는 품목은 입고만 되고 수불 내역에 경고가 나옵니다. 일보에서 매번 다시 계산하므로 같은 일보를 다시 올려도 중복되지 않습니다.', 'Mặc định: nhập sản lượng + trừ linh kiện hiện trường theo BOM. Không trừ NVL. Mã chưa có BOM chỉ được nhập và có cảnh báo. Tính lại từ báo cáo mỗi lần nên không bị trùng.')),
+        h('p', { class: 'help' }, L('기본은 "생산량 입고 + BOM 현장 부품 차감"입니다. BOM 으로 차감하는 것은 현장 재고(반제품 · 완제품)뿐이고, 원부자재(원재료 · 부자재 · 소모품)는 차감하지 않습니다. BOM이 없는 품목은 입고만 되고 수불 내역에 경고가 나옵니다. 일보에서 매번 다시 계산하므로 같은 일보를 다시 올려도 중복되지 않습니다.', 'Mặc định: nhập sản lượng + trừ linh kiện hiện trường theo BOM. Không trừ NVL. Mã chưa có BOM chỉ được nhập và có cảnh báo. Tính lại từ báo cáo mỗi lần nên không bị trùng.')),
         h('dl', { class: 'kv' }, h('dt', L('기초재고 · 창고', 'Tồn đầu · Kho')), h('dd', od.WH ? od.WH + ' · ' + F.n(n.WH) + L('행', ' dòng') : '–'), h('dt', L('기초재고 · 공장', 'Tồn đầu · Xưởng')), h('dd', od.FAC ? od.FAC + ' · ' + F.n(n.FAC) + L('행', ' dòng') : '–'),
           h('dt', L('현장 실사 (공정 중)', 'Kiểm kê hiện trường')), h('dd', od.FLOOR ? od.FLOOR + ' · ' + F.n(n.FLOOR) + L('행', ' dòng') : '–')),
         h('p', { class: 'help' }, L('기초재고를 다시 잡으려면 시작일에 ECOUNT 재고현황을 내려받아 엑셀 업로드에서 "기초재고로 설정"으로 올리세요.', 'Để đặt lại tồn đầu: tải "Tồn kho" ECOUNT vào ngày bắt đầu và chọn "Đặt làm tồn đầu kỳ".')),
