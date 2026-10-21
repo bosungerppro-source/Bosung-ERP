@@ -72,6 +72,8 @@
     const out = XLSX().write(wb, { bookType: 'xlsx', type: 'array' });
     ERP.download(name, new Blob([out], { type: 'application/octet-stream' }));
   }
+  /** 만든 통합 문서를 저장 (16차: 해외 주문 파일 — 서식 · 수식이 있는 시트) */
+  XL.saveBook = (wb, name) => save(wb, name);
   XL.exportAoa = function (name, header, rows) {
     const ws = XLSX().utils.aoa_to_sheet([header].concat(rows)); ws['!cols'] = header.map(h2 => ({ wch: Math.max(10, String(h2).length + 4) }));
     const wb = XLSX().utils.book_new(); XLSX().utils.book_append_sheet(wb, ws, name.slice(0, 31)); save(wb, name + '_' + ERP.fmt.today() + '.xlsx');

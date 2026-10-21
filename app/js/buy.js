@@ -11,6 +11,10 @@
      같은 날짜의 파일을 다시 올리면 그 날의 이 조정만 다시 계산한다 (창고 입출고장을 다시 올려도 이 조정은 그대로).
    · 1.11.2: 같은 코드가 다른 구분으로 또 있으면 **따로 관리하는 재고** (사용자: BIC 업체 요청으로 창고를 나눠 원료를 따로 관리) — 첫 줄은 ERP 품목,
      다음 줄은 buy_pools (재고 = 파일 값, 안전재고 · 리드타임 · 주문도 따로, 주문은 pool = 그 구분). 같은 코드 · 같은 구분이 두 번이면 첫 줄.
+   · 1.11.3 (사용자: "파일을 올려주는 게 아니고, 안전재고에 따라 백단위면 백단위 천단위면 천단위씩 해서 주문 넣을 파일을 내가 올렸던 것처럼 만들어 주는 것"):
+     권장 주문량은 안전재고 자릿수 단위로 올림 (백 단위 → 100, 천 단위 → 1,000 …, 품목별 주문 단위로 바꿀 수 있음),
+     [주문 파일 만들기] = 권장 주문량을 주문일 칸에 넣고 자재구매 파일과 같은 서식의 엑셀(Oder Korea · 제목 · Author · Date · 머리 · Total 수식)을 만든다.
+     따로 관리하는 재고는 표에서 직접 고치고, 그 주문을 입고 완료하면 그 재고에 더한다 (창고 입출고장에 없으므로).
    · 입고 완료는 주문을 입고 대기에서 빼기만 한다 — 재고는 창고 입출고장 · 수불 입력으로 들어온다 (두 번 세지 않게). */
 (function () {
   'use strict';
@@ -43,6 +47,9 @@
     let fdate = null;
     for (let i = 0; i < hi && !fdate; i++) { const r = M[i] || []; const k = r.findIndex(x => typeof x === 'string' && /^date\s*:?$/i.test(x.trim())); if (k >= 0) for (let c = k + 1; c < r.length && !fdate; c++) fdate = F.parseDate(r[c]); }
     fdate = fdate || XL.fileDate(ctx && ctx.file) || F.today();
+    // 1.11.3: 파일 머리 (첫 줄의 제목 · Author 옆 칸) — ERP 가 만드는 주문 파일도 같은 모양으로
+    let author = ''; for (let i = 0; i < hi && !author; i++) { const r = M[i] || []; const k = r.findIndex(x => typeof x === 'string' && /^author\s*:?$/i.test(x.trim())); if (k >= 0) for (let c = k + 1; c < r.length && !author; c++) author = T(r[c]) || ''; }
+    const title = ((M[0] || []).find(x => typeof x === 'string' && x.trim() && !/^author\s*:?$/i.test(x.trim())) || '').trim();
     const rows = [], dups = [], seen = new Map(), firstCat = new Map(); let ord = 0;
     for (let i = hi + 1; i < M.length; i++) {
       const r = M[i]; if (!r) continue; const code = T(S(r, ci.code));
@@ -56,7 +63,7 @@
       seen.set(k, o); rows.push(o);
     }
     if (!rows.length) return [];
-    const Bx = { rows, dups, dates: dates.map(d => d.date), fdate, file: ctx && ctx.file };
+    const Bx = { rows, dups, dates: dates.map(d => d.date), fdate, file: ctx && ctx.file, head: { title, author, sheet: ctx && ctx.sheet } };
     const orderRows = [];
     rows.forEach(o => { const pool = o.pool || undefined; o.orders.forEach(x => orderRows.push({ date: x.date, code: o.code, pool, qty: x.qty, unit: o.unit })); if (o.inc > 0) orderRows.push({ date: fdate, code: o.code, pool, qty: o.inc, unit: o.unit, kind: 'inc' }); });
     const label = L('자재구매 (해외 주문)', 'Mua NVL (đặt nước ngoài)');
@@ -98,6 +105,7 @@
   function applyItems(job) {
     const Bx = job.B; const r = resolveBuy(Bx);
     if (r.created.length) DB.addMany('items', r.created);
+    if (Bx.head && (Bx.head.title || Bx.head.author)) DB.setSetting('buyHead', Bx.head);   // 1.11.3: 주문 파일 머리
     const IT = INV.items(); const inFile = new Set(); let updated = 0, off = 0, poolAdd = 0;
     Bx.rows.forEach(o => {
       if (o.pool) return;   // 따로 관리하는 재고는 아래 (buy_pools)
@@ -238,6 +246,8 @@
     const od = INV.openDates(); const o = od.WH || od.first; if (o) { const s = F.addDays(o, 1).slice(0, 7); if (s > start) start = s; }
     const out = []; for (let m = start; m <= end; m = addMonth(m, 1)) out.push(m); return out;
   };
+  /** 안전재고 자릿수 단위: 80 → 10, 300 → 100, 1,400 → 1,000, 18,000 → 10,000, 4,000,000 → 1,000,000 (없으면 1) */
+  B.stepOf = (safety) => (safety > 0 ? Math.pow(10, Math.floor(Math.log10(safety) + 1e-9)) : 1);
   const numOr = (v) => (v === null || v === undefined || v === '' || !isFinite(+v) ? null : +v);
   /** 표 한 줄 = ERP 품목 (자재구매 파일의 첫 줄) 또는 따로 관리하는 재고 (1.11.2: 같은 코드 · 다른 구분, buy_pools) */
   B.rows = () => DB.memo('buy.rows:' + F.today() + ':' + (B.lead() || ''), ['items', 'stock_open', 'stock_tx', 'prod_log', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_dict', 'code_map', 'buy_orders', 'buy_pools'], () => {
@@ -246,13 +256,13 @@
     const rows = B.items().map(it => {
       const s = st.get(it.code); const balE = s ? s.bal : 0;
       return one({ it, code: it.code, pool: '', cat: str(it.buy_cat), name: str(it.name), kr: str(it.name_kr), unit: B.unitOf(it), unitE: INV.unitShow(it.unit), bal: B.toBuy(it, balE), balE,
-        safety: B.safetyOf(it), fileInv: numOr(it.buy_inv), fileDate: str(it.buy_inv_date), ord: num(it.buy_ord) || 1e9, leadDays: num(it.lead_days) });
+        safety: B.safetyOf(it), fileInv: numOr(it.buy_inv), fileDate: str(it.buy_inv_date), ord: num(it.buy_ord) || 1e9, leadDays: num(it.lead_days), step: num(it.buy_step) });
     });
     // 따로 관리하는 재고: 재고 = 자재구매 파일 값 (창고 입출고장 · 수불과 따로), 월 사용량은 파일처럼 같은 코드의 값
     DB.rows('buy_pools').forEach(p => { const it = INV.item(p.code); if (!it || !it.buy) return;   // 첫 줄(ERP 품목)이 목록에 있을 때만
       const v = numOr(p.inv);
       rows.push(one({ it, poolRow: p, code: it ? it.code : str(p.code), pool: str(p.cat), cat: str(p.cat), name: str(p.name) || (it ? str(it.name) : ''), kr: str(p.name_kr), unit: str(p.unit) || (it ? B.unitOf(it) : ''),
-        unitE: str(p.unit) || (it ? B.unitOf(it) : ''), bal: v === null ? 0 : v, balE: v === null ? 0 : v, safety: numOr(p.safety), fileInv: null, fileDate: str(p.inv_date), ord: num(p.ord) || 1e9, leadDays: num(p.lead_days) })); });
+        unitE: str(p.unit) || (it ? B.unitOf(it) : ''), bal: v === null ? 0 : v, balE: v === null ? 0 : v, safety: numOr(p.safety), fileInv: null, fileDate: str(p.inv_date), ord: num(p.ord) || 1e9, leadDays: num(p.lead_days), step: num(p.step) })); });
     return rows.sort((a, b) => a.ord - b.ord || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
     function one(x) {
       const it = x.it, bal = x.bal, balE = x.balE, unit = x.unit, safety = x.safety, fileInv = x.fileInv; const bu = INV.unitN(unit); const kgpe = it ? num(it.kg_per_ea) : 0;
@@ -273,13 +283,15 @@
       const total = bal === null ? null : bal + openQ;   // = 재고 + 입고예정 + 입고 대기 주문 (파일의 Total)
       const proj = total === null ? null : total - leadUse;
       const status = safety === null || proj === null ? 'na' : (proj < safety ? 'need' : 'ok');
+      // 1.11.3: 주문 단위 = 품목별로 넣은 값, 없으면 안전재고 자릿수 (백 단위 → 100, 천 단위 → 1,000 …) — 권장 주문량은 그 단위로 올림
+      const step = x.step > 0 ? x.step : B.stepOf(safety);
       let sug = 0;
-      if (status === 'need') { sug = safety + leadUse - total; sug = bu === 'kg' && kgpe > 1 ? Math.ceil(sug / kgpe - 1e-9) * kgpe : Math.ceil(sug - 1e-9); }
+      if (status === 'need') { sug = safety + leadUse - total; sug = Math.round(Math.ceil(sug / step - 1e-9) * step * 10000) / 10000; }
       const etaOf = (o) => str(o.eta) || (lead && o.kind !== 'inc' ? F.addDays(o.date, lead) : null);   // 입고예정 칸은 직접 넣은 도착 예정만
       const etas = open.map(etaOf).filter(Boolean).sort(); const eta = etas[0] || null;
       const late = open.filter(o => { const e = etaOf(o); return e && e < today; }).length;
       return { it, key, code: x.code, pool: x.pool, poolRow: x.poolRow || null, ord: x.ord, cat: x.cat, name: x.name, kr: x.kr, unit, bu, unitE: x.unitE, bal, balE, safety, fileInv, fileDate: x.fileDate, invDiff, ords, incs, open, incOpen, incQ, openQ, total,
-        months, mv, conv, max, min, avg, last, lastKg, lastEa, lead, leadOwn: x.leadDays > 0, leadDays: x.leadDays, leadUse, status, sug, eta, late, kgpe, etaOf };
+        months, mv, conv, max, min, avg, last, lastKg, lastEa, lead, leadOwn: x.leadDays > 0, leadDays: x.leadDays, leadUse, status, sug, step, stepOwn: x.step > 0, eta, late, kgpe, etaOf };
     }
   });
 
@@ -291,6 +303,13 @@
     if (!(v > 0)) { if (e) DB.remove('buy_orders', [e._id]); return; }
     if (e) DB.update('buy_orders', e._id, { qty: v, unit: r.unit });
     else DB.add('buy_orders', pick({ date, code: r.code, pool: r.pool || undefined, name: r.name, qty: v, unit: r.unit, status: 'open', src: 'erp' }));
+  }
+  /** 입고 완료 / 입고 대기로 되돌리기. 따로 관리하는 재고(pool)는 그 재고에 더하고 뺀다 (창고 입출고장에 없으므로), ERP 품목은 재고를 바꾸지 않는다 */
+  function setRecv(o, on) {
+    DB.update('buy_orders', o._id, on ? { status: 'recv', recv: F.today() } : { status: 'open', recv: undefined });
+    if (!o.pool) return;
+    const p = DB.rows('buy_pools').find(x => pkey({ code: x.code, pool: x.cat }) === pkey(o)); if (!p) return;
+    DB.update('buy_pools', p._id, { inv: Math.round(((num(p.inv) || 0) + (on ? 1 : -1) * num(o.qty)) * 10000) / 10000, inv_date: F.today() });
   }
   /** 입고예정 칸 저장: 품목마다 입고 대기 '입고예정' 한 줄 (빈 칸 · 0 은 지움) */
   function setInc(r, v) {
@@ -350,6 +369,17 @@
       if (!st.newDates.includes(d)) st.newDates.push(d);
       ERP.toast(L('권장 주문량을 넣었습니다', 'Đã điền SL đề xuất'), 'ok'); ERP.render();
     };
+    /** 1.11.3: 주문 파일 — 이번 주문일 칸에 주문이 없는 주문 필요 품목은 권장 주문량을 넣고, 자재구매 파일과 같은 서식으로 */
+    const orderFile = async () => {
+      const d = (st.newDates.length ? st.newDates.slice().sort().reverse()[0] : null) || st.addDate || today;
+      const lack = B.rows().filter(r => r.status === 'need' && r.sug > 0 && !r.ords.some(o => o.date === d));
+      if (lack.length) {
+        if (!(await ERP.confirm(L('주문 필요 ' + lack.length + '품목의 권장 주문량(안전재고 자릿수 단위로 올림)을 ' + d + ' 주문 칸에 넣고 주문 파일을 만들까요?\n넣은 주문은 입고 대기로 남고, 칸에서 고치거나 지울 수 있습니다.', 'Điền SL đề xuất của ' + lack.length + ' mã vào cột ' + d + ' và tạo file đặt hàng?')))) return;
+        lack.forEach(r => DB.add('buy_orders', pick({ date: d, code: r.code, pool: r.pool || undefined, name: r.name, qty: r.sug, unit: r.unit, status: 'open', src: 'erp' })));
+        if (!st.newDates.includes(d)) st.newDates.push(d);
+      }
+      B.orderFile(d); ERP.render();
+    };
     const tb = h('div', { class: 'toolbar' },
       h('label', { class: 'search' }, ERP.svg('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z', 17), q),
       h('select', { class: 'inp', onchange: (e) => { st.cat = e.target.value; ERP.render(); } }, h('option', { value: '' }, L('구분: 전체', 'Nhóm: tất cả')), cats.map(c => h('option', { value: c, selected: st.cat === c }, c))),
@@ -358,13 +388,15 @@
       h('span', { class: 'sp' }),
       h('span', { class: 'nowrap', style: { display: 'inline-flex', gap: '6px', alignItems: 'center' } }, addInp, h('button', { class: 'btn sm', onclick: addCol }, '+ ' + L('주문 칸', 'Cột đặt hàng'))),
       h('button', { class: 'btn sm', onclick: fillSug }, L('권장 주문량 넣기', 'Điền SL đề xuất')),
-      h('button', { class: 'btn sm', onclick: () => exportSame(pickRows(B.rows()), dates) }, L('엑셀 (같은 표)', 'Excel (cùng mẫu)')),
+      h('button', { class: 'btn sm primary', onclick: orderFile, title: L('권장 주문량을 주문 칸에 넣고 자재구매 파일과 같은 서식의 엑셀을 만듭니다', 'Điền SL đề xuất và tạo file Excel cùng mẫu file mua NVL') }, L('주문 파일 만들기', 'Tạo file đặt hàng')),
       h('button', { class: 'btn sm', onclick: () => { ERP.state.dataTab = 'import'; ERP.goto('data'); } }, L('자재구매 파일 올리기', 'Tải file mua NVL')));
     // ---- 표 (자재구매 파일과 같은 칸 순서)
     const refs = new Map();   // 줄 열쇠 (품목코드 + 따로 관리하는 구분) → 다시 계산할 칸
     const refresh = (key) => { const r = B.rows().find(x => x.key === key); const c = refs.get(key); if (!r || !c) return; fillCalc(c, r); };
     const fillCalc = (c, r) => {
-      c.balV.textContent = fq(r.bal, r.unit); c.balV.style.color = r.safety !== null && r.bal !== null && r.bal < r.safety ? '#B3261E' : '';
+      if (c.balV.tagName !== 'INPUT') c.balV.textContent = fq(r.bal, r.unit);
+      c.balV.style.color = r.safety !== null && r.bal !== null && r.bal < r.safety ? '#B3261E' : '';
+      c.step.placeholder = r.stepOwn ? '' : String(r.step);
       c.total.textContent = fq(r.total, r.unit);
       c.eta.replaceChildren(); if (r.eta) put(c.eta, h('span', { style: r.late ? { color: '#B3261E', fontWeight: 700 } : null, title: r.late ? L('도착 예정일이 지났습니다 (입고되면 입고 완료를 누르세요)', 'Đã quá ngày dự kiến') : '' }, F.d(r.eta)));
       c.status.replaceChildren(ERP.chip(SS[r.status][1], SS[r.status][0]));
@@ -377,7 +409,7 @@
       return h('th', { class: 'num', style: { minWidth: '108px' } }, h('div', d), h('div', { style: { display: 'flex', gap: '4px', justifyContent: 'flex-end', marginTop: '3px' } },
         openOs.length ? h('button', { class: 'btn sm', title: L('이 날 주문을 모두 입고 완료로 (재고는 창고 입출고장 · 수불로 들어옴)', 'Đánh dấu đã nhập cả cột'), onclick: async () => {
           if (!(await ERP.confirm(L(d + ' 주문 ' + openOs.length + '건을 입고 완료로 할까요?\n입고예정에서 빠집니다. 재고는 창고 입출고장 · 수불 입력으로 들어옵니다.', 'Đánh dấu ' + openOs.length + ' đơn ngày ' + d + ' đã nhập?')))) return;
-          openOs.forEach(o => DB.update('buy_orders', o._id, { status: 'recv', recv: today })); ERP.render(); } }, L('입고 완료', 'Đã nhập')) : null,
+          openOs.forEach(o => setRecv(o, true)); ERP.render(); } }, L('입고 완료', 'Đã nhập')) : null,
         h('button', { class: 'icon-btn', title: L('이 주문 칸 지우기', 'Xóa cột này'), onclick: async () => {
           if (os.length && !(await ERP.confirm(L(d + ' 주문 ' + os.length + '건을 지울까요?', 'Xóa ' + os.length + ' đơn ngày ' + d + '?'), L('삭제', 'Xóa'), true))) return;
           if (os.length) DB.remove('buy_orders', os.map(o => o._id)); st.newDates = st.newDates.filter(x => x !== d); ERP.render(); } }, '×')));
@@ -386,15 +418,15 @@
       const inp = h('input', { class: 'inp', type: 'number', min: 0, step: 'any', style: { width: '84px', textAlign: 'right' }, value: r.incQ || '', placeholder: '',
         title: L('주문일 없이 들어올 수량 (파일의 입고예정 칸)', 'Số lượng sắp nhập (không có ngày đặt)') + (r.incOpen.length ? ' · ' + r.incOpen.map(o => o.date + ' ' + F.n(o.qty)).join(', ') : ''),
         onchange: (e) => { setInc(r, Number(e.target.value)); refresh(r.key); } });
-      const done = r.incOpen.length ? h('button', { class: 'icon-btn', title: L('입고 완료', 'Đã nhập'), onclick: () => { r.incOpen.forEach(o => DB.update('buy_orders', o._id, { status: 'recv', recv: today })); ERP.render(); } }, '✓') : null;
+      const done = r.incOpen.length ? h('button', { class: 'icon-btn', title: L('입고 완료', 'Đã nhập'), onclick: () => { r.incOpen.forEach(o => setRecv(o, true)); ERP.render(); } }, '✓') : null;
       return h('td', { class: 'num nowrap' }, inp, done);
     };
     const orderCell = (r, d) => {
       const o = r.ords.find(x => x.date === d);
-      if (o && o.status === 'recv') return h('td', { class: 'num' }, h('button', { class: 'chipbtn', style: { color: '#0E7A5F' }, title: L('입고 완료 ', 'Đã nhập ') + (o.recv || '') + L(' · 누르면 입고 대기로', ' · bấm để chuyển về chờ nhập'), onclick: () => { DB.update('buy_orders', o._id, { status: 'open', recv: undefined }); ERP.render(); } }, '✓ ' + fq(o.qty, r.unit)));
+      if (o && o.status === 'recv') return h('td', { class: 'num' }, h('button', { class: 'chipbtn', style: { color: '#0E7A5F' }, title: L('입고 완료 ', 'Đã nhập ') + (o.recv || '') + L(' · 누르면 입고 대기로', ' · bấm để chuyển về chờ nhập'), onclick: () => { setRecv(o, false); ERP.render(); } }, '✓ ' + fq(o.qty, r.unit)));
       const inp = h('input', { class: 'inp', type: 'number', min: 0, step: 'any', style: { width: '84px', textAlign: 'right' }, value: o ? o.qty : '', placeholder: '',
         title: o ? L('도착 예정 ', 'Dự kiến về ') + (r.etaOf(o) || '–') : '', onchange: (e) => { setOrder(r, d, Number(e.target.value)); r.ords = B.rows().find(x => x.key === r.key).ords; refresh(r.key); } });
-      const done = o ? h('button', { class: 'icon-btn', title: L('입고 완료', 'Đã nhập'), onclick: () => { DB.update('buy_orders', o._id, { status: 'recv', recv: today }); ERP.render(); } }, '✓') : null;
+      const done = o ? h('button', { class: 'icon-btn', title: L('입고 완료', 'Đã nhập'), onclick: () => { setRecv(o, true); ERP.render(); } }, '✓') : null;
       return h('td', { class: 'num nowrap' }, inp, done);
     };
     const th = (ko, vi, en, isNum, title) => h('th', { class: isNum ? 'num' : '', title: [en, title].filter(Boolean).join(' · ') || null }, L(ko, vi));
@@ -404,11 +436,16 @@
       c.lead = h('input', { class: 'inp', type: 'number', min: 0, step: 1, style: { width: '64px', textAlign: 'right' }, value: r.leadOwn ? r.leadDays : '', placeholder: B.lead() ? String(B.lead()) : '–',
         title: L('이 품목의 리드타임 (비우면 기본값)', 'Thời gian giao của mã (trống = mặc định)'), onchange: (e) => { const v = Number(e.target.value); const p = { lead_days: v > 0 ? v : undefined };
           if (r.poolRow) DB.update('buy_pools', r.poolRow._id, p); else DB.update('items', r.it._id, p); refresh(r.key); } });
+      c.step = h('input', { class: 'inp', type: 'number', min: 0, step: 'any', style: { width: '84px', textAlign: 'right' }, value: r.stepOwn ? r.step : '', placeholder: r.stepOwn ? '' : String(r.step),
+        title: L('권장 주문량을 이 단위로 올립니다. 비우면 안전재고 자릿수 (백 단위 → 100, 천 단위 → 1,000 …)', 'Làm tròn SL đề xuất theo bước này; trống = theo hàng của tồn AT'),
+        onchange: (e) => { const v = Number(e.target.value); const p = { [r.poolRow ? 'step' : 'buy_step']: v > 0 ? v : undefined }; if (r.poolRow) DB.update('buy_pools', r.poolRow._id, p); else DB.update('items', r.it._id, p); refresh(r.key); } });
       const saf = h('input', { class: 'inp', type: 'number', min: 0, step: 'any', style: { width: '96px', textAlign: 'right' }, value: r.safety === null ? '' : r.safety, placeholder: '–',
         onchange: (e) => { const v = e.target.value === '' ? undefined : Number(e.target.value);
           if (r.poolRow) DB.update('buy_pools', r.poolRow._id, { safety: v });
           else { const same = !str(r.it.buy_unit) || unitSame(r.it.buy_unit, r.it.unit); DB.update('items', r.it._id, same ? { safety: v } : { buy_safety: v }); }
           refresh(r.key); } });
+      if (r.poolRow) c.balV = h('input', { class: 'inp', type: 'number', min: 0, step: 'any', style: { width: '92px', textAlign: 'right' }, value: r.bal, title: L('따로 관리하는 재고 — 바뀌면 여기서 고칩니다 (입고 완료하면 저절로 더해짐)', 'Tồn quản lý riêng — sửa tại đây'),
+        onchange: (e) => { const v = Number(e.target.value); DB.update('buy_pools', r.poolRow._id, { inv: e.target.value === '' || !isFinite(v) ? undefined : v, inv_date: today }); refresh(r.key); } });
       c.bal = h('td', { class: 'num', style: { fontWeight: 700 } }, c.balV, r.invDiff ? h('div', { class: 'help', style: { margin: 0, fontWeight: 400 }, title: L('자재구매 파일(' + r.fileDate + ')의 재고 — ERP 재고는 창고 입출고장 · 수불 기준', 'Tồn trong file mua NVL (' + r.fileDate + ')') }, L('파일 ', 'File ') + fq(r.fileInv, r.unit)) : null);
       refs.set(r.key, c); fillCalc(c, r);
       const balTitle = r.bal === null ? L('ERP 재고 ', 'Tồn ERP ') + fq(r.balE, r.unitE) + ' ' + r.unitE + L(' — 개당 kg 가 없어 ' + r.unit + ' 로 못 바꿈', ' — thiếu kg/cái để đổi sang ' + r.unit) : (r.unitE !== r.unit ? L('ERP 재고 ', 'Tồn ERP ') + fq(r.balE, r.unitE) + ' ' + r.unitE + ' × ' + F.n(r.kgpe, 3) : '');
@@ -421,7 +458,7 @@
         h('td', { class: 'num' }, saf), h('td', r.unit, r.unitE !== r.unit && !unitSame(r.unit, r.unitE) ? h('div', { class: 'help', style: { margin: 0 } }, 'ERP ' + r.unitE) : null), c.bal, incCell(r),
         dates.map(d => orderCell(r, d)), c.total,
         h('td', { class: 'num' }, r.lastKg === null ? '' : fq(r.lastKg, 'kg')), h('td', { class: 'num' }, r.lastEa === null ? '' : F.n(r.lastEa, isInt(r.lastEa) ? 0 : 1)),
-        mv(r.max), mv(r.min), mv(r.avg === null ? null : Math.round(r.avg * 100) / 100), h('td', { class: 'num' }, c.lead), c.eta, c.status, c.sug);
+        mv(r.max), mv(r.min), mv(r.avg === null ? null : Math.round(r.avg * 100) / 100), h('td', { class: 'num' }, c.lead), c.eta, c.status, c.sug, h('td', { class: 'num' }, c.step));
     });
     const table = h('div', { class: 'tbl-wrap', style: { maxHeight: '64vh' } }, h('table', { class: 'tbl buy-tbl' },
       h('thead', h('tr', th('구분', 'Nhóm', 'Category'), th('품목코드', 'Mã hàng', 'Item Code'), th('품명', 'Tên', 'Item Name'), th('품명 (한글)', 'Tên (tiếng Hàn)', 'Item Name Kr'),
@@ -431,18 +468,38 @@
         th('최대', 'Max', 'Max', 1, mTitle), th('최소', 'Min', 'Min', 1, mTitle), th('평균', 'TB', 'Average', 1, mTitle),
         th('리드타임 (일)', 'Thời gian giao (ngày)', '', 1, L('주문 → 입고 일수. 비우면 기본 리드타임', 'Số ngày đặt → nhập; trống = mặc định')), th('도착 예정', 'Dự kiến về', '', 0, L('입고 대기 주문 중 가장 빠른 도착 예정 (주문일 + 리드타임)', 'Ngày về sớm nhất (ngày đặt + thời gian giao)')),
         th('상태', 'Trạng thái', '', 0, L('합계 − 리드타임 동안 쓸 양(월 평균 ÷ 30 × 리드타임) < 안전재고 → 주문 필요', 'Tổng − lượng dùng trong thời gian giao < tồn AT → cần đặt')),
-        th('권장 주문량', 'SL đề xuất', '', 1, L('안전재고 + 리드타임 동안 쓸 양 − 합계 (kg 품목은 개당 kg 단위로 올림)', 'Tồn AT + lượng dùng trong thời gian giao − tổng')))),
-      h('tbody', body.length ? body : h('tr', h('td', { colspan: 19 + dates.length, class: 'empty' }, L('조건에 맞는 품목이 없습니다.', 'Không có mã phù hợp.'))))));
-    put(host, h('p', { class: 'help', style: { marginTop: 0 } }, L('자재구매 파일의 품목만 따로 봅니다 (해외에서 주문해 리드타임이 있음). 칸 순서는 파일과 같고, 주문일 칸에 수량을 넣으면 바로 저장됩니다.', 'Chỉ các mã trong file mua NVL (đặt nước ngoài, có thời gian giao). Thứ tự cột giống file; nhập số lượng vào cột ngày đặt là lưu ngay.')),
+        th('권장 주문량', 'SL đề xuất', '', 1, L('안전재고 + 리드타임 동안 쓸 양 − 합계, 주문 단위로 올림', 'Tồn AT + lượng dùng trong thời gian giao − tổng, làm tròn theo bước')),
+        th('주문 단위', 'Bước đặt', '', 1, L('비우면 안전재고 자릿수 (백 단위 → 100, 천 단위 → 1,000 …)', 'Trống = theo hàng của tồn AT')))),
+      h('tbody', body.length ? body : h('tr', h('td', { colspan: 20 + dates.length, class: 'empty' }, L('조건에 맞는 품목이 없습니다.', 'Không có mã phù hợp.'))))));
+    put(host, h('p', { class: 'help', style: { marginTop: 0 } }, L('자재구매 파일의 품목만 따로 봅니다 (해외에서 주문해 리드타임이 있음). 칸 순서는 파일과 같고, 주문일 칸에 수량을 넣으면 바로 저장됩니다. [주문 파일 만들기] 를 누르면 권장 주문량(안전재고 자릿수 단위로 올림)을 넣고 자재구매 파일과 같은 서식의 엑셀을 만듭니다.', 'Chỉ các mã trong file mua NVL (đặt nước ngoài, có thời gian giao). Thứ tự cột giống file; nhập số lượng vào cột ngày đặt là lưu ngay. [Tạo file đặt hàng] điền SL đề xuất và tạo Excel cùng mẫu file mua NVL.')),
       kpis, tb, table,
       h('p', { class: 'help' }, L('재고 = ERP 원부자재 재고(창고 입출고장 · 수불, 창고 + 공장' + (whLast ? ' · 창고 입출고장 마지막 ' + whLast : '') + ') — 파일 단위와 다르면 개당 kg 로 바꿉니다. 자재구매 파일의 재고와 다르면 그 아래에 "파일 …" 로 같이 보입니다. 같은 코드가 다른 구분으로 또 있는 줄(따로 관리)은 그 구분의 재고 · 안전재고 · 주문을 따로 보고, 재고는 자재구매 파일의 값입니다. 합계 = 재고 + 입고예정 + 입고 대기 주문 (파일의 Total 과 같음). kg/월 · ea/월 = 지난달 창고 출고, 최대 · 최소 · 평균 = ', 'Tồn = tồn NVL ERP (sổ kho · phiếu' + (whLast ? ' · sổ kho đến ' + whLast : '') + '); khác với file thì hiện "File …" bên dưới. Dòng "Riêng" (cùng mã, khác nhóm) có tồn · tồn AT · đơn riêng, tồn theo file. Tổng = tồn + sắp nhập + đơn chờ nhập. kg/tháng · ea/tháng = xuất kho tháng trước; Max · Min · TB = ') + mTitle + L('. 입고 완료(✓)는 주문을 합계에서 빼기만 합니다 — 재고는 창고 입출고장을 올리거나 수불 입력으로 들어옵니다. 자재구매 파일을 다시 올리면 파일에 있는 주문일 칸 · 입고예정 칸 값이 들어갑니다 (입고 완료는 그대로).', '. Đã nhập (✓) chỉ bỏ đơn khỏi tổng — tồn vào qua sổ kho hoặc nhập phiếu. Tải lại file: lấy giá trị cột ngày đặt · sắp nhập trong file (giữ đơn đã nhập).')));
   };
-  /** 엑셀: 자재구매 파일과 같은 표 (머리 글자도 파일 그대로 — 다시 올려도 인식) */
-  function exportSame(rows, dates) {
-    const hdr = ['Category', 'Item Code', 'Item Name', 'Item Name Kr', 'Safety stock', 'Unit', 'Inventory', '입고예정'].concat(dates, ['Total', 'kg/month', 'ea/month', 'Max', 'Min', 'Average', L('리드타임(일)', 'Thời gian giao (ngày)'), L('도착 예정', 'Dự kiến về'), L('상태', 'Trạng thái'), L('권장 주문량', 'SL đề xuất')]);
-    const SS = STATUS(); const r2 = (v) => (v === null || v === undefined || !isFinite(v) ? '' : Math.round(v * 100) / 100);
-    ERP.xl.exportAoa('buy_order', hdr, rows.map(r => [r.cat, r.code, r.name, r.kr, r.safety === null ? '' : r.safety, r.unit, r2(r.bal), r.incQ || ''].concat(
-      dates.map(d => { const o = r.ords.find(x => x.date === d); return o && o.status !== 'recv' ? num(o.qty) : ''; }),
-      [r2(r.total), r2(r.lastKg), r.lastEa === null ? '' : Math.round(r.lastEa * 10) / 10, r2(r.max), r2(r.min), r2(r.avg), r.lead || '', r.eta || '', SS[r.status][0], r.sug || ''])));
-  }
+  /** 1.11.3: 주문 파일 — 자재구매 파일과 같은 서식 (시트 이름 · 제목 · Author · Date · 4행 머리 · B열부터, 주문일 머리는 날짜, Total = 재고부터 주문일 칸까지 합 수식).
+      주문일 칸 = 이번 주문일 + 입고 대기 주문이 있는 다른 날 (최근이 앞). 다시 올려도 자재구매 파일로 인식된다. */
+  B.orderBook = function (d) {
+    const X = window.XLSX; const rows = B.rows(); const head = DB.setting('buyHead', null) || {}; const today = F.today();
+    const ds = new Set([d]); rows.forEach(r => r.ords.forEach(o => { if (o.status !== 'recv') ds.add(o.date); }));
+    const dates = Array.from(ds).sort().reverse();
+    const ser = (iso) => Math.round((Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000);
+    const r2 = (v) => (v === null || v === undefined || !isFinite(v) ? null : Math.round(v * 100) / 100);
+    const aoa = [[null, head.title || 'Bosung Vina Purchase of materials', null, 'Author : ', head.author || null], [null, null, null, 'Date : ', ser(today)], [],
+      [null, 'Category', 'Item Code', 'Item Name', 'Item Name Kr', 'Safety stock', 'Unit', 'Inventory', '입고예정'].concat(dates.map(ser), ['Total', 'kg/month', 'ea/month', 'Max', 'Min', 'Average'])];
+    rows.forEach(r => aoa.push([null, r.cat || null, r.code, r.name || null, r.kr || null, r.safety, r.unit || null, r2(r.bal), r.incQ || null].concat(
+      dates.map(dd => { const o = r.ords.find(x => x.date === dd && x.status !== 'recv'); return o ? num(o.qty) : null; }),
+      [r2(r.total), r2(r.lastKg), r.lastEa === null ? null : Math.round(r.lastEa * 10) / 10, r2(r.max), r2(r.min), r2(r.avg)])));
+    const ws = X.utils.aoa_to_sheet(aoa); const cTot = 9 + dates.length; const NUM = '#,##0';
+    const fmt = (r, c, z) => { const a = X.utils.encode_cell({ r, c }); if (ws[a]) ws[a].z = z; };
+    fmt(1, 4, 'm/d/yy'); dates.forEach((dd, i) => fmt(3, 9 + i, 'mm"월" dd"일"'));
+    for (let i = 4; i < aoa.length; i++) {
+      [5, 7, 8].concat(dates.map((dd, k) => 9 + k), [1, 2, 3, 4, 5].map(k => cTot + k)).forEach(c => fmt(i, c, NUM));   // 수량 · kg/월 · ea/월 · 최대 · 최소 · 평균
+      const a = X.utils.encode_cell({ r: i, c: cTot }); const v = aoa[i][cTot];
+      ws[a] = { t: 'n', v: v === null ? 0 : v, f: 'SUM(H' + (i + 1) + ':' + X.utils.encode_col(cTot - 1) + (i + 1) + ')', z: NUM };
+    }
+    ws['!merges'] = [{ s: { r: 0, c: 1 }, e: { r: 1, c: 2 } }];
+    ws['!cols'] = [10, 19, 14, 27, 21, 16, 7, 12, 11].concat(dates.map(() => 12), [12, 10, 10, 9, 9, 10]).map(w => ({ wch: w }));
+    const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, (head.sheet || 'Oder Korea').slice(0, 31));
+    return { wb, name: today.slice(2).replace(/-/g, '') + ' 자재구매.xlsx', dates };
+  };
+  B.orderFile = function (d) { const b = B.orderBook(d); ERP.xl.saveBook(b.wb, b.name); return b; };
 })();

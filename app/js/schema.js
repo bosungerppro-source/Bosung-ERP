@@ -254,6 +254,7 @@
       { k: 'buy_safety', ko: '안전재고 (해외 주문 단위)', vi: 'Tồn AT (ĐV đặt hàng)', t: 'n' },   // ERP 단위와 다를 때만 (같으면 safety)
       { k: 'buy_ord', ko: '순서 (해외 주문)', vi: 'Thứ tự (đặt nước ngoài)', t: 'n' },
       { k: 'lead_days', ko: '리드타임 (일)', vi: 'Thời gian giao (ngày)', t: 'n' },
+      { k: 'buy_step', ko: '주문 단위 (해외 주문)', vi: 'Bước đặt hàng', t: 'n' },   // 1.11.3: 비우면 안전재고 자릿수 (백 단위 → 100, 천 단위 → 1,000)
       { k: 'buy_inv', ko: '재고 (자재구매 파일)', vi: 'Tồn (file mua NVL)', t: 'n' },   // 파일의 Inventory — ERP 재고와 다르면 해외 주문 표에 같이 보인다
       { k: 'buy_inv_date', ko: '자재구매 파일 날짜', vi: 'Ngày file mua NVL', t: 'd' },
       { k: 'hidden', ko: '숨김', vi: 'Ẩn', t: 'b' },
@@ -350,6 +351,7 @@
       { k: 'inv_date', ko: '자재구매 파일 날짜', vi: 'Ngày file', t: 'd', list: 1 },
       { k: 'ord', ko: '순서', vi: 'Thứ tự', t: 'n' },
       { k: 'lead_days', ko: '리드타임 (일)', vi: 'Thời gian giao (ngày)', t: 'n' },
+      { k: 'step', ko: '주문 단위', vi: 'Bước đặt hàng', t: 'n' },
     ] },
 
     // 업로드 이력
