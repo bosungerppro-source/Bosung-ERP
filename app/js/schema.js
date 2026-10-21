@@ -322,9 +322,10 @@
     ] },
 
     // 16차: 해외 주문 (자재구매 파일의 주문일 칸 · 입고예정 칸, ERP 에서 넣은 주문). 입고 완료는 입고 대기에서 빼기만 한다 (재고는 창고 입출고장 · 수불로)
-    buy_orders: { ko: '해외 주문', vi: 'Đặt hàng nước ngoài', nat: ['date', 'code', 'kind'], sort: ['date', -1], cols: [
+    buy_orders: { ko: '해외 주문', vi: 'Đặt hàng nước ngoài', nat: ['date', 'code', 'kind', 'pool'], sort: ['date', -1], cols: [
       { k: 'date', ko: '주문일', vi: 'Ngày đặt', t: 'd', list: 1, req: 1 },
       { k: 'code', ko: '품목코드', vi: 'Mã hàng', t: 't', list: 1, req: 1 },
+      { k: 'pool', ko: '따로 관리 (구분)', vi: 'Quản lý riêng (nhóm)', t: 't', list: 1 },   // 1.11.2: 따로 관리하는 재고(buy_pools)의 주문이면 그 구분
       { k: 'kind', ko: '구분 (inc = 입고예정 칸)', vi: 'Loại (inc = sắp nhập)', t: 't', list: 1 },
       { k: 'name', ko: '품명', vi: 'Tên', t: 't', list: 1 },
       { k: 'qty', ko: '수량', vi: 'Số lượng', t: 'n', list: 1, req: 1 },
@@ -334,6 +335,21 @@
       { k: 'eta', ko: '도착 예정 (직접 입력)', vi: 'Dự kiến về (nhập tay)', t: 'd' },
       { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
       { k: 'src', ko: '출처', vi: 'Nguồn', t: 't' },
+    ] },
+
+    // 1.11.2: 자재구매 파일에 같은 코드가 다른 구분으로 또 있으면 따로 관리하는 재고 (사용자: BIC 업체 요청으로 창고를 나눠 원료를 따로 관리).
+    // 첫 줄은 ERP 품목(창고 입출고장 재고), 다음 줄은 여기 — 재고 = 자재구매 파일 값
+    buy_pools: { ko: '해외 주문 — 따로 관리하는 재고', vi: 'Đặt nước ngoài — tồn quản lý riêng', nat: ['code', 'cat'], sort: ['ord', 1], cols: [
+      { k: 'code', ko: '품목코드', vi: 'Mã hàng', t: 't', list: 1, req: 1 },
+      { k: 'cat', ko: '구분 (자재구매 파일)', vi: 'Nhóm (file)', t: 't', list: 1, req: 1 },
+      { k: 'name', ko: '품명', vi: 'Tên', t: 't', list: 1 },
+      { k: 'name_kr', ko: '품명 (한글)', vi: 'Tên (tiếng Hàn)', t: 't' },
+      { k: 'unit', ko: '단위', vi: 'Đơn vị', t: 't', list: 1 },
+      { k: 'safety', ko: '안전재고', vi: 'Tồn an toàn', t: 'n', list: 1 },
+      { k: 'inv', ko: '재고 (자재구매 파일)', vi: 'Tồn (file)', t: 'n', list: 1 },
+      { k: 'inv_date', ko: '자재구매 파일 날짜', vi: 'Ngày file', t: 'd', list: 1 },
+      { k: 'ord', ko: '순서', vi: 'Thứ tự', t: 'n' },
+      { k: 'lead_days', ko: '리드타임 (일)', vi: 'Thời gian giao (ngày)', t: 'n' },
     ] },
 
     // 업로드 이력

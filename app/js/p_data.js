@@ -117,6 +117,7 @@
       const touched = new Set(sel.map(j => j.table)); if (sel.some(j => j.custom === 'stock')) touched.add('items');
       if (floorJobs.length) touched.add('items');   // 현장 실사로 새로 만든 품목도 되돌린다
       touched.add('uploads');   // 되돌리면 업로드 이력(마지막 업로드일)도 되돌린다
+      sel.forEach(j => (j.extraTables || []).forEach(t => touched.add(t)));   // 1.11.2: 작업이 같이 바꾸는 표 (예: 해외 주문의 따로 관리하는 재고)
       st.undo = { at: new Date().toISOString(), tables: {} }; touched.forEach(t => { st.undo.tables[t] = JSON.parse(JSON.stringify(DB.rows(t))); });
       const log = []; const at = F.now();
       sel.forEach(j => {

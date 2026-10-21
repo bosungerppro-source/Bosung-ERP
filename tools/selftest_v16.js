@@ -47,8 +47,8 @@ function buyBook(rows, fileDate) {
   const ev = (fn, arg) => A.evaluate(fn, arg);
   const confirmModal = async () => { for (let i = 0; i < 20; i++) { await A.waitForTimeout(150); const m = await A.$('.modal .modal-foot button:last-child'); if (m) { await m.click(); return true; } } return false; };
   const buyText = () => ev(() => document.querySelector('main').innerText);
-  const rowOf = (code) => ev((c) => { const tr = Array.from(document.querySelectorAll('main table.buy-tbl tbody tr')).find(x => x.children[1] && x.children[1].innerText.trim() === c); if (!tr) return null;
-    return Array.from(tr.children).map(td => { const i = td.querySelector('input'); return i ? i.value : td.innerText.trim(); }); }, code);
+  const rowOf = (code, cat) => ev((a) => { const tr = Array.from(document.querySelectorAll('main table.buy-tbl tbody tr')).find(x => x.children[1] && (a.cat ? x.children[0].innerText.trim() === a.cat && x.children[1].querySelector('b').textContent.trim() === a.code : x.children[1].innerText.trim() === a.code)); if (!tr) return null;
+    return Array.from(tr.children).map(td => { const i = td.querySelector('input'); return i ? i.value : td.innerText.trim(); }); }, { code, cat: cat || '' });
   await A.goto(S.url + '/#/data'); await ready();
 
   // 오늘 기준: 창고 기준일 = 4달 전 마지막 날 → 월 사용량을 보는 달 = 3달 전 ~ 지난달
@@ -90,14 +90,14 @@ function buyBook(rows, fileDate) {
   await sec('1. 파일 인식 · 미리보기', async () => {
     await ev(() => { ERP.state.dataTab = 'import'; ERP.state.imp = { jobs: [] }; ERP.goto('data'); ERP.render(); }); await A.waitForTimeout(300);
     await A.setInputFiles('.drop input[type=file]', [fb]); await A.waitForFunction(() => ERP.state.imp.jobs.length >= 2, null, { timeout: 60000 }); await A.waitForTimeout(300);
-    const j = await ev(() => ERP.state.imp.jobs.map(x => ({ sheet: x.sheet, kind: x.kind || null, n: x.rows.length, include: !!x.include, B: x.B ? { dates: x.B.dates, fdate: x.B.fdate, dups: x.B.dups.map(d => d.code), codes: x.B.rows.map(r => r.code) } : null,
+    const j = await ev(() => ERP.state.imp.jobs.map(x => ({ sheet: x.sheet, kind: x.kind || null, n: x.rows.length, include: !!x.include, B: x.B ? { dates: x.B.dates, fdate: x.B.fdate, dups: x.B.dups.map(d => d.code), codes: x.B.rows.map(r => r.code), pools: x.B.rows.filter(r => r.pool).map(r => [r.code, r.pool]) } : null,
       p: x.preview ? x.preview(x).parts.map(q => q[0] + '=' + q[1]) : null, rows: x.kind === 'buy_orders' ? x.rows : null })));
     const by = Object.fromEntries(j.filter(x => x.kind).map(x => [x.kind, x]));
     eq('작업: 해외 주문 품목 · 주문 (다른 시트는 인식 안 함)', [Object.keys(by).sort(), j.filter(x => !x.kind).map(x => x.sheet).sort()], [['buy_items', 'buy_orders', 'buy_stock'], ['Sheet1', 'Sheet3']]);
-    eq('파일 순서 · 엑셀 표 머리 줄 건너뜀 · 두 번 있는 코드는 첫 줄', [by.buy_items.B.codes, by.buy_items.B.dups], [['R-200', 'R-011', 'R-021', 'R-015', 'R-031A', 'R-001', 'R-380', 'R-300C', 'R-027P'], ['R-015', 'R-027P']]);
+    eq('파일 순서 · 엑셀 표 머리 줄 건너뜀 · 같은 코드 · 다른 구분은 따로 관리 (R-015 BIC Pigment) · 같은 구분 두 번은 첫 줄 (R-027P)', [by.buy_items.B.codes, by.buy_items.B.pools, by.buy_items.B.dups], [['R-200', 'R-011', 'R-021', 'R-015', 'R-031A', 'R-001', 'R-380', 'R-300C', 'R-015', 'R-027P'], [['R-015', 'BIC Pigment']], ['R-027P']]);
     eq('주문일 칸 (머리 칸의 날짜) · 파일 날짜 (Date : 옆 칸)', [by.buy_items.B.dates, by.buy_items.B.fdate], [['2026-10-21', '2026-09-21'], '2026-10-21']);
     const p = by.buy_items.p;
-    ok('품목 미리보기: 9 · 같은 코드 7 · 안전재고 9 · 새로 만듦 2 · 단위 다름 1 · 두 번 2 · 목록에서 빠짐 1', ['해외 주문 품목=9', 'ERP 품목과 같은 코드=7', '안전재고 넣음=9', 'ERP 에 없어 새로 만듦=2', '단위가 ERP 와 다름 (안전재고는 파일 단위로 따로)=1', '파일에 두 번 있는 코드 (첫 줄 사용)=2', '목록에서 빠짐 (이 파일에 없음)=1'].every(x => p.includes(x)), p);
+    ok('품목 미리보기: 9 · 같은 코드 7 · 안전재고 9 · 새로 만듦 2 · 단위 다름 1 · 따로 관리 1 · 두 번 1 · 목록에서 빠짐 1', ['해외 주문 품목=9', 'ERP 품목과 같은 코드=7', '안전재고 넣음=9', 'ERP 에 없어 새로 만듦=2', '단위가 ERP 와 다름 (안전재고는 파일 단위로 따로)=1', '같은 코드 · 다른 구분 → 따로 관리하는 재고=1', '같은 코드 · 같은 구분이 두 번 (첫 줄 사용)=1', '목록에서 빠짐 (이 파일에 없음)=1'].every(x => p.includes(x)), p);
     eq('주문: 10-21 R-011 100 · 09-21 R-001 500 · 입고예정 칸 R-021 150 (파일 날짜, 주문일 칸과 따로)', by.buy_orders.rows.map(r => [r.date, r.code, r.qty, r.kind || '']).sort(), [['2026-09-21', 'R-001', 500, ''], ['2026-10-21', 'R-011', 100, ''], ['2026-10-21', 'R-021', 150, 'inc']]);
     ok('주문 미리보기: 3 · 새 주문 3', by.buy_orders.p.includes('주문=3') && by.buy_orders.p.includes('새 주문=3'), by.buy_orders.p);
   });
@@ -113,7 +113,8 @@ function buyBook(rows, fileDate) {
         orders: ERP.db.rows('buy_orders').map(o => [o.date, o.code, o.qty, o.unit, o.status, o.src, o.kind || '']).sort(), btn: !!Array.from(document.querySelectorAll('main button')).find(b => /해외 주문 보기/.test(b.textContent)) }; });
     eq('R-200: 해외 주문 · 구분 · 한글 품명 · 파일 단위 ea (= PCS) → 품목 안전재고 4,000,000', [r.r200.buy, r.r200.cat, r.r200.kr, r.r200.bu, r.r200.safety, r.r200.bs, r.r200.ord], [true, 'Hot Foil', 'REGULAR', 'ea', 4000000, null, 1]);
     eq('R-380: 파일 kg ≠ ERP ROLL → 안전재고는 파일 단위로 따로 (품목 안전재고 5 그대로)', [r.r380.safety, r.r380.bs, r.r380.bu], [5, 2000, 'kg']);
-    eq('R-015: 두 번 있으면 첫 줄 (Pigment · 100)', [r.r015.cat, r.r015.safety], ['Pigment', 100]);
+    eq('R-015: 첫 줄 = ERP 품목 (Pigment · 안전재고 100)', [r.r015.cat, r.r015.safety], ['Pigment', 100]);
+    eq('R-015 BIC Pigment 줄 = 따로 관리하는 재고 (안전재고 200 · 재고 160 · 파일 날짜)', await ev(() => ERP.db.rows('buy_pools').map(p => [p.code, p.cat, p.safety, p.inv, p.unit, p.inv_date, p.ord])), [['R-015', 'BIC Pigment', 200, 160, 'kg', '2026-10-21', 9]]);
     eq('파일의 재고(Inventory) · 날짜도 남김 (R-011 250)', await ev(() => { const m = ERP.inv.item('R-011'); return [m.buy_inv, m.buy_inv_date]; }), [250, '2026-10-21']);
     eq('없는 품목 만들기: R-031A 원재료 kg · 이름 · 한글 품명 그대로 / R-300C 부자재 · 단위 Yn', [r.r031a && [r.r031a.stage, r.r031a.unit, r.r031a.name, r.r031a.kr, r.r031a.src, r.r031a.safety], r.r300c && [r.r300c.stage, r.r300c.unit, r.r300c.safety]], [['RM', 'kg', 'KAOLIN USA', '카오링(고령토)(usa)', 'buy', 700], ['SM', 'Yn', 500]]);
     eq('파일에 없는 해외 주문 품목은 목록에서 뺌 · 다른 품목은 그대로', [r.old.buy, r.r100.buy, r.r100.safety], [false, false, 10]);
@@ -132,8 +133,10 @@ function buyBook(rows, fileDate) {
     await A.waitForFunction(() => !!document.querySelector('main table.buy-tbl'), null, { timeout: 15000 });
     const head = await ev(() => Array.from(document.querySelectorAll('main table.buy-tbl thead th')).map(th => th.firstChild && th.firstChild.nodeType === 3 ? th.firstChild.textContent.trim() : (th.querySelector('div') ? th.querySelector('div').textContent.trim() : th.textContent.trim())));
     eq('칸 순서 = 파일 (구분 … 평균) + 리드타임 · 도착 예정 · 상태 · 권장 주문량', head, ['구분', '품목코드', '품명', '품명 (한글)', '안전재고', '단위', '재고', '입고예정', '2026-10-21', '2026-09-21', '합계', 'kg/월', 'ea/월', '최대', '최소', '평균', '리드타임 (일)', '도착 예정', '상태', '권장 주문량']);
-    const order = await ev(() => Array.from(document.querySelectorAll('main table.buy-tbl tbody tr')).map(tr => tr.children[1].innerText.trim()));
-    eq('줄 순서 = 파일 순서', order, ['R-200', 'R-011', 'R-021', 'R-015', 'R-031A', 'R-001', 'R-380', 'R-300C', 'R-027P']);
+    const order = await ev(() => Array.from(document.querySelectorAll('main table.buy-tbl tbody tr')).map(tr => tr.children[1].querySelector('b').textContent.trim() + (/따로 관리/.test(tr.children[1].innerText) ? '*' : '')));
+    eq('줄 순서 = 파일 순서 (따로 관리 줄 *)', order, ['R-200', 'R-011', 'R-021', 'R-015', 'R-031A', 'R-001', 'R-380', 'R-300C', 'R-015*', 'R-027P']);
+    const p015 = await rowOf('R-015', 'BIC Pigment'), m015 = await rowOf('R-015');
+    eq('R-015 BIC Pigment (따로 관리): 안전재고 200 · 재고 160 (파일 값) · 주문 필요 · 권장 40 / 첫 줄 Pigment: 안전재고 100 · 충분', [p015 && [p015[0], p015[4], p015[6], p015[18], p015[19]], m015 && [m015[0], m015[4], m015[6], m015[18]]], [['BIC Pigment', '200', '160', '주문 필요', '40'], ['Pigment', '100', '160', '충분']]);
     eq('R-011: 재고 200 · 입고예정 없음 · 10-21 주문 100 · 합계 300 · kg/월 140 · ea/월 14 · 최대 160 · 최소 100 · 평균 133.33 · 주문 필요 · 권장 50', (await rowOf('R-011')).filter((v, i) => [0, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18, 19].includes(i)),
       ['Pigment', 'YELLOW F-10G', '350', 'kg', '200\n파일 250', '', '100', '300', '140', '14', '160', '100', '133.33', '주문 필요', '50']);
     const r021 = await rowOf('R-021');
@@ -143,7 +146,7 @@ function buyBook(rows, fileDate) {
     const r001 = await rowOf('R-001');
     eq('R-001: 09-21 주문 500 → 합계 1,880 = 재고 1,380 + 500 · 충분 (입고예정 칸은 비어 있음)', [r001[7], r001[9], r001[10], r001[18]], ['', '500', '1,880', '충분']);
     const t = await buyText();
-    ok('위 숫자: 품목 9 (파일 재고와 다름 1) · 주문 필요 5 · 입고 대기 3 · 리드타임 아직 안 넣음', /해외 주문 품목\s*9/.test(t) && /파일 재고와 다름 1/.test(t) && /주문 필요\s*5/.test(t) && /입고 대기 주문\s*3/.test(t) && /아직 안 넣음/.test(t), t.slice(0, 600));
+    ok('위 숫자: 품목 9 (파일 재고와 다름 1) · 주문 필요 6 (따로 관리 줄 포함) · 입고 대기 3 · 리드타임 아직 안 넣음', /해외 주문 품목\s*9/.test(t) && /파일 재고와 다름 1/.test(t) && /주문 필요\s*6/.test(t) && /입고 대기 주문\s*3/.test(t) && /아직 안 넣음/.test(t), t.slice(0, 600));
     ok('재고 설명: 창고 입출고장 마지막 입출고일', new RegExp('창고 입출고장 마지막 ' + mAgo(1) + '-10').test(t), (t.match(/재고 = .{0,120}/) || [])[0]);
   });
 
@@ -176,7 +179,10 @@ function buyBook(rows, fileDate) {
     await ev(() => ERP.render()); await A.waitForTimeout(200);
     await A.click('main button:has-text("권장 주문량 넣기")'); ok('확인 창', await confirmModal()); await A.waitForTimeout(400);
     const add = await ev(() => ERP.db.rows('buy_orders').filter(o => o.date === '2026-10-25').map(o => [o.code, o.qty]).sort());
-    eq('권장 주문량 → 10-25 칸 (그 날 주문이 이미 있는 R-027P 는 그대로)', add, [['R-011', 320], ['R-027P', 40], ['R-031A', 700], ['R-300C', 500], ['R-380', 1000]]);
+    eq('권장 주문량 → 10-25 칸 (그 날 주문이 이미 있는 R-027P 는 그대로, 따로 관리 줄 R-015 BIC Pigment 도)', add, [['R-011', 320], ['R-015', 40], ['R-027P', 40], ['R-031A', 700], ['R-300C', 500], ['R-380', 1000]]);
+    eq('따로 관리 줄의 주문은 그 구분으로 (첫 줄 R-015 는 주문 없음)', await ev(() => ERP.db.rows('buy_orders').filter(o => o.code === 'R-015').map(o => [o.date, o.pool || '', o.qty])), [['2026-10-25', 'BIC Pigment', 40]]);
+    const p2 = await rowOf('R-015', 'BIC Pigment');
+    eq('따로 관리 줄: 10-25 주문 40 → 합계 200 · 충분', [p2[8], p2[11], p2[19]], ['40', '200', '충분']);
     // 09-21 칸 입고 완료
     await ev(() => { const th = Array.from(document.querySelectorAll('main table.buy-tbl thead th')).find(x => x.querySelector('div') && x.querySelector('div').textContent.trim() === '2026-09-21'); Array.from(th.querySelectorAll('button')).find(b => /입고 완료/.test(b.textContent)).click(); });
     ok('확인 창 (입고 완료)', await confirmModal()); await A.waitForTimeout(400);
@@ -188,7 +194,7 @@ function buyBook(rows, fileDate) {
     await ev(() => { const tr = Array.from(document.querySelectorAll('main table.buy-tbl tbody tr')).find(x => x.children[1].innerText.trim() === 'R-015'); const i = tr.children[7].querySelector('input'); i.value = '60'; i.dispatchEvent(new Event('change', { bubbles: true })); });
     await A.waitForTimeout(300);
     r = await rowOf('R-015');
-    eq('R-015 입고예정 칸 60 → 합계 220 (바로 다시 계산) · 입고예정 한 줄 저장', [r[7], r[11], await ev(() => ERP.db.rows('buy_orders').filter(o => o.code === 'R-015').map(o => [o.kind, o.qty, o.status, o.src]))], ['60', '220', [['inc', 60, 'open', 'erp']]]);
+    eq('R-015 입고예정 칸 60 → 합계 220 (바로 다시 계산) · 입고예정 한 줄 저장', [r[7], r[11], await ev(() => ERP.db.rows('buy_orders').filter(o => o.code === 'R-015' && !o.pool).map(o => [o.kind, o.qty, o.status, o.src]))], ['60', '220', [['inc', 60, 'open', 'erp']]]);
   });
 
   // ------------------------------------------------------------------------------------------
@@ -203,7 +209,8 @@ function buyBook(rows, fileDate) {
     await A.waitForFunction(() => !!Array.from(document.querySelectorAll('main h3')).find(x => /반영 결과/.test(x.textContent)), null, { timeout: 60000 });
     const after = await ev(() => ({ items: ERP.db.rows('items').length, orders: ERP.db.rows('buy_orders').length, recv: ERP.db.rows('buy_orders').filter(o => o.status === 'recv').length, buy: ERP.db.rows('items').filter(m => m.buy).length }));
     eq('품목 · 입고 완료 · 해외 주문 품목 그대로, 주문은 R-015 입고예정만 빠짐 (ERP 에서 넣은 10-25 주문은 그대로)', after, Object.assign({}, before, { orders: before.orders - 1 }));
-    eq('10-25 주문 그대로 (파일에 없는 날짜)', await ev(() => ERP.db.rows('buy_orders').filter(o => o.date === '2026-10-25').length), 5);
+    eq('10-25 주문 그대로 (파일에 없는 날짜, 따로 관리 줄 주문 포함)', await ev(() => ERP.db.rows('buy_orders').filter(o => o.date === '2026-10-25').length), 6);
+    eq('따로 관리하는 재고 그대로 (1줄)', await ev(() => ERP.db.rows('buy_pools').length), 1);
     eq('R-011 품목별 리드타임 그대로', await ev(() => ERP.inv.item('R-011').lead_days), 60);
   });
 
@@ -228,8 +235,8 @@ function buyBook(rows, fileDate) {
     const r021 = x && x.rows.find(r => r[1] === 'R-021');
     eq('R-021 줄: 입고예정 칸 150 · 합계 550', r021 && [r021[7], r021[11]], [150, 550]);
     const re = await ev((x) => { const X = window.XLSX; const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([x.hdr].concat(x.rows)), 'buy_order'); const jobs = ERP.xl.analyze(wb, { file: 'buy_order.xlsx' });
-      const j = jobs.find(q => q.kind === 'buy_items'), o = jobs.find(q => q.kind === 'buy_orders'); return { n: j ? j.rows.length : null, dates: j ? j.B.dates : null, orders: o ? o.rows.length : null }; }, x);
-    eq('내보낸 표를 다시 올리면 자재구매 파일로 인식 (품목 9 · 주문일 칸 3 · 주문 6 + 입고예정 1)', re, { n: 9, dates: ['2026-10-25', '2026-10-21', '2026-09-21'], orders: 7 });
+      const j = jobs.find(q => q.kind === 'buy_items'), o = jobs.find(q => q.kind === 'buy_orders'); return { n: j ? j.rows.length : null, pools: j ? j.B.rows.filter(r => r.pool).map(r => r.code + ' ' + r.pool) : null, dates: j ? j.B.dates : null, orders: o ? o.rows.length : null }; }, x);
+    eq('내보낸 표를 다시 올리면 자재구매 파일로 인식 (줄 10 · 따로 관리 1 · 주문일 칸 3 · 주문 7 + 입고예정 1)', re, { n: 10, pools: ['R-015 BIC Pigment'], dates: ['2026-10-25', '2026-10-21', '2026-09-21'], orders: 8 });
   });
 
   // ------------------------------------------------------------------------------------------
@@ -251,7 +258,7 @@ function buyBook(rows, fileDate) {
     const adjOf = () => ev(() => ERP.db.rows('stock_tx').filter(t => t.src === 'buy').map(t => [t.date, t.code, t.kind, t.qty, t.unit, t.to_scope, t.purpose]).sort((a, b) => a[1].localeCompare(b[1])));
     const balOf = () => ev(() => ['R-011', 'R-021', 'R-380', 'R-200', 'R-001'].map(c => Math.round(ERP.calc.stock().get(c).bal * 10000) / 10000));
     let p = await up(f2);
-    ok('미리보기: 재고 맞춤 3 (오늘 조정) · 이미 같음 5 · 파일에 재고 없음 1 · 기본으로 반영', p.include && p.parts.includes('재고 맞춤 (' + today + ' 조정)=3') && p.parts.includes('이미 같음=5') && p.parts.includes('파일에 재고 없음 (그대로)=1'), p);
+    ok('미리보기: 재고 맞춤 3 (오늘 조정) · 이미 같음 5 · 파일에 재고 없음 1 · 따로 관리 1 (파일 값 그대로) · 기본으로 반영', p.include && p.parts.includes('재고 맞춤 (' + today + ' 조정)=3') && p.parts.includes('이미 같음=5') && p.parts.includes('파일에 재고 없음 (그대로)=1') && p.parts.includes('따로 관리하는 재고 (파일 값 그대로)=1'), p);
     ok('미리보기 내용: R-011 200 → 250 kg (+50) · R-021 400 → 380 (-20) · R-380 16.8 → 17.6 ROLL (+0.8)', /R-011 200 → 250 kg \(\+50\)/.test(p.detail) && /R-021 400 → 380 kg \(-20\)/.test(p.detail) && /R-380 16\.8 → 17\.6 ROLL \(\+0\.8\)/.test(p.detail), p.detail);
     eq('조정 3줄 (파일 날짜 · 창고 · 재고 맞춤)', await adjOf(), [[today, 'R-011', 'ADJ', 50, 'kg', 'WH', '자재구매 파일 재고 맞춤'], [today, 'R-021', 'ADJ', -20, 'kg', 'WH', '자재구매 파일 재고 맞춤'], [today, 'R-380', 'ADJ', 0.8, 'ROLL', 'WH', '자재구매 파일 재고 맞춤']]);
     eq('ERP 재고 = 파일 재고 (R-011 250 · R-021 380 · R-380 17.6 ROLL = 1,100 kg) · 같던 품목은 그대로', await balOf(), [250, 380, 17.6, 4662000, 1380]);
