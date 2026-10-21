@@ -81,6 +81,8 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const openRows = (await rowBtns()).map(x => x[0]).sort();
     eq('진행 중 탭의 PO', openRows, ['PO-B', 'PO-D', 'PO-F']);
     ok('진행 중 탭: 모두 "완료" 버튼', (await rowBtns()).every(x => x[1] === '완료'), await rowBtns());
+    const vis = await ev(() => { const w = document.querySelector('main section.grow .tbl-wrap'); const b = w.querySelector('tbody button'); const wr = w.getBoundingClientRect(), br = b.getBoundingClientRect(); return { b: Math.round(br.right), w: Math.round(wr.right) }; });
+    ok('완료 버튼이 옆으로 밀지 않아도 보임 (상태 칸 옆)', vis.b <= vis.w, vis);
     await A.locator('main table.tbl tbody tr', { hasText: 'PO-D' }).locator('button', { hasText: /^완료$/ }).click(); await A.waitForSelector('.modal');
     const msg = await ev(() => document.querySelector('.modal').innerText);
     ok('확인 창: PO 번호 · 포장 실적과 상관없이 · 완료 취소 안내', /PO-D/.test(msg) && /포장 실적과 상관없이/.test(msg) && /완료 취소/.test(msg), msg);

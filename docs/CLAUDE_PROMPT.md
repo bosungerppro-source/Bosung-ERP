@@ -216,4 +216,4 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **일괄 완료** `C.closeByDue(from, to, note)` — 납기(Checking)가 from ~ to 인 진행 중 줄 → 완료, 업로드 이력 `kind: 'po_close'`. 기간 · 기준은 사용자가 정한다 (2026-10-21: 납기 2025-01-01 ~ 2026-09-30, 347줄).
 - 수주 엑셀을 다시 올려도(upsert) `done_at` 은 남는다. "전체 교체" 는 지운다.
 - AI 비서 수주 도구: 강제 완료면 `remaining_sets` 0, `marked_done`.
-- 시험: `npm run test:v13` 27개 + v12 · v11 · v9 · v8 · v7 · assistant.
+- 시험: `npm run test:v13` 28개 + v12 · v11 · v9 · v8 · v7 · assistant.

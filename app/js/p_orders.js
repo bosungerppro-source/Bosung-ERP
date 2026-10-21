@@ -166,7 +166,8 @@
         g = ERP.grid({ table: 'po', rows: () => all.filter(match).map(o => ({ _id: o.po_no, po_no: o.po_no, customer: o.p.customer, items: o.n, item_no: o.items.length > 1 ? o.items[0] + ' …' : (o.items[0] || ''), sets: o.sets, due: o.p.due })), pageSize: 25, sortKey: 'due', sortDir: 1, canAdd: false, canEdit: false, export: false, maxH: '60vh',
           searchKeys: ['po_no', 'customer', 'item_no'],
           cols: [mk('po_no', 'PO 번호', 'Số PO'), mk('customer', '거래처', 'Khách hàng'), mk('item_no', '품번', 'Mã hàng'), mk('items', '품번 수', 'Số mã', 'n'), mk('sets', '세트', 'Bộ', 'n'), mk('due', '납기', 'Hạn giao', 'd')],
-          extraCols: [{ label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }, { label: () => L('상태', 'Trạng thái'), render: r => ERP.statusChip(byPo.get(r._id).st) }, { label: () => '', render: r => doneBtn(byPo.get(r._id)) }],
+          // 13차: 상태 칸에 완료 버튼을 같이 둔다 (좁은 화면에서도 보이게 진행 칸 앞으로)
+          extraCols: [{ label: () => L('상태', 'Trạng thái'), render: r => { const o = byPo.get(r._id); return h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', whiteSpace: 'nowrap' } }, ERP.statusChip(o.st), doneBtn(o)); } }, { label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }],
           onRowClick: (r) => { st.sel = r._id; drawAside(); } });
       } else {
         g = ERP.grid({ table: 'po', rows: () => lineAll.filter(match).map(o => o.p), pageSize: 25, sortKey: 'due', sortDir: 1, canAdd: false, maxH: '60vh',

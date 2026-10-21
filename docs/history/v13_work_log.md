@@ -17,12 +17,13 @@
 ## 한 일
 - `schema.js`: PO 칸 `done_at` (완료 처리일).
 - `calc.js`: 줄 상태에 강제 완료 (`done_at` → done, 취소 · 보류가 여전히 이김), `forced` · `doneAt`, `C.closeLines` · `C.reopenLines` · `C.closeByDue` (업로드 이력 `po_close`).
-- `p_orders.js`: 수주 목록(PO별 보기) 줄 끝 **완료** / **완료 취소** 버튼 (확인 창, 줄 선택은 그대로), 상세 칸 **완료 처리** / **완료 취소** 버튼과 "완료 처리 (날짜)" 표시.
+- `p_orders.js`: 수주 목록(PO별 보기) 상태 칸 **완료** / **완료 취소** 버튼 (처음엔 줄 끝에 두었다가, 1440 폭 화면 캡처에서 버튼이 가려져 상태 칸으로 옮기고 상태 칸을 진행 칸 앞으로) (확인 창, 줄 선택은 그대로), 상세 칸 **완료 처리** / **완료 취소** 버튼과 "완료 처리 (날짜)" 표시.
 - `assistant_tools.js`: 강제 완료면 남은 세트 0, `marked_done`.
 - 버전 1.8.0, 새 시험 `tools/selftest_v13.js` (`npm run test:v13`).
+- 이 PC: 1.8.0 적용 뒤 `C.closeByDue('2025-01-01', '2026-09-30')` → 347줄 완료, PO 진행 중 380 → 37 (납기 10월 19 · 11월 8 · 12월 7 · 2027-01 3줄), 완료 343, 취소 · 보류 28 그대로, 업로드 이력 "수주 일괄 완료".
 
 ## 검증 (Windows 11 · Chrome, 사용자 PC)
-- `npm run test:v13` 27 / 27.
+- `npm run test:v13` 28 / 28 (버튼이 옆으로 밀지 않아도 보이는지 포함).
 - `npm run test:v12` 123 / 123 · `npm run test:v11` 50 / 50 · `npm run test:v8` 72 / 72 · `npm run test:assistant` 290 / 290.
 - `npm run test:v7` 149 / 149 (`ERP_PREV` = 1.7.1 소스 → 1.8.0 업그레이드).
 - `npm run test:v9` 86 / 87 (Windows 환경 차이 1개, 이전과 같음).
