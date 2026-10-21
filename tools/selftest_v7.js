@@ -70,7 +70,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const pages = await ev(() => Object.keys(ERP.pages));
     for (const p of pages) { await ev((x) => ERP.goto(x), p); await page.waitForTimeout(250); }
     // 12차: 메뉴 3개 (품목 / 현장 재고 / 원부자재 재고) — ERP.goStock(탭) 으로 그 탭이 있는 메뉴를 연다. 'stock' · 'compare' 는 예전 이름 (compare 는 원부자재 재고로)
-    for (const t of ['mat', 'entry', 'ledger', 'reorder', 'outsource', 'floor', 'post', 'fentry', 'fledger', 'master', 'codes', 'check', 'legacy']) { await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await page.waitForTimeout(250); }
+    for (const t of ['mat', 'entry', 'ledger', 'reorder', 'buy', 'outsource', 'floor', 'post', 'fentry', 'fledger', 'master', 'codes', 'check', 'legacy']) { await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await page.waitForTimeout(250); }
     for (const t of ['stock', 'compare', 'post', 'codes', 'mat']) { await ev((x) => { ERP.state.matTab = x; ERP.goto('materials'); ERP.render(); }, t); await page.waitForTimeout(250); }
     for (const t of ['mrp', 'struct', 'asm', 'semi_stock', 'bom', 'recipes']) { await ev((x) => { ERP.state.bomTab = x; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }, t); await page.waitForTimeout(250); }
     await ev(() => { ERP.state.asm = Object.assign(ERP.state.asm || {}, { kind: 'stp' }); ERP.render(); ERP.state.asm.kind = 'asm'; });

@@ -246,6 +246,16 @@
       { k: 'type', ko: 'BOM 유형', vi: 'Loại BOM', t: 's', opts: () => ERP.ITEM_TYPES.map(x => ({ v: x.v, ko: x.ko, vi: x.vi })) },
       { k: 'proc', ko: '생산 공정', vi: 'Công đoạn SX', t: 't' },
       { k: 'safety_move', ko: '안전재고관리-창고이동', vi: 'QL tồn AT - chuyển kho', t: 't' },
+      // 16차: 해외 주문 품목 (자재구매 파일 Oder Korea 표) — 원부자재 재고 → 해외 주문 탭에서 따로 본다
+      { k: 'buy', ko: '해외 주문 품목', vi: 'Hàng đặt nước ngoài', t: 'b' },
+      { k: 'buy_cat', ko: '구분 (해외 주문)', vi: 'Nhóm (đặt nước ngoài)', t: 't' },
+      { k: 'name_kr', ko: '품명 (한글)', vi: 'Tên (tiếng Hàn)', t: 't' },
+      { k: 'buy_unit', ko: '단위 (해외 주문)', vi: 'ĐV (đặt nước ngoài)', t: 't' },
+      { k: 'buy_safety', ko: '안전재고 (해외 주문 단위)', vi: 'Tồn AT (ĐV đặt hàng)', t: 'n' },   // ERP 단위와 다를 때만 (같으면 safety)
+      { k: 'buy_ord', ko: '순서 (해외 주문)', vi: 'Thứ tự (đặt nước ngoài)', t: 'n' },
+      { k: 'lead_days', ko: '리드타임 (일)', vi: 'Thời gian giao (ngày)', t: 'n' },
+      { k: 'buy_inv', ko: '재고 (자재구매 파일)', vi: 'Tồn (file mua NVL)', t: 'n' },   // 파일의 Inventory — ERP 재고와 다르면 해외 주문 표에 같이 보인다
+      { k: 'buy_inv_date', ko: '자재구매 파일 날짜', vi: 'Ngày file mua NVL', t: 'd' },
       { k: 'hidden', ko: '숨김', vi: 'Ẩn', t: 'b' },
       { k: 'missing', ko: 'ECOUNT 파일에 없음', vi: 'Không có trong file ECOUNT', t: 'b' },
       { k: 'src', ko: '출처', vi: 'Nguồn', t: 't' },
@@ -307,6 +317,21 @@
       { k: 'lot', ko: 'Lot', vi: 'Lot', t: 't' },
       { k: 'color', ko: '색깔', vi: 'Màu', t: 't' },
       { k: 'ref', ko: '참조 (PO 등)', vi: 'Tham chiếu (PO…)', t: 't' },
+      { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
+      { k: 'src', ko: '출처', vi: 'Nguồn', t: 't' },
+    ] },
+
+    // 16차: 해외 주문 (자재구매 파일의 주문일 칸 · 입고예정 칸, ERP 에서 넣은 주문). 입고 완료는 입고 대기에서 빼기만 한다 (재고는 창고 입출고장 · 수불로)
+    buy_orders: { ko: '해외 주문', vi: 'Đặt hàng nước ngoài', nat: ['date', 'code', 'kind'], sort: ['date', -1], cols: [
+      { k: 'date', ko: '주문일', vi: 'Ngày đặt', t: 'd', list: 1, req: 1 },
+      { k: 'code', ko: '품목코드', vi: 'Mã hàng', t: 't', list: 1, req: 1 },
+      { k: 'kind', ko: '구분 (inc = 입고예정 칸)', vi: 'Loại (inc = sắp nhập)', t: 't', list: 1 },
+      { k: 'name', ko: '품명', vi: 'Tên', t: 't', list: 1 },
+      { k: 'qty', ko: '수량', vi: 'Số lượng', t: 'n', list: 1, req: 1 },
+      { k: 'unit', ko: '단위', vi: 'Đơn vị', t: 't', list: 1 },
+      { k: 'status', ko: '상태', vi: 'Trạng thái', t: 's', list: 1, opts: () => [{ v: 'open', ko: '입고 대기', vi: 'Chờ nhập' }, { v: 'recv', ko: '입고 완료', vi: 'Đã nhập' }] },
+      { k: 'recv', ko: '입고일', vi: 'Ngày nhập', t: 'd', list: 1 },
+      { k: 'eta', ko: '도착 예정 (직접 입력)', vi: 'Dự kiến về (nhập tay)', t: 'd' },
       { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
       { k: 'src', ko: '출처', vi: 'Nguồn', t: 't' },
     ] },

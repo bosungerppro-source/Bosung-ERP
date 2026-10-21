@@ -54,7 +54,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('메뉴 주소', nav.slice(i, i + 3).map(x => x[0]), ['#/items', '#/floor', '#/materials']);
     ok('예전 메뉴 이름(품목 · 재고) 없음', !names.some(x => /품목\s*·\s*재고/.test(x)), names);
     eq('배지: 품목 없음 · 현장 재고 1 (BM02 마이너스) · 원부자재 재고 1 (WAX1 미달)', nav.slice(i, i + 3).map(x => x[2]), ['', '1', '1']);
-    const want = { items: ['품목 마스터', '코드 사전', '자료 점검', '예시 자료'], floor: ['현장 재고', '생산 반영', '수불 입력', '수불 내역'], materials: ['원부자재 재고', '수불 입력', '수불 내역', '발주 · 안전재고', '외주 입출고'] };
+    const want = { items: ['품목 마스터', '코드 사전', '자료 점검', '예시 자료'], floor: ['현장 재고', '생산 반영', '수불 입력', '수불 내역'], materials: ['원부자재 재고', '수불 입력', '수불 내역', '발주 · 안전재고', '해외 주문', '외주 입출고'] };
     const title = { items: '품목', floor: '현장 재고', materials: '원부자재 재고' };
     for (const id of Object.keys(want)) {
       await A.click('nav.side a[href="#/' + id + '"]'); await settle();
@@ -170,7 +170,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const d = await ev(() => document.querySelector('main').innerText);
     ok('자료 올리기 안내에 비교 없음 · 새 메뉴 이름 (원부자재 재고 → 수불 입력)', !/비교만|ECOUNT 비교|품목·재고/.test(d) && /원부자재 재고 → 수불 입력/.test(d), d.match(/.{0,40}(비교|품목·재고).{0,40}/));
     let all = '';
-    for (const t of ['master', 'codes', 'check', 'legacy', 'floor', 'post', 'fentry', 'fledger', 'mat', 'entry', 'ledger', 'reorder', 'outsource']) { await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await A.waitForTimeout(150); all += await ev(() => document.querySelector('main').innerText); }
+    for (const t of ['master', 'codes', 'check', 'legacy', 'floor', 'post', 'fentry', 'fledger', 'mat', 'entry', 'ledger', 'reorder', 'buy', 'outsource']) { await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await A.waitForTimeout(150); all += await ev(() => document.querySelector('main').innerText); }
     ok('세 메뉴 어디에도 "ECOUNT 비교" · "품목·재고" 없음', !/ECOUNT 비교|품목\s*·\s*재고|비교만/.test(all), all.match(/.{0,40}(ECOUNT 비교|품목\s*·\s*재고|비교만).{0,40}/));
   });
 
@@ -211,7 +211,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
   await sec('8. 모든 탭 (한국어 / Tiếng Việt) 오류 없음', async () => {
     for (const lang of ['ko', 'vi']) {
       await ev((l) => ERP.setLang(l), lang);
-      for (const t of ['master', 'codes', 'check', 'legacy', 'floor', 'post', 'fentry', 'fledger', 'mat', 'entry', 'ledger', 'reorder', 'outsource']) {
+      for (const t of ['master', 'codes', 'check', 'legacy', 'floor', 'post', 'fentry', 'fledger', 'mat', 'entry', 'ledger', 'reorder', 'buy', 'outsource']) {
         await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await A.waitForTimeout(120);
         const txt = await ev(() => document.querySelector('main').innerText);
         ok('[' + lang + ' · ' + t + '] 화면에 null · undefined 글자 없음', !/\bnull\b|\bundefined\b/.test(txt), txt.match(/.{0,40}\b(null|undefined)\b.{0,40}/));

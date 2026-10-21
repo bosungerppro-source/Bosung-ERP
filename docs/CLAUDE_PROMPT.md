@@ -245,3 +245,14 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **휴대폰 (공장 밖, 구글 웹 앱 Code.gs 4판)**: 요약 `ERP.mobileSummary()` 는 종합 현황과 같은 계산 (`ERP.dashCtx`) — 종합 현황 숫자를 바꾸면 요약도 같이 바뀐다. 이 PC 만 15분마다 보냄 (`mobileOn`). 비밀번호는 구글 쪽 해시로만, ERP 에 남기지 않는다. 휴대폰 화면 글자는 textContent 로만.
 - **월별 조립 생산량 (1.10.1)**: 종합 현황 위젯 `asm_monthly` (기본 배치에서 `asm_daily` 다음, 저장한 배치에는 `meta.dashAsmMonthly` 로 한 번만 넣음) · 생산 관리 탭 `analysis` (일별) · `monthly` (월별) · 휴대폰 요약 `asmDaily` · `asmMonthly`. 일별과 월별은 항상 같이 둔다 (사용자가 둘 다 요구).
 - 시험: `npm run test:v15` 155개 + GitHub Actions "자동 업데이트 시험 (Windows)" (`tools/update_e2e.js` — 실제 설치 프로그램 · Electron) + v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.
+
+### 2-15. 16차: 해외 주문 품목 — 자재구매 파일 · 리드타임 (v1.11.0, 2026-10-21)
+자세한 요청 · 결정은 `docs/PROMPT_v16_BUY.md`, 작업 기록은 `docs/history/v16_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **자재구매 파일 = 해외 주문 품목 목록 · 안전재고 · 주문의 기준**: 인식기 `buy_list` (머리 Item Code · Safety stock · Inventory). 품목 `buy` · `buy_cat` · `name_kr` · `buy_ord` · `buy_unit` · `buy_inv`(파일 재고) — 파일에 없는 품목은 `buy` 를 끈다. 안전재고는 단위가 같으면 `safety`, 다르면 `buy_safety`. 없는 코드는 파일 이름 · 단위로 새 품목 (`src: 'buy'`, kg → RM, 그 밖 SM).
+- **주문 `buy_orders`**: 주문일 칸 = 그 날 주문, 입고예정 칸 = `kind: 'inc'` (주문일 칸과 따로 — 파일의 Total = Inventory + 입고예정 + 주문일 칸). 다시 올리면 파일에 있는 주문일 · 품목의 입고 대기 주문과 입고예정은 파일 값, 입고 완료 · 파일에 없는 날짜는 그대로. **입고 완료는 합계에서 빼기만** (재고는 창고 입출고장 · 수불 — 두 번 세지 않음).
+- **원부자재 재고 → 해외 주문 탭** (`ERP.buyTab`, 버튼 "해외 주문 품목만 N"): 칸 순서는 파일과 같게 (구분 … 평균) + 리드타임 · 도착 예정 · 상태 · 권장 주문량. 재고 = ERP 원부자재 재고 (단위가 다르면 개당 kg), 파일 재고와 다르면 "파일 …". 월 사용량 = 창고 출고(OUT · 창고 → 공장 이동) 지난 12달 ~ 지난달.
+- **리드타임**: 품목 `lead_days` 또는 기본 `buyLead` (사용자가 정함, 비면 리드타임 없이). 주문 필요 = 합계 − 월 평균 ÷ 30 × 리드타임 < 안전재고, 권장 = 안전재고 + 리드타임 동안 쓸 양 − 합계 (kg 품목은 개당 kg 단위로 올림).
+- 발주 필요 목록은 해외 주문 품목을 빼고 안내한다 (해외 주문 탭에서 따로).
+- 시험: `npm run test:v16` 53개 + v15 · v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.

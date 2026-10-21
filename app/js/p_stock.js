@@ -181,6 +181,8 @@
       h('select', { class: 'inp', onchange: (e) => { st.scope = e.target.value; st.page = 0; ERP.render(); } }, [['all', L('범위: 창고+공장', 'Phạm vi: Kho+Xưởng')], ['WH', L('범위: 창고', 'Phạm vi: Kho')], ['FAC', L('범위: 공장', 'Phạm vi: Xưởng')]].map(o => h('option', { value: o[0], selected: st.scope === o[0] }, o[1]))),
       sel('status', L('상태', 'Trạng thái'), statusOpts),
       h('label', { class: 'muted nowrap' }, h('input', { type: 'checkbox', checked: st.hideZero, onchange: (e) => { st.hideZero = e.target.checked; st.page = 0; ERP.render(); } }), ' ', L('재고 0 숨김', 'Ẩn tồn 0')),
+      // 16차: 자재구매 파일(해외 주문) 품목만 따로 → 해외 주문 탭
+      group === 'mat' ? h('button', { class: 'btn sm primary', onclick: () => ERP.goStock('buy'), title: L('자재구매 파일의 품목만 따로 보고 주문 (리드타임 관리)', 'Chỉ các mã trong file mua NVL (đặt nước ngoài)') }, L('해외 주문 품목만 ', 'Chỉ mã đặt nước ngoài ') + F.n(ERP.buy ? ERP.buy.items().length : 0)) : null,
       h('span', { class: 'sp' }),
       h('button', { class: 'btn sm', onclick: () => {
         const hdr = [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), 'ERP CODE', L('단계', 'Công đoạn'), L('제품군', 'Dòng SP'), L('분류', 'Phân loại'), L('세부', 'Chi tiết'), 'Mã XNK', L('단위', 'ĐV'), L('기초', 'Đầu kỳ'), in2Label, useLabel, othLabel, L('창고', 'Kho'), L('공장', 'Xưởng'), L('합계', 'Tổng'), 'set', 'pcs', L('안전재고', 'Tồn AT'), L('상태', 'Trạng thái'), L('최근 수불', 'Phát sinh gần nhất')];
@@ -194,7 +196,7 @@
         th('wh', L('창고', 'Kho'), 1), th('fac', L('공장', 'Xưởng'), 1), th('bal', L('합계', 'Tổng'), 1, L('= 기초 + 입고 − 소모 ± 기타', '= đầu kỳ + nhập − tiêu hao ± khác')),
         group === 'floor' ? th('sets', 'set', 1) : th('safety', L('안전재고', 'Tồn AT'), 1), th('status', L('상태', 'TT')), th('last', L('최근 수불', 'Gần nhất')))),
       h('tbody', slice.map(s => h('tr', { class: 'click', onclick: () => ERP.itemDetail(s.code) },
-        h('td', h('b', s.code)), h('td', { class: 'namecell', title: (s.m && s.m.erp_code) || '' }, h('div', s.name || ''), ERP.codeChips(s)), h('td', s.prim),
+        h('td', h('b', s.code)), h('td', { class: 'namecell', title: (s.m && s.m.erp_code) || '' }, h('div', s.name || ''), ERP.codeChips(s), s.m && s.m.buy ? ERP.chip('info', L('해외 주문', 'Đặt nước ngoài')) : null), h('td', s.prim),
         h('td', { class: 'num', style: negStyle(s.openTot) }, fq(s.openTot, s.prim)),
         h('td', { class: 'num', style: { color: '#0E7A5F' } }, sgn(group === 'floor' ? s.prod : s.in, s.prim)), h('td', { class: 'num', style: { color: '#B45F06' } }, sgn(-s.use, s.prim)), h('td', { class: 'num' }, sgn(other(s, group), s.prim)),
         h('td', { class: 'num', style: negStyle(s.by.WH) }, fq(s.by.WH, s.prim)), h('td', { class: 'num', style: negStyle(s.by.FAC) }, fq(s.by.FAC, s.prim)), h('td', { class: 'num', style: negStyle(s.bal) || { fontWeight: 700 } }, fq(s.bal, s.prim)),
@@ -462,13 +464,17 @@
     const S = STAT();
     put(host, h('div', { class: 'toolbar' }, h('div', { class: 'seg' }, [['list', L('발주 필요 목록', 'Cần đặt hàng')], ['setup', L('안전재고 설정', 'Cài tồn an toàn')]].map(o => h('button', { class: 'btn' + (st.view === o[0] ? ' primary' : ''), onclick: () => { st.view = o[0]; ERP.render(); } }, o[1])))));
     if (st.view === 'setup') return setupView(host, st);
-    const list = INV.rows().filter(s => grpOf(s.m) === 'mat' && s.safety !== null && s.safety > 0 && (s.status === 'low' || s.status === 'neg'))   // 12차: 발주는 원부자재만.map(s => Object.assign({}, s, { target: s.safety * st.mult, need: Math.max(0, s.safety * st.mult - s.bal) })).sort((a, b) => (a.bal / a.safety) - (b.bal / b.safety));
+    // 12차: 발주는 원부자재만. 16차: 해외 주문 품목은 해외 주문 탭에서 따로 (리드타임) — 여기서는 뺀다
+    const buyN = DB.rows('items').filter(m => m.buy).length; const buyNeed = buyN && ERP.buy ? ERP.buy.rows().filter(r => r.status === 'need').length : 0;
+    const list = INV.rows().filter(s => grpOf(s.m) === 'mat' && !(s.m && s.m.buy) && s.safety !== null && s.safety > 0 && (s.status === 'low' || s.status === 'neg'))
+      .map(s => Object.assign({}, s, { target: s.safety * st.mult, need: Math.max(0, s.safety * st.mult - s.bal) })).sort((a, b) => (a.bal / a.safety) - (b.bal / b.safety));
     const cols = [{ label: L('품목코드', 'Mã hàng'), render: s => h('b', s.code) }, { label: L('품명', 'Tên'), render: s => s.name }, { label: L('창고', 'Kho'), num: 1, render: s => fq(s.by.WH, s.prim), style: s => negStyle(s.by.WH) }, { label: L('공장', 'Xưởng'), num: 1, render: s => fq(s.by.FAC, s.prim), style: s => negStyle(s.by.FAC) },
       { label: L('현재고 (합계)', 'Tồn (tổng)'), num: 1, render: s => fq(s.bal, s.prim) + ' ' + s.prim }, { label: L('안전재고', 'Tồn AT'), num: 1, render: s => F.n(s.safety) },
       { label: L('부족분', 'Thiếu'), num: 1, render: s => fq(Math.max(0, s.safety - s.bal), s.prim) }, { label: L('재고율', '% tồn'), num: 1, render: s => F.n(s.bal / s.safety * 100, 0) + '%' },
       { label: L('권장 발주량', 'Đề xuất đặt'), num: 1, render: s => h('b', fq(s.need, s.prim) + ' ' + s.prim) }, { label: L('상태', 'TT'), render: s => ERP.chip(S[s.status][1], S[s.status][0]) }];
     put(host, h('div', { class: 'toolbar' }, h('label', { class: 'muted' }, L('발주 목표 = 안전재고 × ', 'Mục tiêu đặt = tồn an toàn × '), h('input', { class: 'inp', type: 'number', step: '0.1', min: '1', style: { width: '80px' }, value: st.mult, onchange: (e) => { st.mult = Math.max(1, Number(e.target.value) || 1); ERP.render(); } })),
       h('span', { class: 'sp' }), h('button', { class: 'btn primary', onclick: () => ERP.xl.exportAoa('purchase_request', [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), 'Mã XNK', L('현재고', 'Tồn'), L('단위', 'ĐV'), L('안전재고', 'Tồn AT'), L('부족분', 'Thiếu'), L('재고율', '% tồn'), L('권장 발주량', 'Đề xuất đặt')], list.map(s => [s.code, s.name, s.m ? s.m.xnk || '' : '', +s.bal.toFixed(2), s.prim, s.safety, +Math.max(0, s.safety - s.bal).toFixed(2), Math.round(s.bal / s.safety * 100) + '%', Math.ceil(s.need)])) }, L('발주 요청서 엑셀', 'Xuất yêu cầu mua hàng'))),
+      buyN ? h('p', { class: 'help', style: { marginTop: 0 } }, L('해외 주문 품목 ' + buyN + '개' + (buyNeed ? ' (그중 주문 필요 ' + buyNeed + '개)' : '') + '는 이 목록에서 빼고 ', buyN + ' mã đặt nước ngoài' + (buyNeed ? ' (cần đặt ' + buyNeed + ')' : '') + ' không nằm ở đây — xem ở '), h('a', { href: 'javascript:void 0', onclick: () => ERP.goStock('buy') }, L('해외 주문 탭', 'tab Đặt hàng nước ngoài')), L('에서 리드타임과 함께 봅니다.', '.')) : null,
       list.length ? ERP.simpleTable(cols, list, { maxH: '62vh', onClick: (s) => ERP.itemDetail(s.code) }) : h('div', { class: 'empty' }, L('안전재고 미달 품목이 없습니다.', 'Không có mã nào dưới tồn an toàn.')),
       h('p', { class: 'help' }, F.n(list.length) + L('개 품목이 안전재고 미달입니다. 안전재고는 ECOUNT 품목등록의 "안전재고수량"을 가져오며, "안전재고 설정"에서 바꿀 수 있습니다 (ECOUNT 값이 빈 품목은 여기서 넣은 값을 유지). 현재고는 창고+공장 합계입니다.', ' mã dưới tồn an toàn. Tồn an toàn lấy từ ECOUNT ("안전재고수량"), có thể sửa ở "Cài tồn an toàn". Tồn = Kho + Xưởng.')));
   }
@@ -669,13 +675,13 @@
     return {
       items: { def: 'master', tabs: [['master', L('품목 마스터', 'Danh mục')], ['codes', L('코드 사전', 'Từ điển mã')], ['check', L('자료 점검', 'Kiểm tra dữ liệu')], ['legacy', L('예시 자료', 'Dữ liệu mẫu')]] },
       floor: { def: 'floor', tabs: [['floor', L('현장 재고', 'Tồn hiện trường')], ['post', L('생산 반영', 'Cập nhật SX') + (issues ? ' · ' + issues : '')], ['fentry', L('수불 입력', 'Nhập phiếu')], ['fledger', L('수불 내역', 'Nhập xuất tồn')]] },
-      materials: { def: 'mat', tabs: [['mat', L('원부자재 재고', 'Tồn NVL')], ['entry', L('수불 입력', 'Nhập phiếu')], ['ledger', L('수불 내역', 'Nhập xuất tồn')], ['reorder', L('발주 · 안전재고', 'Đặt hàng · Tồn AT')], ['outsource', L('외주 입출고', 'Gia công ngoài')]] },
+      materials: { def: 'mat', tabs: [['mat', L('원부자재 재고', 'Tồn NVL')], ['entry', L('수불 입력', 'Nhập phiếu')], ['ledger', L('수불 내역', 'Nhập xuất tồn')], ['reorder', L('발주 · 안전재고', 'Đặt hàng · Tồn AT')], ['buy', L('해외 주문', 'Đặt hàng nước ngoài')], ['outsource', L('외주 입출고', 'Gia công ngoài')]] },
     };
   };
-  const TAB_PAGE = { master: 'items', codes: 'items', check: 'items', legacy: 'items', floor: 'floor', post: 'floor', fentry: 'floor', fledger: 'floor', mat: 'materials', entry: 'materials', ledger: 'materials', reorder: 'materials', outsource: 'materials' };
+  const TAB_PAGE = { master: 'items', codes: 'items', check: 'items', legacy: 'items', floor: 'floor', post: 'floor', fentry: 'floor', fledger: 'floor', mat: 'materials', entry: 'materials', ledger: 'materials', reorder: 'materials', buy: 'materials', outsource: 'materials' };
   const PAGE_KEY = { items: 'itemTab', floor: 'floorTab', materials: 'mtab' };
   const TAB_FN = { mat: (x) => stockTab(x, 'mat'), floor: (x) => stockTab(x, 'floor'), post: postTab, entry: (x) => entryTab(x, 'mat'), ledger: (x) => ledgerTab(x, 'mat'), fentry: (x) => entryTab(x, 'floor'), fledger: (x) => ledgerTab(x, 'floor'),
-    reorder: reorderTab, outsource: outsourceTab, check: checkTab, codes: codesTab, master: masterTab, legacy: legacyTab };
+    reorder: reorderTab, buy: (x) => ERP.buyTab(x), outsource: outsourceTab, check: checkTab, codes: codesTab, master: masterTab, legacy: legacyTab };   // 16차: 해외 주문 (buy.js)
   /** 탭 이름(옛 'compare' · 'stock' 포함) → [메뉴, 탭] */
   function where(tab) {
     let t = tab;

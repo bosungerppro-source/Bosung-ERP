@@ -154,7 +154,7 @@
       const mult = Math.max(1, +a.target_multiplier || 1); const all = stockRows();
       const list = all.filter(s => s.safety !== null && s.safety > 0 && (s.status === 'low' || s.status === 'neg')).sort((x, y) => (x.bal / x.safety) - (y.bal / y.safety));
       return { total_below_safety: list.length, target_multiplier: mult, materials_with_safety_set: all.filter(s => s.safety > 0).length,
-        materials_without_safety_set: all.filter(s => s.m && !(s.safety > 0)).length, rows: list.slice(0, clampLim(a.limit, 15)).map(s => Object.assign(matRow(s, mult), { target: r1(s.safety * mult) })) };
+        materials_without_safety_set: all.filter(s => s.m && !(s.safety > 0)).length, rows: list.slice(0, clampLim(a.limit, 15)).map(s => Object.assign(matRow(s, mult), { target: r1(s.safety * mult) }, s.m && s.m.buy ? { overseas: true, lead_days: ERP.buy ? ERP.buy.leadOf(s.m) : undefined } : {})) };
     },
 
     mrp(a) {
@@ -220,7 +220,7 @@
       from: { type: 'string', description: 'YYYY-MM-DD' }, to: { type: 'string', description: 'YYYY-MM-DD' }, process: { type: 'string', description: 'INJ, REF, STP, ASM, WRP, PCK or a custom process code' }, by_day: { type: 'boolean' } }, ['from', 'to']) },
     { name: 'quality_downtime', description: 'Defects and machine stops for a period (default: latest production day): NG rate per process, worst machines by NG quantity, total stop minutes, stop minutes by recorded reason (falls back to the remark) and by machine.', input_schema: S({
       from: { type: 'string', description: 'YYYY-MM-DD' }, to: { type: 'string', description: 'YYYY-MM-DD' }, process: { type: 'string' }, top: { type: 'integer', description: 'rows per ranking (default 5)' } }) },
-    { name: 'reorder', description: 'Materials to order: only items with a safety stock set that are below it, with recommended order quantity (safety × multiplier − balance), same as the "발주 필요 목록" screen. Also reports how many materials have NO safety stock (not evaluated).', input_schema: S({ target_multiplier: { type: 'number', description: 'default 1' }, limit: { type: 'integer' } }) },
+    { name: 'reorder', description: 'Materials to order: only items with a safety stock set that are below it, with recommended order quantity (safety × multiplier − balance), same as the "발주 필요 목록" screen. Also reports how many materials have NO safety stock (not evaluated). Rows with overseas=true are ordered abroad (자재구매 file items, lead time in days) and are managed in 원부자재 재고 → 해외 주문 instead of that screen.', input_schema: S({ target_multiplier: { type: 'number', description: 'default 1' }, limit: { type: 'integer' } }) },
     { name: 'mrp', description: 'Material requirement from the BOM / recipes, netted against stock. Give lines[] (item code, qty, unit) or a po_no (all unfinished lines of that PO). READ warnings: NO_COMPONENTS / NO_BOM mean the requirement could NOT be calculated (never report that as "no shortage"); STOCK_UNKNOWN means some raw materials are not matched to the stock master. kind: raw (kg), semi (pcs), asm.', input_schema: S({
       lines: { type: 'array', items: S({ code: { type: 'string' }, qty: { type: 'number' }, unit: { type: 'string', enum: ['set', 'pcs', 'ea'] } }, ['code', 'qty']) },
       po_no: { type: 'string', description: 'alternative to lines' }, only_short: { type: 'boolean', description: 'only rows with a shortage (default true)' } }) },
