@@ -120,17 +120,18 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('확인된 이름은 그대로 (WIP01 배럴 · RM 원재료 · SUP 스매쉬업)', [r.ko.w01, r.ko.rm, r.ko.sup], ['배럴', '원재료', '스매쉬업']);
     eq('이름 미정 분류 · 제품군 · 세부는 코드만 (CM-LB · GRA · NEON)', [r.ko.lb, r.ko.gra, r.ko.neon], ['LB', 'GRA', 'NEON']);
     ok('내장 사전에 짐작한 이름 없음 (이름 미정 ' + r.nGuessed + '개 모두 빈칸 · 이름 미정 단계 없음)', r.nGuessed === 34 && !r.blank.length && !r.gStage.length, r);
+    // 1.11.4: 현장 재고 위는 공정별 · 대분류 칸 (단계 카드 없음) — 대분류 이름은 일보 품목군 (Mini · Dial · Pencil · Click pencil …), 물음표 없음
     await ev(() => { ERP.state.stk_floor = null; ERP.goStock('floor'); ERP.render(); }); await settle();
+    const fl = await ev(() => ({ stage: document.querySelectorAll('main .flow .st:not(.pl)').length, cards: Array.from(document.querySelectorAll('main .flow .st.pl')).map(b => b.querySelector('b').textContent), t: document.querySelector('main .flow').innerText }));
+    ok('현장 재고 칸 = 공정별 · 대분류만 (단계 카드 없음 · 물음표 없음)', !fl.stage && fl.cards.length > 0 && fl.cards.every(x => ['Mini', 'Dial', 'Pencil', 'Click pencil', 'Glass', 'Marker', '기타'].includes(x)) && !/\?/.test(fl.t), fl);
+    // 이름을 지운 단계 (코드 사전에서 이름을 모두 지우면 이름 미정) → 코드만 · 코드 줄 없음 · 안내 말풍선 (단계 카드는 원부자재 재고에 남아 있음)
+    await ev(() => { ERP.db.add('code_dict', { level: 'stage', code: 'CM', ko: '', vi: '', guessed: true }); ERP.state.stk_mat = null; ERP.goStock('mat'); ERP.render(); }); await settle();
     const cardsOf = () => ev(() => Array.from(document.querySelectorAll('main .flow .st')).map(b => ({ t: b.innerText.replace(/\s+/g, ' '), code: !!b.querySelector('code'), tip: b.getAttribute('title') || '' })));
-    let cards = await cardsOf();
-    ok('현장 재고 흐름 카드에 물음표 없음', cards.length === 13 && !cards.some(c => /\?/.test(c.t)), cards.map(c => c.t));
-    ok('모든 카드 = 이름 + 코드 줄 (부품 / WIP11, 부품 / WIP21·31…, 배럴 / WIP01)', cards.every(c => c.code) && cards.some(c => /^부품 WIP11/.test(c.t)) && cards.some(c => /^부품 WIP21·31…/.test(c.t)) && cards.some(c => /^배럴 WIP01/.test(c.t)), cards.map(c => c.t));
-    // 이름을 지운 단계 (코드 사전에서 이름을 모두 지우면 이름 미정) → 코드만 · 코드 줄 없음 · 안내 말풍선
-    await ev(() => { ERP.db.add('code_dict', { level: 'stage', code: 'WIP55', ko: '', vi: '', guessed: true }); ERP.render(); }); await settle();
-    cards = await cardsOf();
-    eq('이름 미정 단계 카드 = 코드만 (코드 줄 없음 · 안내 말풍선)', cards.filter(c => /이름 없음/.test(c.tip)).map(c => [c.t.split(' ')[0], c.code]), [['WIP55', false]]);
-    await ev(() => { const DB = ERP.db; DB.remove('code_dict', DB.rows('code_dict').filter(x => x.level === 'stage' && x.code === 'WIP55').map(x => x._id)); ERP.render(); }); await settle();
-    eq('되돌리면 다시 이름 (부품)', await ev(() => ERP.inv.label('stage', 'WIP55')), '부품');
+    const cards = await cardsOf();
+    eq('이름 미정 단계 카드 = 코드만 (코드 줄 없음 · 안내 말풍선)', cards.filter(c => /이름 없음/.test(c.tip)).map(c => [c.t.split(' ')[0], c.code]), [['CM', false]]);
+    await ev(() => { const DB = ERP.db; DB.remove('code_dict', DB.rows('code_dict').filter(x => x.level === 'stage' && x.code === 'CM').map(x => x._id)); ERP.render(); }); await settle();
+    eq('되돌리면 다시 이름 (소모품)', await ev(() => ERP.inv.label('stage', 'CM')), '소모품');
+    await ev(() => { ERP.goStock('floor'); ERP.render(); }); await settle();
     const page = await ev(() => document.querySelector('main').innerText);
     ok('화면에 짐작했던 이름 없음 (스탬핑 완료 배럴 · 클릭펜 · 리필 컨테이너 · 가공 배럴)', !/스탬핑 완료 배럴|클릭펜 시스템|클릭펜슬 조립품|리필 컨테이너|가공 배럴/.test(page), page.match(/.{0,20}(스탬핑 완료|클릭펜|리필 컨테이너|가공 배럴).{0,20}/));
   });

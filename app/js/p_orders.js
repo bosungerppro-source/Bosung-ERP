@@ -93,6 +93,8 @@
   const doneBtn = (o, big) => (!o ? '' : C.isOpen(o) ? h('button', { class: 'btn' + (big ? '' : ' sm'), title: L('포장 실적과 상관없이 완료로 표시', 'Đánh dấu xong (không cần kết quả đóng gói)'), onclick: (e) => { e.stopPropagation(); closePo(o); } }, big ? L('완료 처리', 'Đánh dấu xong') : L('완료', 'Xong'))
     : o.st === 'done' && o.forced ? h('button', { class: 'btn' + (big ? '' : ' sm'), title: L('완료 처리일 ', 'Ngày đánh dấu xong ') + o.doneAt, onclick: (e) => { e.stopPropagation(); reopenPo(o); } }, L('완료 취소', 'Bỏ xong')) : '');
 
+  /** 1.11.4: 다른 화면(생산 관리 일보 조회 등)에서 PO 하나를 수주 관리에 열기 */
+  ERP.openPo = function (poNo) { const st = ERP.state.ord = ERP.state.ord || { tab: 'open', sel: null, view: 'po' }; st.tab = 'all'; st.view = 'po'; st.sel = String(poNo); ERP.goto('orders'); };
   ERP.pages.orders = { ko: '수주 관리', vi: 'Quản lý đơn hàng', render(root) {
     const st = ERP.state.ord = ERP.state.ord || { tab: 'open', sel: null, view: 'po' };
     if (!st.view) st.view = 'po';

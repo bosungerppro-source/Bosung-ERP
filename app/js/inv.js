@@ -100,6 +100,12 @@
   };
   INV.isGuessed = (level, code, parent) => { const r = INV.dict().m.get(level + '|' + (level === 'cat' ? (parent || '') : '') + '|' + up(code)); return !!(r && r.guessed); };
   INV.stageList = () => STAGES.map(s => s.code);
+  /** 단계의 공정 (내장 사전: 심 → 리필 성형, 배럴 · 노즈콘 · 홀더 · 스푼 · 부품(x6 · x5) → 사출, 부품(WIP11 · x1) → 스탬핑, 부품(WIP55) · 조립 완료 → 조립, 마니라 · 박스 포장 → 포장) */
+  INV.procOfStage = (st) => { const s = STAGES.find(x => x.code === st); return s && s.proc ? s.proc : ''; };
+  /** 1.11.4: 현장 재고 대분류 이름 — 생산 일보의 품목군 이름 (사용자: "조립 Mini/Dial/Pencil/Click pencil", 일보 Dial → 제품군 REG) */
+  INV.LINE_DIV = { MINI: 'Mini', REG: 'Dial', PEN: 'Pencil', CPC: 'Click pencil', GLA: 'Glass', MARKER: 'Marker' };
+  INV.LINE_ORDER = ['MINI', 'REG', 'PEN', 'CPC', 'GLA', 'MARKER'];
+  INV.lineDivName = (ln) => (ln ? INV.LINE_DIV[ln] || INV.label('line', ln) || ln : L('기타', 'Khác'));
   INV.stageInfo = (code) => STAGE_IDX.get(code) || STAGE_IDX.get('ETC');
   INV.stageName = (code) => INV.label('stage', code);
   /** 목록 · 필터용: 이름 · 코드 (여러 단계가 같은 이름 — 예: 부품 — 을 쓸 수 있어 코드를 같이 보인다). 이름이 없으면 코드만 */

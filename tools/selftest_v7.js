@@ -91,10 +91,14 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const cm = await cardCodes();
     await ev(() => { ERP.goStock('floor'); ERP.render(); }); await page.waitForTimeout(300);
     const cf = await cardCodes();
-    eq('원부자재 재고 흐름 카드 = RM · SM · CM', cm, ['RM', 'SM', 'CM']); ok('현장 재고 흐름 카드 = 심 … 박스 포장 (13칸 · 배럴 계열 WIP21·31… 포함)', cf.length === 13 && cf[0] === 'WIP00' && cf[cf.length - 1] === 'FG' && cf.includes('WIP21·31…'), cf);
-    await page.click('.flow .st:has-text("배럴")'); await page.waitForTimeout(300);
-    const r = await ev(() => ({ stage: ERP.state.stk_floor.stage, rows: document.querySelectorAll('main table.tbl tbody tr').length }));
-    eq('배럴 카드 → WIP01 필터', r.stage, 'WIP01'); ok('배럴 표에 행', r.rows > 0, r.rows);
+    // 1.11.4: 현장 재고 위 = 공정별 · 대분류(일보 품목군 이름) 칸, 단계 카드 없음
+    const ERP_PROC_NAMES = await ev(() => ERP.PROC.map(x => x.ko).concat(['기타']));
+    const fg = await ev(() => Array.from(document.querySelectorAll('main .flow .grp')).map(g => [g.querySelector('small').textContent, Array.from(g.querySelectorAll('.st.pl')).map(b => b.dataset.line)]));
+    eq('원부자재 재고 흐름 카드 = RM · SM · CM', cm, ['RM', 'SM', 'CM']); const pairs = await ev(() => Array.from(document.querySelectorAll('main .flow .st.pl')).map(x => [x.querySelector('b').textContent, x.dataset.line]));
+    ok('현장 재고 칸 = 공정별 (ERP 공정 이름) · 대분류만 (이름 없는 제품군은 코드만 — GRA · MIX)', fg.length > 0 && fg.every(([p, ls]) => ERP_PROC_NAMES.includes(p) && ls.length) && pairs.every(([t, c]) => ['Mini', 'Dial', 'Pencil', 'Click pencil', 'Glass', 'Marker', '기타'].includes(t) || t === c), { fg, pairs });
+    await page.click('.flow .st.pl'); await page.waitForTimeout(300);
+    const r = await ev(() => ({ proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, rows: document.querySelectorAll('main table.tbl tbody tr').length, procs: Array.from(new Set(Array.from(document.querySelectorAll('main table.tbl tbody tr')).map(tr => tr.querySelector('td b') && tr.querySelector('td b').textContent))).length }));
+    ok('공정 · 대분류 칸 → 표가 그 공정 · 대분류 품목', !!r.proc && r.rows > 0, r);
     const sus = await ev(async () => { const out = {}; for (const g of ['mat', 'floor']) { ERP.goStock(g); ERP.state['stk_' + g] = { stage: '', line: '', sub: '', cat: '', scope: 'all', status: 'susp', q: '', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }; ERP.render(); out[g] = parseInt(document.querySelector('main .pager span').textContent.replace(/,/g, ''), 10); } return out; });
     eq('이동 누락 의심 = 원부자재 + 현장 재고 = 71', sus.mat + sus.floor, 71);
     await ev(() => { ERP.state.stk_mat.status = ''; ERP.state.stk_mat.q = 'rm wax bees'; ERP.goStock('mat'); ERP.render(); }); await page.waitForTimeout(300);
@@ -388,8 +392,8 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const out = require('child_process').execSync('node ' + path.join(ROOT, 'tools/build_demo.js'), { cwd: ROOT }).toString(); console.log('  ' + out.trim());
     const p2 = await browser.newPage(); const e2 = []; p2.on('pageerror', e => e2.push(e.message));
     await p2.goto('file://' + path.join(ROOT, 'dist/ERP_Demo.html') + '#/materials'); await p2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 }); await p2.waitForTimeout(800);
-    const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.goStock('floor'); ERP.render(); const b = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b], widgets: document.querySelectorAll('.wgrid .w').length }; });
-    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고 13) · 위젯 13', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 13], 13]); ok('데모 오류 0', e2.length === 0, e2);
+    const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.goStock('floor'); ERP.render(); const b = document.querySelectorAll('.flow .st.pl').length, bs = document.querySelectorAll('.flow .st:not(.pl)').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b > 0 && bs === 0], widgets: document.querySelectorAll('.wgrid .w').length }; });
+    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고는 공정별 · 대분류 칸) · 위젯 13', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, true], 13]); ok('데모 오류 0', e2.length === 0, e2);
   }
 
   section('18. 저장 표시 · 닫기 전 저장 · 베트남어 빈 글자');

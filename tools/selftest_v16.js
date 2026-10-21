@@ -301,6 +301,37 @@ function buyBook(rows, fileDate) {
     ok('수불 내역: 출처 자재구매 파일 · 용도 자재구매 파일 재고 맞춤', /자재구매 파일 재고 맞춤/.test(lt) && /자재구매 파일/.test(lt), lt.slice(0, 400));
   });
 
+  await sec('8-3. 현장 재고 = 공정별 · 대분류 현재 재고 (1.11.4) · 일보 조회에 PO 번호 → 수주 관리', async () => {
+    await ev(async (o) => { const DB = ERP.db;
+      DB.addMany('items', [
+        { code: 'T-M1', name: 'MINI RED', unit: 'PCS', stage: 'WIP', line: 'MINI', src: 'test' }, { code: 'T-M2', name: 'MINI BLUE', unit: 'PCS', stage: 'WIP', line: 'MINI', src: 'test' },
+        { code: 'T-D1', name: 'DIAL RED', unit: 'PCS', stage: 'WIP', line: 'REG', src: 'test' }, { code: 'T-C1', name: 'CORE MINI RED', unit: 'PCS', stage: 'WIP00', line: 'MINI', src: 'test' },
+        { code: 'T-P1', name: 'PENCIL 12 MANILA', unit: 'SET', stage: 'SG', line: 'PEN', src: 'test' }, { code: 'T-P2', name: 'PENCIL 12 BOX', unit: 'CT', stage: 'FG', line: 'PEN', src: 'test' }]);
+      const op = (code, qty, unit) => ({ date: o.openDate, scope: 'FAC', code, qty, unit });
+      DB.addMany('stock_open', [op('T-M1', 100, 'PCS'), op('T-M2', 20, 'PCS'), op('T-D1', 30, 'PCS'), op('T-C1', 50, 'PCS'), op('T-P1', 7, 'SET'), op('T-P2', 3, 'CT')]);
+      DB.add('po', { po_no: 'PO-T9', item_no: 'T-P1', customer: 'TEST', kind: 'Pencil', sets: 10, pcs: 120, date: o.today, due: o.today });
+      DB.add('prod_log', { date: o.today, process: 'PCK', shift: 'D', code: 'T-P1', name: 'PENCIL 12 MANILA', po_no: 'PO-T9', ok_qty: 5, ok_ea: 60, unit: 'set', source: 'manual' });
+      await DB.flush(); }, { openDate, today });
+    await ev(() => { ERP.state.stk_floor = null; ERP.goStock('floor'); ERP.render(); }); await A.waitForTimeout(400);
+    const fl = await ev(() => ({ stage: document.querySelectorAll('main .flow .st:not(.pl)').length,
+      groups: Array.from(document.querySelectorAll('main .flow .grp')).map(g => [g.querySelector('small').textContent, Array.from(g.querySelectorAll('.st.pl')).map(b => b.innerText.replace(/\s+/g, ' ').trim())]) }));
+    eq('현장 재고 위 = 공정별 (리필 성형 · 조립 · 포장) · 대분류만 (Mini · Dial · Pencil) · 현재 재고 (단계 카드 없음, 포장은 SET · CT 나눔 — 마니라 7 + 오늘 포장 일보 5 = 12 SET)', fl, { stage: 0, groups: [['리필 성형', ['Mini 50 PCS']], ['조립', ['Mini 120 PCS', 'Dial 30 PCS']], ['포장', ['Pencil 12 SET 3 CT']]] });
+    await A.click('main .flow .st.pl[data-proc="ASM"][data-line="MINI"]'); await A.waitForTimeout(300);
+    const f = await ev(() => ({ proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, codes: Array.from(document.querySelectorAll('main table.tbl tbody tr')).map(tr => tr.children[0].innerText.trim()).sort(), chip: Array.from(document.querySelectorAll('main .toolbar button')).map(b => b.textContent).filter(t => /×$/.test(t)) }));
+    eq('조립 · Mini 칸 → 표 = 조립 단계의 Mini 품목 (T-M1 · T-M2) · "조립 · Mini ×"', f, { proc: 'ASM', line: 'MINI', codes: ['T-M1', 'T-M2'], chip: ['조립 · Mini ×'] });
+    await A.click('main .toolbar button:has-text("조립 · Mini ×")'); await A.waitForTimeout(300);
+    eq('× → 거르기 풀림', await ev(() => [ERP.state.stk_floor.proc, ERP.state.stk_floor.line]), ['', '']);
+    // 생산 관리 → 일보 조회: PO 번호 칸 · 수주 보기 → 수주 관리에서 그 PO
+    await ev((d) => { ERP.state.prodTab = 'log'; ERP.state.plog = { from: d, to: d }; ERP.goto('production'); }, today); await A.waitForTimeout(600);
+    const lg = await ev(() => { const head = Array.from(document.querySelectorAll('main table.tbl thead th')).map(t => t.textContent.trim()); const i = head.indexOf('PO 번호');
+      const tr = Array.from(document.querySelectorAll('main table.tbl tbody tr')).find(x => /T-P1/.test(x.innerText)); return { i, po: tr && i >= 0 ? tr.children[i].innerText.trim() : null, link: tr ? !!Array.from(tr.querySelectorAll('a')).find(a => /수주 보기/.test(a.textContent)) : false }; });
+    ok('일보 조회에 PO 번호 칸 · 포장 일보의 PO-T9 · 수주 보기 링크', lg.i > 0 && lg.po === 'PO-T9' && lg.link, lg);
+    await ev(() => { const tr = Array.from(document.querySelectorAll('main table.tbl tbody tr')).find(x => /T-P1/.test(x.innerText)); Array.from(tr.querySelectorAll('a')).find(a => /수주 보기/.test(a.textContent)).click(); });
+    await A.waitForFunction(() => location.hash === '#/orders' && /PO-T9/.test((document.querySelector('main aside') || {}).innerText || ''), null, { timeout: 15000 }).catch(() => {});
+    eq('수주 보기 → 수주 관리 · 그 PO 상세', await ev(() => [location.hash, ERP.state.ord.sel, /PO-T9/.test((document.querySelector('main aside') || {}).innerText || '')]), ['#/orders', 'PO-T9', true]);
+    await ev(() => ERP.goStock('buy')); await A.waitForTimeout(300);
+  });
+
   await sec('9. 휴대폰 폭 · 베트남어 · 오류 없음', async () => {
     await A.setViewportSize({ width: 375, height: 812 }); await ev(() => { ERP.goStock('buy'); ERP.render(); }); await A.waitForTimeout(500);
     const w = await ev(() => ({ doc: document.documentElement.scrollWidth, win: window.innerWidth, tbl: !!document.querySelector('main table.buy-tbl') }));

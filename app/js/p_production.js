@@ -28,7 +28,9 @@
         { id: 'd', label: L('품목군', 'Nhóm'), key: 'division', options: () => Array.from(new Set(DB.rows('prod_log').map(r => r.division).filter(Boolean))).sort().map(v => ({ v, label: v })) },
         { id: 's', label: L('주/야', 'Ca'), key: 'shift', options: () => [{ v: 'D', label: L('주간', 'Ca ngày') }, { v: 'N', label: L('야간', 'Ca đêm') }] }],
       toolbar: (s, render) => [h('label', { class: 'muted' }, L('기간 ', 'Từ '), h('input', { class: 'inp', type: 'date', value: st.from, onchange: (e) => { st.from = e.target.value || st.from; render(); } }), ' ~ ', h('input', { class: 'inp', type: 'date', value: st.to, onchange: (e) => { st.to = e.target.value || st.to; render(); } }))],
-      cols: ['date', 'process', 'shift', 'machine_no', 'division', 'code', 'name', 'plan_qty', 'ok_qty', 'ng_qty', 'stop_min'].map(COL) });
+      // 1.11.4: 포장 일보의 PO 번호 (수주 관리와 이어짐) — 누르면 수주 관리에서 그 PO
+      cols: ['date', 'process', 'shift', 'machine_no', 'division', 'po_no', 'code', 'name', 'plan_qty', 'ok_qty', 'ng_qty', 'stop_min'].map(COL),
+      extraCols: [{ label: () => L('수주', 'Đơn hàng'), render: r => (r.po_no ? h('a', { href: 'javascript:void 0', title: L('수주 관리에서 이 PO 보기', 'Xem PO này ở Quản lý đơn hàng'), onclick: (e) => { e.stopPropagation(); ERP.openPo(r.po_no); } }, L('수주 보기 →', 'Xem PO →')) : '') }] });
     host.appendChild(grid.el);
   }
 
