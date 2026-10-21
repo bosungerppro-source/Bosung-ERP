@@ -119,9 +119,10 @@
           const prog = sets > 0 ? packed / sets : (num(p.rate) || 0);
           let st = 'wait';
           if (sets > 0 && prog >= 0.999) st = 'done'; else if (p.due && p.due < today) st = 'late'; else if (packed > 0) st = 'prod';
+          if (p.done_at) st = 'done';   // 13차: 강제 완료 (done_at = 완료 처리일) — 포장 실적과 상관없이 완료
           const cond = C.poCond(p); if (cond) st = cond;   // 취소 · 보류 표시가 이긴다 (진행 · 지연 · 완료로 세지 않는다)
           const dd = p.due ? F.diffDays(p.due, today) : null;
-          out.push({ p, sets, packed, live: lv, prog, st, dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, n: lines.length, orphan: lines.length > 1 ? orphan : 0 });
+          out.push({ p, sets, packed, live: lv, prog, st, forced: st === 'done' && !!p.done_at, dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, n: lines.length, orphan: lines.length > 1 ? orphan : 0 });
         });
       });
       return out;
@@ -143,10 +144,21 @@
         let st = 'wait'; if (!act.length) st = lines.some(o => o.st === 'hold') ? 'hold' : 'cancel'; else if (done) st = 'done'; else if (openL.some(o => o.st === 'late')) st = 'late'; else if (act.some(o => o.packed > 0)) st = 'prod';
         const dd = due ? F.diffDays(due, today) : null; const items = Array.from(new Set(lines.map(o => o.p.item_no).filter(Boolean)));
         const rep = Object.assign({}, first, { item_no: items.length > 1 ? items[0] + L(' 외 ' + (items.length - 1), ' +' + (items.length - 1)) : items[0], due, pcs });
-        out.push({ p: rep, po_no: po, lines, n: lines.length, items, sets, packed, prog: sets > 0 ? packed / sets : 0, st, dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, orphan: lines[0].orphan });
+        out.push({ p: rep, po_no: po, lines, n: lines.length, items, sets, packed, prog: sets > 0 ? packed / sets : 0, st, forced: act.some(o => o.forced), doneAt: lines.map(o => o.p.done_at).filter(Boolean).sort().pop() || '', dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, orphan: lines[0].orphan });
       });
       return out;
     });
+  };
+  // 13차: 강제 완료 — 포장 실적이 없어도 완료로 표시한다 (줄마다 done_at = 완료 처리일). 수주를 다시 올려도(upsert) 남는다
+  /** 진행 중 줄(완료 · 취소 · 보류가 아닌 줄)을 완료로 표시 → 바꾼 줄 수 */
+  C.closeLines = function (lines, day) { const t = day || F.today(); let n = 0; (lines || []).forEach(o => { if (!C.isOpen(o)) return; DB.update('po', o.p._id, { done_at: t }); n++; }); return n; };
+  /** 강제 완료를 되돌린다 (done_at 지움) → 바꾼 줄 수 */
+  C.reopenLines = function (lines) { let n = 0; (lines || []).forEach(o => { if (!o.p.done_at) return; DB.update('po', o.p._id, { done_at: '' }); n++; }); return n; };
+  /** 납기(Checking)가 from ~ to (YYYY-MM-DD, 둘 다 포함)인 진행 중 줄을 모두 완료로 표시하고 업로드 이력에 남긴다 → 바꾼 줄 수 */
+  C.closeByDue = function (from, to, note) {
+    const n = C.closeLines(C.orders().filter(o => C.isOpen(o) && o.p.due && o.p.due >= from && o.p.due <= to));
+    if (n) DB.add('uploads', { at: F.now(), kind: 'po_close', date: to, mode: 'due', rows: n, changed: n, note: note || L('수주 일괄 완료 (납기 ' + from + ' ~ ' + to + ')', 'Đánh dấu xong PO hàng loạt (hạn ' + from + ' ~ ' + to + ')') });
+    return n;
   };
   const ISO = /^\d{4}-\d\d-\d\d/;
   /** monthly PO quantity (pcs) by 품목군. basis 'due' = Checking(납기) 월 (7차 기본, 엑셀 "PO Sum"과 같음) · 'date' = 수주월 */

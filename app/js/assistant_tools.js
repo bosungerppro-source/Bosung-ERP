@@ -34,8 +34,9 @@
 
   const poRow = (g) => {
     const row = { po_no: g.po_no, customer: clean(g.p.customer), items: g.items.map(clean), sets: Math.round(g.sets), packed_sets: Math.round(g.packed),
-      remaining_sets: Math.max(0, Math.round(g.sets - g.packed)), progress_pct: Math.round(g.prog * 100), due: g.p.due, days_to_due: ddOf(g), status: g.st };
+      remaining_sets: g.forced ? 0 : Math.max(0, Math.round(g.sets - g.packed)), progress_pct: Math.round(g.prog * 100), due: g.p.due, days_to_due: ddOf(g), status: g.st };
     if (isStale(g)) row.stale = true;
+    if (g.forced) row.marked_done = g.doneAt;   // 13차: 포장 실적과 상관없이 완료로 표시한 PO (완료 처리일)
     return row;
   };
   const sevRank = { neg: 0, low: 1, near: 2, ok: 3, na: 4 };
@@ -97,7 +98,7 @@
       const packAll = DB.rows('prod_log').filter(r => r.process === 'PCK' && String(r.po_no) === String(g.po_no)).sort((x, y) => String(y.date).localeCompare(String(x.date)));
       const pack = packAll.slice(0, 12).map(r => ({ date: r.date, code: r.code, qty_sets: C.num(r.ok_qty) }));
       return { po: poRow(g), customer: clean(g.p.customer), country: clean(g.p.country), order_date: g.p.date, condition: g.p.condition, note: g.p.mark,
-        lines: g.lines.map(o => ({ item_no: o.p.item_no, kind: o.p.kind, sets: Math.round(o.sets), packed_sets: Math.round(o.packed), remaining_sets: Math.max(0, Math.round(o.sets - o.packed)), progress_pct: Math.round(o.prog * 100), due: o.p.due, status: o.st })),
+        lines: g.lines.map(o => ({ item_no: o.p.item_no, kind: o.p.kind, sets: Math.round(o.sets), packed_sets: Math.round(o.packed), remaining_sets: o.forced ? 0 : Math.max(0, Math.round(o.sets - o.packed)), progress_pct: Math.round(o.prog * 100), due: o.p.due, status: o.st })),
         packing_not_matching_any_line: g.orphan || undefined, recent_packing: pack, recent_packing_total: packAll.length > pack.length ? packAll.length : undefined };
     },
 

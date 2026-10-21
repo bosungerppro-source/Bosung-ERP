@@ -43,6 +43,7 @@
       { k: 'packed', ko: '포장수량(set)', vi: 'Đã đóng (set)', t: 'n', list: 1 },
       { k: 'rate', ko: '달성률', vi: 'Tỷ lệ', t: 'n' },
       { k: 'yn', ko: 'OK/NG', vi: 'OK/NG', t: 't' },
+      { k: 'done_at', ko: '완료 처리일', vi: 'Ngày đánh dấu xong', t: 'd' },   // 13차: 강제 완료 (수주 목록의 완료 버튼 · 일괄 완료)
       { k: 'mark', ko: '비고', vi: 'Ghi chú', t: 't' },
     ] },
 

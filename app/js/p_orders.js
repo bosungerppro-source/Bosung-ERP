@@ -80,6 +80,19 @@
     return g.lines.filter(l => l.p.item_no && C.isOpen(l) && l.sets - l.packed > 0).map(l => ({ code: bomFor(l.p.item_no).key || l.p.item_no, qty: Math.round(l.sets - l.packed), unit: 'set' }));
   };
 
+  // 13차: 강제 완료 — 포장 실적과 상관없이 PO 를 완료로 표시 (완료 탭에서 "완료 취소" 로 되돌림)
+  async function closePo(o) {
+    if (!(await ERP.confirm(L('PO ' + o.po_no + ' 을(를) 완료로 표시할까요?\n포장 실적과 상관없이 완료가 되고 진행 중 목록에서 빠집니다. 완료 탭에서 "완료 취소" 로 되돌릴 수 있습니다.', 'Đánh dấu PO ' + o.po_no + ' là đã xong?\nPO sẽ xong dù chưa có kết quả đóng gói và rời khỏi danh sách đang mở. Có thể bỏ ở tab Xong ("Bỏ xong").'), L('완료', 'Xong')))) return;
+    const n = C.closeLines(o.lines); ERP.toast(L('완료로 표시했습니다: ', 'Đã đánh dấu xong: ') + o.po_no + (n > 1 ? ' (' + n + L('줄', ' dòng') + ')' : ''), 'ok'); ERP.render();
+  }
+  async function reopenPo(o) {
+    if (!(await ERP.confirm(L('PO ' + o.po_no + ' 의 완료 표시를 취소할까요? (다시 진행 중으로 돌아갑니다)', 'Bỏ đánh dấu xong cho PO ' + o.po_no + '? (trở lại đang mở)'), L('완료 취소', 'Bỏ xong')))) return;
+    C.reopenLines(o.lines); ERP.toast(L('완료 표시를 취소했습니다: ', 'Đã bỏ đánh dấu xong: ') + o.po_no, 'ok'); ERP.render();
+  }
+  /** 목록 · 상세의 완료 버튼: 진행 중 → "완료", 강제 완료한 PO → "완료 취소" */
+  const doneBtn = (o, big) => (!o ? '' : C.isOpen(o) ? h('button', { class: 'btn' + (big ? '' : ' sm'), title: L('포장 실적과 상관없이 완료로 표시', 'Đánh dấu xong (không cần kết quả đóng gói)'), onclick: (e) => { e.stopPropagation(); closePo(o); } }, big ? L('완료 처리', 'Đánh dấu xong') : L('완료', 'Xong'))
+    : o.st === 'done' && o.forced ? h('button', { class: 'btn' + (big ? '' : ' sm'), title: L('완료 처리일 ', 'Ngày đánh dấu xong ') + o.doneAt, onclick: (e) => { e.stopPropagation(); reopenPo(o); } }, L('완료 취소', 'Bỏ xong')) : '');
+
   ERP.pages.orders = { ko: '수주 관리', vi: 'Quản lý đơn hàng', render(root) {
     const st = ERP.state.ord = ERP.state.ord || { tab: 'open', sel: null, view: 'po' };
     if (!st.view) st.view = 'po';
@@ -153,7 +166,7 @@
         g = ERP.grid({ table: 'po', rows: () => all.filter(match).map(o => ({ _id: o.po_no, po_no: o.po_no, customer: o.p.customer, items: o.n, item_no: o.items.length > 1 ? o.items[0] + ' …' : (o.items[0] || ''), sets: o.sets, due: o.p.due })), pageSize: 25, sortKey: 'due', sortDir: 1, canAdd: false, canEdit: false, export: false, maxH: '60vh',
           searchKeys: ['po_no', 'customer', 'item_no'],
           cols: [mk('po_no', 'PO 번호', 'Số PO'), mk('customer', '거래처', 'Khách hàng'), mk('item_no', '품번', 'Mã hàng'), mk('items', '품번 수', 'Số mã', 'n'), mk('sets', '세트', 'Bộ', 'n'), mk('due', '납기', 'Hạn giao', 'd')],
-          extraCols: [{ label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }, { label: () => L('상태', 'Trạng thái'), render: r => ERP.statusChip(byPo.get(r._id).st) }],
+          extraCols: [{ label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }, { label: () => L('상태', 'Trạng thái'), render: r => ERP.statusChip(byPo.get(r._id).st) }, { label: () => '', render: r => doneBtn(byPo.get(r._id)) }],
           onRowClick: (r) => { st.sel = r._id; drawAside(); } });
       } else {
         g = ERP.grid({ table: 'po', rows: () => lineAll.filter(match).map(o => o.p), pageSize: 25, sortKey: 'due', sortDir: 1, canAdd: false, maxH: '60vh',
@@ -176,6 +189,7 @@
           h('div', h('div', { class: 'sub' }, L('가장 빠른 납기', 'Hạn giao sớm nhất')), h('b', F.d(p.due) || '–'), h('div', ERP.ddayChip(o.dday, o.st))),
           h('div', h('div', { class: 'sub' }, L('수주일', 'Ngày đặt')), h('b', F.d(p.date))), h('div', h('div', { class: 'sub' }, L('전체 포장 진행률', 'Tiến độ đóng gói chung')), h('b', F.n(o.prog * 100, 0) + '%'))),
         ERP.bar(o.prog * 100, o.st === 'late' ? 'bad' : o.st === 'done' ? 'ok' : 'info'),
+        o.forced ? h('p', { class: 'help', style: { margin: '6px 0 0' } }, ERP.chip('ok', L('완료 처리 ', 'Đã đánh dấu xong ') + F.d(o.doneAt)), ' ', L('포장 실적과 상관없이 완료로 표시한 PO 입니다.', 'PO được đánh dấu xong không cần kết quả đóng gói.')) : null,
         h('div', h('h3', L('품번별 진행 (' + o.n + ')', 'Tiến độ từng mã (' + o.n + ')')),
           ERP.simpleTable([{ label: L('품번', 'Mã hàng'), render: l => h('div', h('b', l.p.item_no || '–'), h('div', { class: 'sub' }, l.p.kind || '')) }, { label: 'set', num: 1, render: l => F.n(l.packed) + ' / ' + F.n(l.sets) }, { label: L('진행', 'Tiến độ'), render: l => h('div', { style: { minWidth: '70px' } }, ERP.bar(l.prog * 100, l.st === 'late' ? 'bad' : l.st === 'done' ? 'ok' : 'info'), h('small', { class: 'muted' }, F.n(l.prog * 100, 0) + '%')) },
             { label: L('완제품 재고', 'Tồn TP'), num: 1, render: l => { const st0 = ERP.calc.stock().get(String(l.p.item_no || '')); if (!st0 || (!st0.bal && !st0.n)) return h('span', { class: 'muted' }, '–'); const rem = Math.max(0, l.sets - l.packed); const sets = st0.sets; return h('div', { title: L('창고 ', 'Kho ') + F.n(st0.by.WH) + ' / ' + L('공장 ', 'Xưởng ') + F.n(st0.by.FAC) + ' ' + st0.prim }, h('b', { style: st0.bal < 0 ? { color: '#B3261E' } : null }, F.n(st0.bal, st0.prim === 'kg' ? 1 : 0) + ' ' + st0.prim), sets !== null && sets !== undefined ? h('div', { class: 'sub', style: rem && sets >= rem ? { color: '#0E7A5F' } : null }, F.n(sets) + ' set') : null); } },
@@ -184,7 +198,7 @@
         h('div', h('h3', L('포장 실적 (생산일보)', 'Kết quả đóng gói (báo cáo ngày)')), packs.length ? ERP.simpleTable([{ label: L('일자', 'Ngày'), render: r => F.md(r.date) }, { label: L('품번', 'Mã hàng'), render: r => h('span', { style: codes.has(String(r.code)) ? null : { color: '#C77700' } }, r.code || '') }, { label: L('설비', 'Máy'), render: r => r.machine_no || '' }, { label: 'set', num: 1, render: r => F.n(r.ok_qty) }], packs.slice(0, 10), { maxH: '220px' }) : h('div', { class: 'sub' }, L('이 PO 번호의 포장일보가 아직 없습니다. (포장일보에 PO 번호 + 품번 입력)', 'Chưa có báo cáo đóng gói cho PO này. (nhập số PO + mã hàng)'))),
         h('div', { class: 'actions' },
           h('button', { class: 'btn primary', onclick: () => ERP.goto('bom', { tab: 'mrp', lines: ERP.poMrpLines(o.po_no) }) }, L('자재 소요량 계산 (전체 품번)', 'Tính nhu cầu NVL (tất cả mã)')),
-          h('button', { class: 'btn', onclick: () => poEditor(o.po_no) }, L('수주 편집 · 품번 추가', 'Sửa PO · thêm mã'))));
+          h('button', { class: 'btn', onclick: () => poEditor(o.po_no) }, L('수주 편집 · 품번 추가', 'Sửa PO · thêm mã')), doneBtn(o, true)));
     }
     const viewSw = h('div', { class: 'seg' }, [['po', L('PO별 보기', 'Theo PO')], ['line', L('품번 라인별 보기', 'Theo dòng mã hàng')]].map(o => h('button', { class: 'btn sm' + (st.view === o[0] ? ' primary' : ''), onclick: () => { st.view = o[0]; ERP.render(); } }, o[1])));
     root.appendChild(h('div', { class: 'row' },

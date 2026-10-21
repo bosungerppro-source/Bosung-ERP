@@ -150,6 +150,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 **규칙 (이후 버전에서도 지킬 것)**
 - **일보 교체**: 일보(`source:'daily-report'`) · ERP 양식(`'template'`) 행은 날짜 · 공정 · 출처 · 조(`shift`) · 작업장(`workplace`)이 모두 같을 때만 바꾼다. 누적 시트(`'history'`)는 공정 · 기간 전체를 바꾼다. 같은 날짜 · 공정에 누적 행이 있으면 일보는 기본 건너뜀(`job.overlap`), `job.overlapMode='replace'` 면 그날 누적 행 대신 일보. 조 = 시트 이름 → 행의 DAY/NIGHT 칸 → D. 작업장 = 일보의 "1. 작업장명" 칸.
 - **수주 키**: `po.nat` = po_no · po_no2 · item_no · date · kind · kind2 · color, `po.multi` → `DB.upsert` 는 같은 키 줄을 순번으로 맞춘다 (합치지 않음).
+- **강제 완료 (13차)**: PO 줄의 `done_at`(완료 처리일)이 있으면 포장 실적과 상관없이 완료. 수주 목록의 완료 버튼 · `C.closeByDue`. 아래 2-12.
 - **취소 · 보류**: `C.poCond(p)` ('cancel' · 'hold', Condition 칸). 표시가 있으면 줄 상태 = cancel/hold. PO 는 모든 줄이 취소/보류면 취소/보류, 아니면 그 줄을 뺀 줄로 계산. 진행 중 = `C.isOpen(o)`.
 - **포장 일보**: `code` = PO 품번(열 1 → 열 0), `item` = 재고 품목코드(완제품 열 1), `ok_ct` = 실적 CT. 생산 반영은 `item` → `code` → `code_map`, CT 품목은 `ok_ct` 가 있으면 그대로.
 - **품목군(일보)**: 누적 시트의 같은 코드 → ERP CODE 제품군별 누적 최빈값 → 설비 이름. **설비** = `C.machKey(r)` (공정 + 종류 + 번호).
@@ -205,3 +206,14 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - 물음표 표시도 쓰지 않는다: 이동 누락 의심은 "이동 누락" (말풍선에 "이동 누락 의심").
 - **1.7.1 (2026-10-21)**: 사용자가 단계 이름을 정함 — CM = 소모품 (Vật tư tiêu hao), WIP06·x6 · WIP15·25·35 · WIP11 · WIP21·31… · WIP55 = 부품 (Linh kiện). 내장 사전에 넣음 (이름 미정은 34개: 제품군 2 · 세부 14 · 분류 18). 여러 단계가 같은 이름을 쓸 수 있으므로 목록 · 필터 · 미리보기는 `INV.stageTitle(code)` ("부품 · WIP11"), 단계 카드는 이름 아래 코드 줄.
 - 시험: `npm run test:v12` 123개 (모든 화면 null · undefined 글자 검사 포함) + v11 · v9 · v8 · v7 · assistant (v7 의 ECOUNT 비교 시험은 "비교 없음 · 기초재고 재설정 경고" 로 바꿈).
+
+### 2-12. 13차: 수주 강제 완료 — 완료 버튼 · 납기 기준 일괄 완료 (v1.8.0, 2026-10-21)
+자세한 요청 · 결정은 `docs/PROMPT_v13_PO_DONE.md`, 작업 기록은 `docs/history/v13_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **완료 판단**: 줄 상태 = 포장 실적 ≥ 세트면 done, 아니면 납기 경과 late / 포장 중 prod / 대기 wait. **`done_at`(완료 처리일)이 있으면 done** (강제 완료). 그다음 취소 · 보류 표시가 이긴다. 줄에 `forced`, PO 에 `forced` · `doneAt`.
+- **강제 완료는 사용자가 누른 것만**: 수주 목록(PO별 보기)의 **완료** 버튼 · 상세 칸의 **완료 처리** (확인 창). 그 PO 의 진행 중 줄에만 `done_at = 오늘`. **완료 취소** 는 `done_at` 을 지운다. 자동으로 넣지 않는다.
+- **일괄 완료** `C.closeByDue(from, to, note)` — 납기(Checking)가 from ~ to 인 진행 중 줄 → 완료, 업로드 이력 `kind: 'po_close'`. 기간 · 기준은 사용자가 정한다 (2026-10-21: 납기 2025-01-01 ~ 2026-09-30, 347줄).
+- 수주 엑셀을 다시 올려도(upsert) `done_at` 은 남는다. "전체 교체" 는 지운다.
+- AI 비서 수주 도구: 강제 완료면 `remaining_sets` 0, `marked_done`.
+- 시험: `npm run test:v13` 27개 + v12 · v11 · v9 · v8 · v7 · assistant.

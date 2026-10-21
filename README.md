@@ -2,13 +2,13 @@
 
 ## 저장소 · 받기 / Kho mã nguồn · Tải về
 - 소스: GitHub `bosungerppro-source/Bosung-ERP` (브랜치 `main`). 차수별 결정 · 작업 기록은 `docs/`.
-- 설치 파일 · 데모: 저장소의 **Releases**. 새 Release 는 **Actions → "Release — 설치 파일" → Run workflow** 에서 버전(예: `1.7.1`)을 넣으면 GitHub 가 설치 파일과 데모를 빌드해 태그와 함께 만듭니다 (`.github/workflows/release.yml`, 설명은 `docs/releases/v<버전>.md`).
+- 설치 파일 · 데모: 저장소의 **Releases**. 새 Release 는 **Actions → "Release — 설치 파일" → Run workflow** 에서 버전(예: `1.8.0`)을 넣으면 GitHub 가 설치 파일과 데모를 빌드해 태그와 함께 만듭니다 (`.github/workflows/release.yml`, 설명은 `docs/releases/v<버전>.md`).
 
 ## 구성 / Thành phần
 | 경로 | 설명 |
 |---|---|
 | `ERP_Demo.html` | 설치 없이 브라우저로 여는 테스트용 단일 파일 (데이터는 브라우저에만 저장) |
-| `ColorPencil-ERP-Setup-1.7.1.exe` | Windows 설치 프로그램 (Windows 10 이상, 사용자 폴더 설치, 관리자 권한 불필요). 이전 버전(1.4.0 · 1.3.0 등)을 쓰던 PC에 덮어 설치하면 데이터·설정은 그대로이고 고친 내용만 더해집니다. ERP 가 켜져 있으면 닫으라고 알려 줍니다 |
+| `ColorPencil-ERP-Setup-1.8.0.exe` | Windows 설치 프로그램 (Windows 10 이상, 사용자 폴더 설치, 관리자 권한 불필요). 이전 버전(1.4.0 · 1.3.0 등)을 쓰던 PC에 덮어 설치하면 데이터·설정은 그대로이고 고친 내용만 더해집니다. ERP 가 켜져 있으면 닫으라고 알려 줍니다 |
 | `google/Code.gs` | 구글 시트/드라이브 연동용 Apps Script |
 | `docs/CLAUDE_PROMPT.md` | 개발·확장용 마스터 프롬프트 |
 | `docs/PROMPT_v6_ECOUNT.md` | 6차 개정 프롬프트 (ECOUNT 자료로 품목·창고·재고 재구성) |
@@ -18,6 +18,7 @@
 | `docs/PROMPT_v10_PARTS.md` | 10차 개정 프롬프트 (Electron 44 · 빌드 도구 업데이트 · 설치 중 실행 감지 · 날짜 형식 안내) |
 | `docs/PROMPT_v11_FLOOR.md` | 11차 개정 프롬프트 (공정 중 현장 재고 실사 · 원부자재는 생산 반영으로 차감 안 함 · 배럴 계열 WIPx1 · BOM 사용량 교체) |
 | `docs/PROMPT_v12_MENUS.md` | 12차 개정 프롬프트 (메뉴 3개: 품목 / 현장 재고 / 원부자재 재고 · ECOUNT 비교 없앰 · 이름 미정 코드는 코드만) |
+| `docs/PROMPT_v13_PO_DONE.md` | 13차 개정 프롬프트 (수주 강제 완료: 수주 목록의 완료 버튼 · 완료 취소 · 납기 기준 일괄 완료) |
 | `docs/GUIDE_EXCEL_DATES.md` | **현장 일보 엑셀 날짜 칸 입력 안내** (한국어 · 베트남어, 반장 확인표 포함) |
 | `docs/history/` | 차수별 작업 기록 |
 | `app/` `server.js` `electron/` | 소스 코드 (비서: `app/js/assistant*.js`) |
@@ -38,6 +39,7 @@
    - 처음 한 번: `제품·BOM → 조립 BOM 자동 구성` → `확실한 부품만 모두 적용` (노랑 행은 드롭다운으로 부품을 골라 적용). 그다음 `현장 재고 → 생산 반영` 탭에서 "해결할 항목"을 0 으로 (일보 코드 ↔ 품목코드 연결, BOM 없는 생산품).
 4. 언어: 왼쪽 아래 **한국어 / Tiếng Việt** 버튼. **설정 → 붙여넣기 숫자 형식**: 엑셀에서 붙여넣은 수량이 1000배로 틀리면 바꾸세요 (자동 = 이 PC 형식, 베트남어 PC 는 35.000 = 3만 5천).
    - 수주 관리: Condition 칸이 취소(Cancle) · 보류(Di hold)인 줄은 진행 중 · 납기 경과에서 빠지고 **취소 · 보류** 탭에 모입니다.
+   - 수주 관리: 끝난 PO 는 수주 목록의 **완료** 버튼으로 닫습니다 (포장 실적과 상관없이 완료, 확인 창). 잘못 눌렀으면 **완료** 탭에서 **완료 취소**.
 5. **엑셀 업로드**: `엑셀·구글 연동 → 엑셀 업로드`에 파일을 여러 개 한 번에 끌어다 놓기 → 인식 결과·미리보기 확인(반영 방식·범위·날짜 수정) → **선택 항목 모두 반영** (직후 **되돌리기** 가능).
    - ECOUNT 품목등록 · 창고리스트 · 재고현황(창고/공장 자동 구분) · ERP CODE 설명, 수불 양식, KHO NVL 입출고장, 일일 생산일보(조립/스탬핑/리필/권취/포장), 이동전표, 수주(PO), BOM/배합표를 내용으로 인식합니다 (파일 이름은 보지 않음).
    - 위쪽 안내 상자에 자료별 마지막 업로드일이 나오고, 매일 올릴 자료가 밀리면 노란색으로 표시됩니다.
@@ -65,6 +67,7 @@ npm run server      # http://127.0.0.1:3210 (브라우저 테스트)
 npm start           # Electron 실행
 npm run demo        # dist/ERP_Demo.html
 npm run test:assistant   # 비서·화면·서버 자동 시험 (Playwright 필요: npm i -D playwright)
+npm run test:v13    # 13차 수주 강제 완료 · 완료 버튼 · 일괄 완료
 npm run test:v12    # 12차 메뉴 3개 · ECOUNT 비교 없음 · 이름 미정은 코드만
 npm run test:v11    # 11차 현장 실사 · 원부자재 차감 안 함 · 배럴 계열 · BOM 사용량
 npm run test:v9     # 9차 여러 PC 저장 합치기 · Host/Origin · 사내망 PIN · 자동 백업
