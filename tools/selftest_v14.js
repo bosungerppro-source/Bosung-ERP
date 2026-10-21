@@ -169,6 +169,25 @@ function ecountBook(rows) {
   });
 
   // ------------------------------------------------------------------------------------------
+  await sec('4-3. 완제품 번호로 적힌 포장 카톤(원부자재)에 포장 일보 생산량을 더하지 않음 (1.10.2)', async () => {
+    const r = await ev(async () => {
+      const C = ERP.calc, I = ERP.inv;
+      ERP.db.add('prod_log', { date: '2026-10-26', process: 'PCK', code: '68-7408-0-013', po_no: 'PO-T1', ok_qty: 50, ok_ea: 600, unit: 'set', source: 'history' });   // 같은 번호의 완제품 포장 실적
+      await ERP.db.flush();
+      const s = C.stock().get('68-7408-0-013'); const pp = I.prodPost();
+      return { s: [s.by.WH, s.by.FAC, s.bal, I.groupOf(s)], prod: pp.rows.filter(t => t.kind === 'PROD' && t.code === '68-7408-0-013').length,
+        mp: pp.diag.matProd ? (pp.diag.matProd.get('68-7408-0-013') || null) : 'none', nb: pp.diag.noBom.has('68-7408-0-013') };
+    });
+    eq('카톤 68-7408-0-013: 창고 20 · 공장 0 (포장 50 set 을 카톤 재고에 더하지 않음)', r.s, [20, 0, 20, 'mat']);
+    eq('생산 반영: 입고 0건 · 원부자재 코드 1행 50 set (정보만) · BOM 없는 생산품 목록에는 없음', [r.prod, r.mp, r.nb], [0, { n: 1, qty: 50 }, false]);
+    await ev(() => ERP.goStock('post'));
+    await A.waitForFunction(() => /생산일보 → 재고 자동 반영/.test(document.querySelector('main').innerText), null, { timeout: 15000 }).catch(() => {});
+    const t = await ev(() => document.querySelector('main').textContent);   // 접힌 칸(details) 안의 표도 본다
+    ok('생산 반영 화면: 원부자재 코드는 생산 입고하지 않음 (68-7408-0-013)', /원부자재 코드는 생산 입고하지 않음/.test(t) && /68-7408-0-013/.test(t), t.replace(/\s+/g, ' ').slice(0, 600));
+    await ev(() => { ERP.state.dataTab = 'import'; ERP.goto('data'); ERP.render(); }); await A.waitForTimeout(300);   // 6장은 자료 올리기 화면에서
+  });
+
+  // ------------------------------------------------------------------------------------------
   await sec('5. 수불 칸 (업체코드 · 용도 · Lot · 색깔)', async () => {
     const r = await ev(() => { const T = ERP.db.rows('stock_tx').filter(t => t.src === 'wh'); const f = (c, d) => { const t = T.find(x => x.code === c && x.date === d); return t ? { kind: t.kind, qty: t.qty, unit: t.unit, partner: t.partner, pc: t.partner_code, purpose: t.purpose || null, lot: t.lot || null, color: t.color || null, note: t.note || null, from: t.from_scope || null, to: t.to_scope || null } : null; };
       return { out: f('R-100', '2026-02-01'), gc: f('R-100', '2026-02-03'), in: f('R-100', '2026-01-05'), paper: f('R-302', '2026-01-08'), red: f('R-302', '2026-05-01'), mh: T.filter(t => t.code === 'MH').length, fgt: T.filter(t => t.code === 'FGT-001').map(t => t.kind + t.qty).join(), n: T.length }; });

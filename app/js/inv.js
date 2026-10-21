@@ -450,7 +450,7 @@
     opt = opt || {};
     const mode = opt.mode || INV.prodMode(); const od = INV.opening().date; const IT = INV.items(); const rmBy = INV.rmByName(); const MAP = INV.codeMap();
     const diag = { mode, open: od.FAC || od.WH || od.FLOOR || null, openFloor: od.FLOOR || null, considered: 0, before: 0, beforeFloor: 0, prod: 0, use: 0, mapped: 0, resin: 0,
-      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), similar: new Map(), bomSrc: {} };
+      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), matProd: new Map(), similar: new Map(), bomSrc: {} };
     // 원료 이름 → RM 품목: 사용자가 연결한 것(code_map raw)이 먼저, 그다음 이름이 같은 RM (차감하지 않고 진단에 이름만 쓴다)
     const rawItem = (name) => { const c = MAP.raw(name); const a = c ? IT.get(c) : null; return a || rmBy.get(normName(name)) || null; };
     const out = [];
@@ -478,6 +478,10 @@
         const rm = rawItem(r.raw_material); bump(diag.matSkip, rm ? rm.code : str(r.raw_material), num(r.raw_kg));
       };
       if (!item) { bump(diag.notItem, (r.process || '') + '|' + str(r.division) + '|' + (src || '(' + L('코드 없음', 'không mã') + ')'), pcs); resin(); return; }
+      // 1.10.2: 원부자재(원재료 · 부자재 · 소모품)에는 생산량을 입고하지 않는다 — 창고 입출고장에 완제품 번호로 적힌 포장 카톤이 원부자재 품목이 되어
+      //         같은 번호의 포장 일보와 겹친다. 진단(matProd)에만 일보 수량(포장은 set)을 남기고, BOM 현장 부품 차감은 예전처럼 한다.
+      const matIt = isMatItem(item);
+      if (matIt) bump(diag.matProd, item.code, setProc ? num(r.ok_qty) : pcs);
       const unit = INV.unitN(item.unit); const spc = num(item.set_per_ct), pps = num(item.pcs_per_set);
       let sets = setProc ? num(r.ok_qty) : (pps ? pcs / pps : null);
       let mainQ = null;
@@ -485,15 +489,16 @@
       else if (unit === 'SET') mainQ = sets;
       else if (unit === 'kg') mainQ = num(r.weight_kg) || null;
       else mainQ = pcs;
-      if (mainQ === null || !isFinite(mainQ)) { bump(diag.noConv, item.code, setProc ? num(r.ok_qty) : pcs); resin(); return; }
+      if (mainQ === null || !isFinite(mainQ)) { if (!matIt) bump(diag.noConv, item.code, setProc ? num(r.ok_qty) : pcs); resin(); return; }
       if (!mainQ) { resin(); return; }   // 양품 0 (전부 불량 · 시험 사출)
       const base = base0;
-      if (after(r.date, item)) { out.push(Object.assign({ kind: 'PROD', to_scope: 'FAC', code: item.code, name: item.name, qty: r4(mainQ), unit: INV.unitShow(item.unit) }, base)); diag.prod++; }
+      if (matIt) { /* 입고하지 않음 (위 matProd) */ }
+      else if (after(r.date, item)) { out.push(Object.assign({ kind: 'PROD', to_scope: 'FAC', code: item.code, name: item.name, qty: r4(mainQ), unit: INV.unitShow(item.unit) }, base)); diag.prod++; }
       else diag.beforeFloor++;   // 현장 실사일 이전 생산 — 실사 수량에 이미 들어 있다
       if (mode !== 'in_bom') return;
       if (r.process === 'INJ' && !bomIndex().lines.get(item.code)) { resin(); return; }
       const bm = bomOf(item, r.process, diag);
-      if (!bm || !bm.kids.length) { bump(diag.noBom, item.code, mainQ); return; }
+      if (!bm || !bm.kids.length) { if (!matIt) bump(diag.noBom, item.code, mainQ); return; }
       diag.bomSrc[bm.src] = (diag.bomSrc[bm.src] || 0) + 1;
       bm.kids.forEach(k => {
         const basisQ = k.basis === 'main' ? mainQ : k.basis === 'set' ? (sets !== null ? sets : (pps ? pcs / pps : null)) : (pcs || (sets !== null && pps ? sets * pps : 0));
