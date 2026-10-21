@@ -230,7 +230,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const bad = [];
     const look = async (name) => { await A.waitForTimeout(150); const t = await ev(() => document.querySelector('main').innerText); const m = t.match(/.{0,30}\b(null|undefined)\b.{0,30}/); if (m) bad.push(name + ': ' + m[0]); };
     for (const p of await ev(() => Object.keys(ERP.pages))) { await ev((x) => { ERP.goto(x); ERP.render(); }, p); await look(p); }
-    for (const t of ['log', 'entry', 'analysis', 'machines', 'procs']) { await ev((x) => { ERP.state.prodTab = x; ERP.goto('production'); ERP.render(); }, t); await look('production/' + t); }
+    for (const t of ['log', 'entry', 'analysis', 'monthly', 'machines', 'procs']) { await ev((x) => { ERP.state.prodTab = x; ERP.goto('production'); ERP.render(); }, t); await look('production/' + t); }
     for (const t of ['mrp', 'struct', 'asm', 'semi_stock', 'bom', 'recipes']) { await ev((x) => { ERP.state.bomTab = x; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }, t); await look('bom/' + t); }
     for (const t of ['import', 'google', 'backup']) { await ev((x) => { ERP.state.dataTab = x; ERP.goto('data'); ERP.render(); }, t); await look('data/' + t); }
     for (const t of ['items', 'warehouses', 'partners', 'stock_open', 'uploads']) { await ev((x) => { ERP.state.mst = { t: x }; ERP.goStock('master'); ERP.render(); }, t); await look('master/' + t); }

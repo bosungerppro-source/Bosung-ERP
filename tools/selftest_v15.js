@@ -496,6 +496,68 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     await ctx.close(); S3.close(); gsrv.close();
   });
 
+  // ------------------------------------------------------------------------------------------
+  await sec('11. 월별 조립 생산량 — 종합 현황 · 생산 관리 · 휴대폰 (1.10.1)', async () => {
+    const S5 = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir: tmp('erp-v15-m-'), host: '127.0.0.1', port: port0 + 900, backupDelay: 3600000 });
+    const ctx = await browser.newContext({ viewport: { width: 1480, height: 1000 } }); const A = await newPage(ctx);
+    await A.goto(S5.url + '/#/dashboard'); await ready(A); await A.waitForTimeout(800);
+    const d = await A.evaluate(() => {
+      const ids = Array.from(document.querySelectorAll('.wgrid .w')).map(e => e.getAttribute('data-id'));
+      const w = document.querySelector('.w[data-id=asm_monthly]'); const C = ERP.calc; const ref = C.latestProdDate(); const y = ref.slice(0, 4), mo = ref.slice(0, 7);
+      const asm = C.rowsBetween(y + '-01-01', y + '-12-31', 'ASM'); const sum = asm.reduce((a, r) => a + C.qty(r), 0), sumM = asm.filter(r => r.date.slice(0, 7) === mo).reduce((a, r) => a + C.qty(r), 0);
+      return { ids, title: w && w.querySelector('h2').textContent, y, sum, sumM, mi: +mo.slice(5, 7), tot: w ? Array.from(w.querySelectorAll('tbody tr.tot td')).map(td => td.textContent) : null };
+    });
+    ok('종합 현황 기본 배치: 일별 조립 생산량 바로 다음에 월별 조립 생산량', d.ids.indexOf('asm_monthly') === d.ids.indexOf('asm_daily') + 1 && d.ids.indexOf('asm_daily') >= 0, d.ids);
+    eq('위젯 제목', d.title, '월별 조립 생산량 · ' + d.y);
+    const num = (s) => Number(String(s || '').replace(/[^\d]/g, ''));
+    ok('연 합계 = 그해 조립 양품 합 · 이 달 칸 = 그 달 합 (예시 자료 ' + d.y + ')', d.sum > 0 && d.tot && num(d.tot[1]) === d.sum && num(d.tot[1 + d.mi]) === d.sumM, { tot: d.tot, sum: d.sum, sumM: d.sumM });
+    await A.click('.w[data-id=asm_monthly] .seg button:last-child'); await A.waitForTimeout(500);
+    ok('표 → 차트', await A.evaluate(() => !!document.querySelector('.w[data-id=asm_monthly] canvas')));
+    await A.click('.w[data-id=asm_monthly] .seg button:first-child'); await A.waitForTimeout(300);
+    await A.click('.w[data-id=asm_monthly] .wnav button[aria-label=prev]'); await A.waitForTimeout(300);
+    ok('‹ → 전년', await A.evaluate((y) => document.querySelector('.w[data-id=asm_monthly] h2').textContent.includes(String(y - 1)), +d.y));
+    // 저장한 배치 (월별 없음) → 한 번만 일별 아래에, 사용자가 빼면 다시 넣지 않음
+    const mig = await A.evaluate(async () => {
+      const DB = ERP.db; DB.setSetting('dash', [{ k: 'a', id: 'kpi_due', w: 1 }, { k: 'b', id: 'asm_daily', w: 4 }, { k: 'c', id: 'flow', w: 2 }]); DB.setSetting('dashAsmMonthly', false); await DB.flush();
+      ERP.render(); await new Promise(r => setTimeout(r, 300)); const ids1 = ERP.dashLayout().map(x => x.id);
+      DB.setSetting('dash', ERP.dashLayout().filter(x => x.id !== 'asm_monthly').map(x => ({ k: x.k, id: x.id, w: x.w }))); await DB.flush();
+      ERP.render(); await new Promise(r => setTimeout(r, 300)); return { ids1, ids2: ERP.dashLayout().map(x => x.id), flag: DB.setting('dashAsmMonthly') };
+    });
+    eq('저장한 배치에 한 번 넣음 (일별 다음)', mig.ids1, ['kpi_due', 'asm_daily', 'asm_monthly', 'flow']);
+    eq('사용자가 빼면 다시 넣지 않음', [mig.ids2, mig.flag], [['kpi_due', 'asm_daily', 'flow'], true]);
+    // 생산 관리: 일별 · 월별 조립 생산량 탭
+    await A.evaluate(() => { ERP.state.prodTab = 'analysis'; ERP.state.pan = null; ERP.state.pmon = null; location.hash = '#/production'; ERP.render(); }); await A.waitForTimeout(700);
+    const tabs = await A.evaluate(() => Array.from(document.querySelectorAll('.tabs .tab')).map(t => t.textContent));
+    ok('생산 관리 탭: 일별 조립 생산량 · 월별 조립 생산량', tabs.includes('일별 조립 생산량') && tabs.includes('월별 조립 생산량'), tabs);
+    const dailyTot = await A.evaluate(() => { const t = document.querySelector('main table.tbl'); const tr = t && Array.from(t.querySelectorAll('tbody tr')).pop(); return tr ? tr.lastChild.textContent : null; });   // 첫 표 = 날짜별 표, 마지막 줄 = 월 합계
+    await A.evaluate(() => { ERP.state.prodTab = 'monthly'; ERP.render(); }); await A.waitForTimeout(900);
+    const mt = await A.evaluate(() => { const ref = ERP.calc.latestProdDate(); const trs = Array.from(document.querySelectorAll('main table.tbl tbody tr'));
+      return { h2: document.querySelector('main .card h2').textContent, n: trs.length, month: trs[+ref.slice(5, 7) - 1] ? trs[+ref.slice(5, 7) - 1].lastChild.textContent : null, year: ref.slice(0, 4), chart: !!document.querySelector('main canvas'), kpi: document.querySelector('main .kpis').innerText }; });
+    ok('월별 조립 생산량 탭: 1~12월 + 연 합계 · 제목 · 막대 · 연 생산량 · 가장 많은 달', mt.n === 13 && mt.h2 === '월별 조립 생산량 · ' + mt.year && mt.chart && /가장 많은 달/.test(mt.kpi) && mt.kpi.includes(mt.year + '년 조립 생산량'), mt);
+    eq('이 달 칸 = 일별 조립 생산량 탭의 월 합계', num(mt.month), num(dailyTot));
+    ok('연 합계 = 그해 조립 합', await A.evaluate((s) => Number(Array.from(document.querySelectorAll('main table.tbl tbody tr')).pop().lastChild.textContent.replace(/[^\d]/g, '')) === s, d.sum));
+    await A.selectOption('main .toolbar select:nth-of-type(2)', 'INJ'); await A.waitForTimeout(800);
+    ok('공정을 바꾸면 탭 이름 · 제목도 (월별 사출 생산량)', await A.evaluate(() => Array.from(document.querySelectorAll('.tabs .tab')).some(t => t.textContent === '월별 사출 생산량') && /월별 사출 생산량/.test(document.querySelector('main .card h2').textContent)));
+    await A.evaluate(() => { ERP.state.pmon = null; ERP.setLang('vi'); }); await A.waitForTimeout(500);
+    const vi = await A.evaluate(() => document.querySelector('main').innerText);
+    ok('베트남어 · null 없음', /theo tháng/.test(vi) && !/\bnull\b|undefined/.test(vi));
+    await A.evaluate(() => ERP.setLang('ko'));
+    // 휴대폰: 요약 · 화면
+    const sumJson = JSON.stringify(await A.evaluate(() => ERP.mobileSummary())); const sm = JSON.parse(sumJson);
+    ok('휴대폰 요약: 일별 · 월별 조립 생산량 (품목군별, 숫자 같음)', sm.asmDaily && sm.asmDaily.days.length > 0 && sm.asmDaily.grand === d.sumM && sm.asmMonthly && sm.asmMonthly.total.length === 12 && sm.asmMonthly.grand === d.sum && sm.asmMonthly.divs.length > 0, { ad: sm.asmDaily && sm.asmDaily.grand, am: sm.asmMonthly && sm.asmMonthly.grand, d });
+    const G = gas(); const html = G.c.doGet({ parameter: {} }).getContent().replace('<head>', '<head><meta name="viewport" content="width=device-width, initial-scale=1">');
+    const ps = http.createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); r.end(html); }); await new Promise(r => ps.listen(0, '127.0.0.1', r));
+    const P = await browser.newContext(PHONE); const M = await newPage(P);
+    await M.addInitScript((data) => { window.google = { script: { run: { withSuccessHandler(ok) { return { withFailureHandler() { return { mobileData() { setTimeout(() => ok({ ok: true, data }), 10); } }; } }; } } } }; }, sumJson);
+    await M.goto('http://127.0.0.1:' + ps.address().port + '/'); await M.fill('input[type=password]', 'secret12'); await M.click('button.btn.p'); await M.waitForTimeout(500);
+    const ph = await M.evaluate(() => ({ t: document.body.innerText, sw: document.documentElement.scrollWidth, iw: innerWidth }));
+    ok('휴대폰 화면: 일별 조립 생산량 · 월별 조립 생산량 표 · 폭 맞음 · null 없음', /일별 조립 생산량/.test(ph.t) && /월별 조립 생산량/.test(ph.t) && ph.t.includes(Number(d.sum).toLocaleString('ko-KR')) && ph.sw <= 391 && !/\bnull\b|undefined|NaN/.test(ph.t), { sw: ph.sw, t: ph.t.slice(0, 200) });
+    // 생산 관리 월별 탭도 휴대폰 폭에 맞음
+    const Q = await newPage(P); await Q.goto(S5.url + '/#/production'); await ready(Q); await Q.evaluate(() => { ERP.state.prodTab = 'monthly'; ERP.render(); }); await Q.waitForTimeout(800);
+    ok('월별 조립 생산량 탭 휴대폰 폭(390)', (await fits(Q)).sw <= 391, await fits(Q));
+    await P.close(); await ctx.close(); ps.close(); S5.close();
+  });
+
   ok('화면 오류 없음', !errors.length, errors.slice(0, 5));
   await browser.close(); S.close(); S0.close(); gh.close();
   console.log('\n' + (fail ? '✗ 실패 ' + fail + '건' : '✓ 모두 통과') + '  (통과 ' + pass + ' / 전체 ' + (pass + fail) + ')');

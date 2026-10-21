@@ -158,6 +158,44 @@
       return box(L('일별 ' + p.ko + ' 생산량 · ', 'Sản lượng ' + p.vi + ' theo ngày · ') + mm, right, body,
         h('p', { class: 'help', style: { margin: '8px 0 0' } }, L('월 합계 ', 'Tổng tháng ') + F.n(grand) + ' ' + u + ' · ' + L('입력된 날 ', 'Số ngày có dữ liệu ') + active + L('일 · 일 평균 ', ' · TB/ngày ') + F.n(active ? grand / active : 0) + ' ' + u + ' · ' + L('생산일보 양품 기준', 'theo SL đạt của báo cáo')));
     } });
+  /** 1.10.1: 한 해의 달별 · 품목군별 생산량 (양품, 포장 · 세트 공정은 세트) — 종합 현황 '월별 조립 생산량' · 휴대폰 요약 */
+  ERP.prodByMonth = function (p, year) {
+    const rows = C.rowsBetween(year + '-01-01', year + '-12-31', p.id);
+    const canon = new Map(); const keyOf = (d) => { const raw = String(d || '').trim(); const k = raw.toLowerCase() || '–'; if (!canon.has(k)) canon.set(k, raw || L('(품목군 없음)', '(không nhóm)')); return k; };
+    const cell = {}, tot = {}, mTot = new Array(12).fill(0), days = new Array(12).fill(0).map(() => new Set()); let grand = 0;
+    rows.forEach(r => { const mi = +String(r.date).slice(5, 7) - 1; if (!(mi >= 0 && mi < 12)) return; const k = keyOf(r.division); const q = (p.id === 'PCK' || p.unit === 'set') ? C.num(r.ok_qty) : C.qty(r);
+      (cell[k] = cell[k] || new Array(12).fill(0))[mi] += q; tot[k] = (tot[k] || 0) + q; mTot[mi] += q; grand += q; days[mi].add(r.date); });
+    return { divs: Object.keys(tot).sort((a, b) => tot[b] - tot[a]).map(k => ({ k, label: canon.get(k), m: cell[k], t: tot[k] })), mTot, grand, days: days.map(s => s.size) };
+  };
+  /** 1.10.1: 한 달의 날짜별 · 품목군별 생산량 (일별 조립 생산량 위젯과 같은 계산) — 휴대폰 요약 */
+  ERP.prodByDay = function (p, ym) {
+    const to = F.addDays(addM(ym, 1) + '-01', -1); const rows = C.rowsBetween(ym + '-01', to, p.id);
+    const canon = new Map(); const keyOf = (d) => { const raw = String(d || '').trim(); const k = raw.toLowerCase() || '–'; if (!canon.has(k)) canon.set(k, raw || L('(품목군 없음)', '(không nhóm)')); return k; };
+    const cell = {}, tot = {}, dTot = {}; let grand = 0;
+    rows.forEach(r => { const k = keyOf(r.division); const q = (p.id === 'PCK' || p.unit === 'set') ? C.num(r.ok_qty) : C.qty(r); (cell[k] = cell[k] || {})[r.date] = (cell[k][r.date] || 0) + q; tot[k] = (tot[k] || 0) + q; dTot[r.date] = (dTot[r.date] || 0) + q; grand += q; });
+    const days = Object.keys(dTot).sort();
+    return { days, divs: Object.keys(tot).sort((a, b) => tot[b] - tot[a]).map(k => ({ k, label: canon.get(k), vals: days.map(d => cell[k][d] || 0), t: tot[k] })), dTot: days.map(d => dTot[d]), grand };
+  };
+  // 1.10.1: 월별 조립 생산량 (일별 조립 생산량과 짝) — 품목군 × 1~12월, ‹ › 로 연도, 표/차트
+  reg('asm_monthly', { ko: '월별 조립 생산량 (연)', vi: 'Sản lượng lắp ráp theo tháng (năm)', dko: '한 해 동안 달별 · 품목군별 조립 양품 수량(pcs). ‹ › 로 연도 이동, 표/차트 전환', dvi: 'Sản lượng lắp ráp theo tháng · nhóm hàng trong năm', cat: 'prod', w: 4, sizes: [2, 3, 4], multi: true, defaults: { proc: 'ASM', view: 'table' },
+    opts: [{ k: 'proc', ko: '공정 (기본 조립)', vi: 'Công đoạn (mặc định lắp ráp)', options: procOpts }],
+    render(ctx, inst) {
+      const o = inst.o || {}; const p = procById(o.proc || 'ASM'); const view = o.view || 'table';
+      const S = wstate(inst.k, { year: +ctx.ref.slice(0, 4) }); const y = S.year;
+      const d = ERP.prodByMonth(p, y); const u = unitOf(p); const mLabel = (i) => L((i + 1) + '월', 'T' + (i + 1));
+      const right = [nav(String(y), () => { S.year--; ERP.render(); }, () => { S.year++; ERP.render(); }),
+        seg([['table', L('표', 'Bảng')], ['chart', L('차트', 'Biểu đồ')]], view, (v) => { setOpt(inst.k, { view: v }); })];
+      let body;
+      if (!d.divs.length) body = h('div', { class: 'empty' }, L(y + '년에 입력된 ' + p.ko + ' 일보가 없습니다.', 'Không có báo cáo ' + p.vi + ' năm ' + y + '.'));
+      else if (view === 'chart') body = ERP.chart({ type: 'bar', data: { labels: d.mTot.map((x, i) => mLabel(i)), datasets: d.divs.map((r, i) => ({ label: r.label, data: r.m, backgroundColor: ERP.palette[i % ERP.palette.length], stack: 's' })) }, options: { scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: short } } } } }, true);
+      else body = h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl dt' },
+        h('thead', h('tr', h('th', L('품목군 \\ 월', 'Nhóm \\ tháng')), h('th', { class: 'num' }, y + L(' 합계', ' tổng')), d.mTot.map((x, i) => h('th', { class: 'num' }, mLabel(i))))),
+        h('tbody', d.divs.map(r => h('tr', h('td', h('b', r.label)), h('td', { class: 'num' }, h('b', F.n(r.t))), r.m.map(v => h('td', { class: 'num' }, v ? F.n(v) : h('span', { class: 'muted' }, '·'))))),
+          h('tr', { class: 'tot' }, h('td', L('월 합계', 'Tổng tháng')), h('td', { class: 'num' }, F.n(d.grand)), d.mTot.map(v => h('td', { class: 'num' }, v ? F.n(v) : '·'))))));
+      const act = d.mTot.filter(v => v > 0).length;
+      return box(L('월별 ' + p.ko + ' 생산량 · ', 'Sản lượng ' + p.vi + ' theo tháng · ') + y, right, body,
+        h('p', { class: 'help', style: { margin: '8px 0 0' } }, y + L('년 합계 ', ' tổng ') + F.n(d.grand) + ' ' + u + ' · ' + L('입력된 달 ', 'Số tháng có dữ liệu ') + act + L('개 · 월 평균 ', ' · TB/tháng ') + F.n(act ? d.grand / act : 0) + ' ' + u + ' · ' + L('생산일보 양품 기준', 'theo SL đạt của báo cáo')));
+    } });
   reg('trend30', { ko: '공정별 생산 추이 (30일)', vi: 'Xu hướng sản lượng (30 ngày)', dko: '최근 30일 공정별 일 생산량 (pcs 환산) 선 그래프', dvi: 'Biểu đồ 30 ngày theo công đoạn', cat: 'prod', w: 2, sizes: [2, 3, 4],
     render(ctx) { const ds = C.dailySeries(F.addDays(ctx.ref, -29), ctx.ref);
       return box(L('공정별 생산 추이 (최근 30일, pcs 환산)', 'Sản lượng 30 ngày (quy đổi pcs)'), null, ERP.chart({ type: 'line', data: { labels: ds.days.map(d => F.md(d)), datasets: ERP.PROC.map(p => ({ label: L(p.ko, p.vi), data: ds.series[p.id], borderColor: p.color, backgroundColor: p.color, borderWidth: 1.8, pointRadius: 0, tension: .25 })) }, options: { scales: { y: { ticks: { callback: short } }, x: { ticks: { maxTicksLimit: 10 } } } } }, true)); } });
@@ -241,12 +279,20 @@
       return h('section', { class: 'card wcard memo' }, h('div', { class: 'card-head' }, h('h2', '🗒 ' + L('메모', 'Ghi chú'))), ta); } });
 
   // ---------------------------------------------------------------- layout (saved in settings)
-  const DEFAULT = () => [['kpi_pck_day', 1], ['kpi_pck_month', 1], ['kpi_due', 1], ['kpi_low', 1], ['procs', 4], ['asm_daily', 4], ['po_monthly', 2], ['due_list', 2], ['low_list', 2], ['flow', 2], ['fresh', 2], ['input7', 2]]
+  const DEFAULT = () => [['kpi_pck_day', 1], ['kpi_pck_month', 1], ['kpi_due', 1], ['kpi_low', 1], ['procs', 4], ['asm_daily', 4], ['asm_monthly', 4], ['po_monthly', 2], ['due_list', 2], ['low_list', 2], ['flow', 2], ['fresh', 2], ['input7', 2]]
     .map(([id, w], i) => ({ k: id + '-' + i, id, w, o: W[id].defaults ? JSON.parse(JSON.stringify(W[id].defaults)) : undefined }));
   ERP.dashDefault = DEFAULT;
   ERP.dashCtx = makeCtx; ERP.dashPrevMonth = prevMonthWindow;   // 15차: 휴대폰 요약(mobile.js)이 같은 숫자를 쓰게
   const clampW = (w, def) => { const s = def.sizes; if (s.includes(w)) return w; return s.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a), s[0]); };
-  function layout() { const l = DB.setting('dash', null); const arr = Array.isArray(l) && l.length ? l.filter(x => x && W[x.id]) : DEFAULT(); return arr.map(x => Object.assign({}, x, { o: x.o ? Object.assign({}, x.o) : (W[x.id].defaults ? JSON.parse(JSON.stringify(W[x.id].defaults)) : undefined) })); }
+  function layout() {
+    const l = DB.setting('dash', null); let arr = Array.isArray(l) && l.length ? l.filter(x => x && W[x.id]) : DEFAULT();
+    // 1.10.1: 저장한 배치에 '월별 조립 생산량' 이 없으면 한 번만 '일별 조립 생산량' 아래에 넣는다 (그 뒤 사용자가 빼면 다시 넣지 않음)
+    if (Array.isArray(l) && l.length && !DB.setting('dashAsmMonthly', false)) {
+      if (!arr.some(x => x.id === 'asm_monthly')) { const i = arr.findIndex(x => x.id === 'asm_daily'); arr = arr.slice(); arr.splice(i < 0 ? arr.length : i + 1, 0, { k: 'asm_monthly-' + Date.now().toString(36), id: 'asm_monthly', w: 4 }); save(arr); }
+      DB.setSetting('dashAsmMonthly', true);
+    }
+    return arr.map(x => Object.assign({}, x, { o: x.o ? Object.assign({}, x.o) : (W[x.id].defaults ? JSON.parse(JSON.stringify(W[x.id].defaults)) : undefined) }));
+  }
   function save(l) { DB.setSetting('dash', l.map(x => { const o = { k: x.k, id: x.id, w: x.w }; if (x.o && Object.keys(x.o).length) o.o = x.o; return o; })); }
   ERP.dashLayout = layout; ERP.dashSave = save;
   function setOpt(k, patch, quiet) { const l = layout(); const x = l.find(y => y.k === k); if (!x) return; x.o = Object.assign({}, x.o || {}, patch); save(l); if (!quiet) ERP.render(); }

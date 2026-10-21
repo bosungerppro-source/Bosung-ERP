@@ -187,7 +187,8 @@
 
   const openRows = () => DB.memo('inv.open', ['stock_open'], () => {
     // 11차: grp 'floor' = 현장 실사(TỒN KHO) 로 올린 공정 중 재고 — ECOUNT 기초재고(창고 · 공장)와 따로 모은다
-    const by = { WH: new Map(), FAC: new Map() }, floor = new Map(), date = { WH: null, FAC: null, FLOOR: null }, n = { WH: 0, FAC: 0, FLOOR: 0 };
+    // 1.10.1: whl = 창고 입출고장 기초재고(grp 'wh') — 현장 실사가 있어도 공정 중 품목의 창고 재고는 이것으로 (외주에서 받아 창고에 있는 반제품)
+    const by = { WH: new Map(), FAC: new Map() }, floor = new Map(), whl = new Map(), date = { WH: null, FAC: null, FLOOR: null }, n = { WH: 0, FAC: 0, FLOOR: 0 };
     const add = (m, r, c) => {
       const o = m.get(c) || { qty: 0, sets: null, pcs: null, unit: r.unit, name: r.name };
       o.qty += num(r.qty);
@@ -199,18 +200,22 @@
       const c = str(r.code); if (!c) return;
       const sc = r.grp === 'floor' ? 'FLOOR' : r.scope === 'FAC' ? 'FAC' : 'WH';
       add(sc === 'FLOOR' ? floor : by[sc], r, c); n[sc]++;
+      if (sc === 'WH' && r.grp === 'wh') add(whl, r, c);
       if (r.date && (!date[sc] || r.date > date[sc])) date[sc] = r.date;
     });
-    return { by, floor, max: date, n };
+    return { by, floor, whl, max: date, n };
   });
   /** 기초재고: 범위별 수량 + 기준일. 기준일은 설정(meta.openDate, 기초재고를 올릴 때 저장)이 이기고, 없으면 행 날짜의 최댓값 —
       행 하나를 나중 날짜로 더하거나 고쳐도 그 범위 전체의 기준일이 바뀌지 않는다. FLOOR = 현장 실사 기준일 (현장 실사 행이 있을 때만) */
   INV.opening = () => { const o = openRows(); const md = DB.meta.openDate || {};
-    return { by: o.by, floor: o.floor, n: o.n, max: o.max, date: { WH: md.WH || o.max.WH, FAC: md.FAC || o.max.FAC, FLOOR: o.n.FLOOR ? (md.FLOOR || o.max.FLOOR) : null } }; };
+    return { by: o.by, floor: o.floor, whl: o.whl, n: o.n, max: o.max, date: { WH: md.WH || o.max.WH, FAC: md.FAC || o.max.FAC, FLOOR: o.n.FLOOR ? (md.FLOOR || o.max.FLOOR) : null } }; };
   /** 현장 실사(공정 중 재고)를 올렸는가 */
   INV.floorActive = () => INV.opening().n.FLOOR > 0;
-  /** 이 품목의 기준일 {WH, FAC}: 현장 실사가 있으면 공정 중 품목은 현장 실사일, 그 밖(원부자재 · 포장품)은 ECOUNT 기초재고 기준일 */
-  INV.openDateFor = (m) => { const d = INV.opening().date; return d.FLOOR && m && INV.inProcess(m) ? { WH: d.FLOOR, FAC: d.FLOOR } : { WH: d.WH, FAC: d.FAC }; };
+  /** 이 품목의 기준일 {WH, FAC}: 현장 실사가 있으면 공정 중 품목은 현장 실사일, 그 밖(원부자재 · 포장품)은 ECOUNT 기초재고 기준일.
+      1.10.1: 공정 중 품목이라도 창고 입출고장에 있으면(외주에서 받아 창고에 있는 것) 창고 칸은 창고 입출고장 기준일 */
+  INV.openDateFor = (m) => { const op = INV.opening(), d = op.date;
+    if (!(d.FLOOR && m && INV.inProcess(m))) return { WH: d.WH, FAC: d.FAC };
+    return { WH: m.code && op.whl.has(str(m.code)) ? d.WH : d.FLOOR, FAC: d.FLOOR }; };
   /** 이동 전표 등 자동 수불의 날짜: 오늘 — 단, 오늘이 기초재고 기준일 이전 · 당일이면 기준일 다음 날 (기준일 당일 수불은 기초재고에 들어 있다고 보므로) */
   INV.suggestDate = () => { const od = INV.openDates(); const t = F.today(); return !od.any || t > od.any ? t : F.addDays(od.any, 1); };
   /** 계산 캐시 키에 넣는 값: 기초재고 기준일(현장 실사 포함) · 공정 단위 (설정만 바뀌어도 다시 계산되게) */
@@ -529,9 +534,12 @@
       };
       ['WH', 'FAC'].forEach(sc => op.by[sc].forEach((o, c) => { const s = get(c); if (!floorItem(s)) open(s, sc, o); }));
       op.floor.forEach((o, c) => { const s = get(c); s.floorOpen = true; open(s, 'FAC', o); });
+      // 1.10.1: 공정 중 품목의 창고 칸 = 창고 입출고장 기초재고 + 그 뒤 입출고 (공장 칸은 현장 실사) — 외주에서 받아 창고에 있는 반제품
+      const odWF = { WH: od.WH, FAC: od.FLOOR };
+      op.whl.forEach((o, c) => { const s = get(c); if (floorItem(s)) { s.whlOpen = true; open(s, 'WH', o); } });
       const apply = (t) => {
         if (!t.code || (upTo && t.date > upTo)) return;
-        const s = get(t.code); let any = false; const odS = floorItem(s) ? odF : od;
+        const s = get(t.code); let any = false; const odS = floorItem(s) ? (s.whlOpen ? odWF : odF) : od;
         INV.effects(t).forEach(([sc, q]) => { if (!counts(t.date, sc, odS)) return; s.by[sc] += q; any = true; });
         if (!any) return;
         const q = num(t.qty);
@@ -577,15 +585,16 @@
   // ------------------------------------------------------------------ ledger (수불부)
   INV.ledger = function (code) {
     const m = INV.item(code); const key = m ? m.code : str(code); const op = INV.opening();
-    // 11차: 현장 실사가 있는 공정 중 품목은 현장 실사 수량 · 기준일에서 시작한다
-    const fl = op.n.FLOOR > 0 && !!op.date.FLOOR && !!m && INV.inProcess(m); const od = fl ? { WH: op.date.FLOOR, FAC: op.date.FLOOR } : op.date;
+    // 11차: 현장 실사가 있는 공정 중 품목은 현장 실사 수량 · 기준일에서 시작한다 (1.10.1: 창고 입출고장에 있으면 창고 칸은 그 기초재고 · 기준일)
+    const fl = op.n.FLOOR > 0 && !!op.date.FLOOR && !!m && INV.inProcess(m); const wl = fl ? op.whl.get(key) : null;
+    const od = fl ? { WH: wl ? op.date.WH : op.date.FLOOR, FAC: op.date.FLOOR } : op.date;
     const evs = [];
     DB.rows('stock_tx').forEach(t => { const it = t.code ? INV.item(t.code) : null; if ((it ? it.code : str(t.code)) === key) evs.push(Object.assign({ _manual: true }, t)); });
     INV.prodPost().rows.forEach(t => { if (t.code === key) evs.push(t); });
     evs.sort((a, b) => String(a.date).localeCompare(String(b.date)) || ((a.kind === 'PROD' ? 0 : 1) - (b.kind === 'PROD' ? 0 : 1)));
-    const ow = fl ? null : op.by.WH.get(key), of = fl ? op.floor.get(key) : op.by.FAC.get(key);
+    const ow = fl ? wl : op.by.WH.get(key), of = fl ? op.floor.get(key) : op.by.FAC.get(key);
     const bal = { WH: ow ? ow.qty : 0, FAC: of ? of.qty : 0 };
-    const rows = [{ open: true, floor: fl, date: fl ? op.date.FLOOR : (od.WH || od.FAC || ''), kind: 'OPEN', wh: bal.WH, fac: bal.FAC, balWH: bal.WH, balFAC: bal.FAC, bal: bal.WH + bal.FAC }];
+    const rows = [{ open: true, floor: fl, date: fl && !wl ? op.date.FLOOR : (od.WH || od.FAC || ''), kind: 'OPEN', wh: bal.WH, fac: bal.FAC, balWH: bal.WH, balFAC: bal.FAC, bal: bal.WH + bal.FAC }];
     evs.forEach(t => {
       const eff = { WH: 0, FAC: 0 }; let before = true;
       INV.effects(t).forEach(([sc, q]) => { if (counts(t.date, sc, od)) { eff[sc] += q; before = false; } });

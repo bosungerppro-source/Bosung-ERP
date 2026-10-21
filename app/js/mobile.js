@@ -23,6 +23,7 @@
     let run = 0, tot = 0; procs.forEach(p => { const r = ctx.machRun(p.id); run += r; tot += Math.max(ctx.machTotal(p.id), r); });
     const day = C.agg(ctx.dayRows); const inv = ERP.inv.rows();
     const days = []; for (let i = 0; i < 14; i++) days.push(F.addDays(ref, -i));
+    const asm = ERP.PROC.find(p => p.id === 'ASM') || null;
     return {
       v: 1, app: 'colorpencil-erp', erp: ERP.v, at: new Date().toISOString(), ref, today: F.today(),
       kpi: {
@@ -43,6 +44,9 @@
         .map(s => ({ code: s.code, name: s.name || '', bal: Math.round(s.bal * 10) / 10, prim: s.prim || '', safety: s.safety || 0, neg: s.status === 'neg' })),
       daily: { days, procs: procs.map(p => Object.assign(pinfo(p), { vals: days.map(d => valOf(p, C.agg((ctx.ix.byDate.get(d) || []).filter(r => r.process === p.id)))) })) },
       month: procs.map(p => Object.assign(pinfo(p), { val: valOf(p, ctx.monthAgg(p.id, ctx.mStart, ref)), prev: valOf(p, ctx.monthAgg(p.id, pw[0], pw[1])) })),
+      // 1.10.1: 일별 · 월별 조립 생산량 (종합 현황 위젯과 같은 계산, 품목군별)
+      asmDaily: asm ? (() => { const d = ERP.prodByDay(asm, ref.slice(0, 7)); return Object.assign(pinfo(asm), { month: ref.slice(0, 7), days: d.days, total: d.dTot, divs: d.divs.map(x => ({ label: x.label, vals: x.vals, t: x.t })), grand: d.grand }); })() : null,
+      asmMonthly: asm ? (() => { const y = +ref.slice(0, 4); const d = ERP.prodByMonth(asm, y); return Object.assign(pinfo(asm), { year: y, total: d.mTot, divs: d.divs.map(x => ({ label: x.label, m: x.m, t: x.t })), grand: d.grand }); })() : null,
     };
   };
 

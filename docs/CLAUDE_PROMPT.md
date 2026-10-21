@@ -224,7 +224,8 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 
 **규칙 (이후 버전에서도 지킬 것)**
 - **열**: A 전표번호 쓰지 않음 · C 입출고일 · D 업체코드 → `partner_code` · E 업체 → `partner` · F 품목코드 · G 세관신고 코드 → 품목 `xnk` · H 품목명 (베트남어 → 한국어 `EC.viToKo`, 원문 `name_vn`) · I 내용 → `purpose` · `lot` · `color` · `note` (`EC.splitContent`) · J 개당 kg → `kg_per_ea` · L/M 입고 · N/O 출고 · P/Q 기말 재고 (품목마다 같은 값).
-- **품목 맞추기** (`resolveWh`, 반영할 때): 같은 코드 원부자재 → 제품번호(마지막 마디 0xx)로 적은 카톤 · 케이스는 Mã XNK + 앞 3마디가 같은 원부자재 하나 → 그 밖은 새 품목 (출고 내용 NL → RM kg, vật tư → SM 개). 한 ERP 품목에 창고 코드 둘 이상이면 합치지 않는다 (`pairs` 로 알림). 같은 코드가 FG · SG · WIP 면 원부자재로 넣지 않는다.
+- **품목 맞추기** (`resolveWh`, 반영할 때): 같은 코드 원부자재 → 제품번호(마지막 마디 0xx)로 적은 카톤 · 케이스는 Mã XNK + 앞 3마디가 같은 원부자재 하나 → 그 밖은 새 품목 (출고 내용 NL → RM kg, vật tư → SM 개). 한 ERP 품목에 창고 코드 둘 이상이면 합치지 않는다 (`pairs` 로 알림 — 사용자가 2026-10-21 네 쌍 모두 다른 물건으로 확인). 같은 코드가 **반제품(WIP · SG)이면 그 품목의 창고 재고**로 넣고 (1.10.1, `how: 'floor'` — 외주에서 받아 창고에 있는 반제품), **완제품(FG)이면 넣지 않는다** (창고는 완제품 번호로 포장 카톤을 적음).
+- **공정 중 품목의 창고 칸 (1.10.1)**: 현장 실사가 있어도 창고 입출고장 기초재고(grp 'wh')가 있는 공정 중 품목은 창고 칸 = 그 기초재고 + 창고 기준일 뒤 입출고, 공장 칸 = 현장 실사 (`INV.opening().whl`). 현장으로 분출 = 이동(창고 → 공장).
 - **기초재고**: WH, 첫 입출고일 전날, 기말 − 입고 + 출고 (품목 단위로 환산), 마이너스면 0 + 마지막 날 ADJ (`purpose: '기말 재고 맞춤'`). 0 인 품목도 줄을 만든다. `grp: 'wh'`, `meta.openDate.WH` = 그 날.
 - **출고 = 창고 → 외부** (원부자재 재고에서 빠짐, 생산 투입 포함 — 11차 규칙과 맞춤). `src: 'wh'`, 다시 올리면 같은 기간을 바꾼다.
 - **ECOUNT 재고현황**: ERP CODE · Mã XNK 칸이 있으면 품목 작업(`ecount_items_stock`, 있는 칸만 · 숨김 후보 없음). 창고 입출고장과 같이 올리거나 `grp: 'wh'` 기초재고가 있으면 방식 `fill` — 기초재고가 있는 품목은 그대로, 없는 품목만 (마이너스 0, 현장 실사가 있으면 공정 중 품목은 뺌), `grp: 'fill'`.
@@ -241,4 +242,5 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **업데이트 API**: `GET /api/update` (보기 — 다른 PC 도), `PUT /api/update` · `POST /api/update/check` · `POST /api/update/install` 은 loopback 만.
 - **휴대폰 (공장 Wi-Fi)**: 사내망 접속 그대로. 화면은 휴대폰 폭(390)에서 옆으로 밀리지 않게 만든다 — 새 화면 · 카드를 만들면 `npm run test:v15` 의 휴대폰 폭 시험에 넣는다 (`white-space: nowrap` 은 좁은 화면에서 풀리게, 넓은 표는 `.tbl-wrap` 안에서 옆으로). 900px 이하는 메뉴를 [☰] 로 접는다.
 - **휴대폰 (공장 밖, 구글 웹 앱 Code.gs 4판)**: 요약 `ERP.mobileSummary()` 는 종합 현황과 같은 계산 (`ERP.dashCtx`) — 종합 현황 숫자를 바꾸면 요약도 같이 바뀐다. 이 PC 만 15분마다 보냄 (`mobileOn`). 비밀번호는 구글 쪽 해시로만, ERP 에 남기지 않는다. 휴대폰 화면 글자는 textContent 로만.
-- 시험: `npm run test:v15` 138개 + GitHub Actions "자동 업데이트 시험 (Windows)" (`tools/update_e2e.js` — 실제 설치 프로그램 · Electron) + v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.
+- **월별 조립 생산량 (1.10.1)**: 종합 현황 위젯 `asm_monthly` (기본 배치에서 `asm_daily` 다음, 저장한 배치에는 `meta.dashAsmMonthly` 로 한 번만 넣음) · 생산 관리 탭 `analysis` (일별) · `monthly` (월별) · 휴대폰 요약 `asmDaily` · `asmMonthly`. 일별과 월별은 항상 같이 둔다 (사용자가 둘 다 요구).
+- 시험: `npm run test:v15` 155개 + GitHub Actions "자동 업데이트 시험 (Windows)" (`tools/update_e2e.js` — 실제 설치 프로그램 · Electron) + v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.

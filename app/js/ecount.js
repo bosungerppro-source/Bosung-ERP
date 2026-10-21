@@ -541,18 +541,26 @@
       const keep = keys.find(k => pick1.get(k).how === 'code') || keys[0];
       keys.forEach(k => { if (k === keep) return; const v = pick1.get(k); pairs.push({ code: S0.items.get(k).F, to: v.it.code }); v.it = null; v.how = 'new'; });
     });
+    const floor = [];
     S0.items.forEach((o, k) => {
       const v = pick1.get(k); let it = v.it, how = v.how;
       if (!it) {
-        // 같은 코드가 완제품 · 반제품이면 원부자재로 넣지 않는다 (현장 재고 품목)
-        if (v.other) { skipped.push({ code: o.F, name: o.name, stage: INV.info(v.other).stage }); return; }
-        if (!create) { skipped.push({ code: o.F, name: o.name, stage: '' }); return; }
-        it = newItem(o); created.push(it); how = 'new';
+        // 같은 코드가 반제품(현장 재고 품목)이면 원부자재로 만들지 않고 그 품목의 창고 재고로 넣는다
+        // (1.10.1 사용자: 외주에서 받아 창고에 있고 아직 생산현장에 분출 전 → 창고 재고) — 품목 · 단계는 그대로.
+        // 완제품 코드는 넣지 않는다: 창고는 완제품 번호로 포장 카톤을 적는다 (CARTON … · 자재 입고/출고 — 완제품 재고가 아님)
+        if (v.other) {
+          const stg = INV.info(v.other).stage;
+          if (stg === 'FG') { skipped.push({ code: o.F, name: o.name, stage: stg, why: 'fg' }); return; }
+          it = v.other; how = 'floor'; floor.push({ code: o.F, name: o.name, stage: stg });
+        }
+        else if (!create) { skipped.push({ code: o.F, name: o.name, stage: '', why: 'none' }); return; }
+        else { it = newItem(o); created.push(it); how = 'new'; }
       }
       counts[how] = (counts[how] || 0) + 1;
       map.set(k, { code: it.code, name: it.name, unit: INV.unitN(it.unit) || 'PCS', it, how });
     });
-    return { map, created, skipped, counts, pairs };
+    // 넣지 않은 코드(완제품 번호의 포장 카톤)는 "같은 물건일 수 있는 쌍" 으로 알리지 않는다
+    return { map, created, skipped, counts, pairs: pairs.filter(p => map.has(up(p.code))), floor };
   }
   function previewWhItems(job) {
     const r = resolveWh(job.S, true, job.S.extra); const stg = { RM: 0, SM: 0 }; r.created.forEach(x => { stg[x.stage] = (stg[x.stage] || 0) + 1; });
@@ -560,9 +568,14 @@
     const parts = [[L('같은 코드로 맞춤', 'Khớp cùng mã'), r.counts.code || 0, 'info'], [L('세관 코드 + 제품번호로 맞춤 (카톤 · 케이스)', 'Khớp theo Mã XNK + số SP'), r.counts.xnk || 0, 'info'],
       [L('새 품목 (원재료 ', 'Mã mới (NL ') + stg.RM + L(' · 부자재 ', ' · VT ') + stg.SM + ')', r.created.length, r.created.length ? 'info' : 'neutral']];
     if (tr) parts.push([L('베트남어 이름 → 한국어', 'Tên tiếng Việt → tiếng Hàn'), tr, 'neutral']);
-    if (r.skipped.length) parts.push([L('완제품 · 반제품 코드라 원부자재에서 뺌', 'Mã TP/BTP — không đưa vào NVL'), r.skipped.length, 'warn']);
+    const fg = r.skipped.filter(x => x.why === 'fg'), none = r.skipped.filter(x => x.why !== 'fg');
+    if (r.floor.length) parts.push([L('반제품 코드 → 그 품목의 창고 재고로 (외주에서 받아 창고에 있는 것)', 'Mã BTP → tồn kho của mã đó (nhận từ gia công, đang ở kho)'), r.floor.length, 'info']);
+    if (fg.length) parts.push([L('완제품 코드라 뺌 (창고 줄은 포장 카톤)', 'Mã TP — bỏ qua (dòng kho là thùng carton)'), fg.length, 'warn']);
+    if (none.length) parts.push([L('맞출 품목이 없음 (건너뜀)', 'Không có mã để khớp (bỏ qua)'), none.length, 'warn']);
     if (r.pairs.length) parts.push([L('같은 물건일 수 있어 따로 둔 코드 (확인 필요)', 'Mã có thể trùng — để riêng'), r.pairs.length, 'warn']);
-    return { parts, detail: [r.skipped.length ? L('뺀 코드: ', 'Mã bỏ qua: ') + r.skipped.slice(0, 8).map(x => x.code + (x.stage ? '(' + x.stage + ')' : '')).join(', ') + (r.skipped.length > 8 ? ' …' : '') : '',
+    const list = (a) => a.slice(0, 8).map(x => x.code + (x.stage ? '(' + x.stage + ')' : '')).join(', ') + (a.length > 8 ? ' …' : '');
+    return { parts, detail: [r.floor.length ? L('창고 재고로 넣는 반제품: ', 'BTP vào tồn kho: ') + list(r.floor) : '', fg.length ? L('뺀 완제품 코드: ', 'Mã TP bỏ qua: ') + list(fg) : '',
+      none.length ? L('건너뛴 코드: ', 'Mã bỏ qua: ') + list(none) : '',
       r.pairs.length ? L('따로 둔 코드: ', 'Để riêng: ') + r.pairs.slice(0, 6).map(x => x.code + ' ↔ ' + x.to).join(', ') + (r.pairs.length > 6 ? ' …' : '') : ''].filter(Boolean).join(' · ') };
   }
   function applyWhItems(job) {
@@ -571,14 +584,14 @@
     // 맞춘 품목: 비어 있는 세관 코드 · 개당 kg 를 채우고, 베트남어 이름은 한국어로 (원래 이름은 name_vn)
     let filled = 0;
     r.map.forEach((v, k) => {
-      if (v.how === 'new') return; const o = job.S.items.get(k); const it = v.it; const patch = {};
+      if (v.how === 'new' || v.how === 'floor') return; const o = job.S.items.get(k); const it = v.it; const patch = {};   // 반제품 · 완제품 품목 정보는 건드리지 않는다
       if (!it.xnk && o.xnk) patch.xnk = o.xnk; if (!it.kg_per_ea && o.kgpe) patch.kg_per_ea = o.kgpe;
       const ko = EC.viToKo(it.name); if (ko) { patch.name = ko; if (!it.name_vn) patch.name_vn = it.name; }
       if (Object.keys(patch).length) { DB.update('items', it._id, patch); filled++; }
     });
     // 새 품목 · 이름이 바뀐 품목을 다시 찾을 수 있게 결과를 다시 만든다 (it 참조 · 이름 갱신)
     job.S.res = resolveWh(job.S, false);
-    return { added: r.created.length, updated: filled, removed: 0, skipped: r.skipped.length };
+    return { added: r.created.length, updated: filled, removed: 0, skipped: r.skipped.length, floor: r.floor.length };
   }
   /** 반영 때는 품목 작업이 만든 결과(S0.res), 미리보기에서는 새 품목도 있다고 보고 계산 */
   const resOf = (S0, preview) => S0.res || resolveWh(S0, !!preview, S0.extra);
@@ -627,8 +640,8 @@
   function previewWhTx(job) {
     const t = whTxRows(job.S, whOpenRows(job.S, true).adj, true); const by = {}; t.rows.forEach(r => { by[r.kind] = (by[r.kind] || 0) + 1; });
     const parts = Object.keys(by).map(k => [ERP.txKindName(k), by[k], 'info']);
-    if (t.skipped) parts.push([L('원부자재가 아닌 품목 줄 (건너뜀)', 'Dòng không phải NVL (bỏ qua)'), t.skipped, 'warn']);
-    return { parts, detail: F.d(job.S.first) + ' ~ ' + F.d(job.S.last) + L(' · 출고는 원부자재 재고에서 빠집니다 (생산 투입 · 외주 · 반품 등은 용도 칸에)', ' · Xuất = trừ tồn NVL (mục đích ghi ở cột riêng)') };
+    if (t.skipped) parts.push([L('맞출 품목이 없는 줄 (건너뜀)', 'Dòng không có mã để khớp (bỏ qua)'), t.skipped, 'warn']);
+    return { parts, detail: F.d(job.S.first) + ' ~ ' + F.d(job.S.last) + L(' · 출고는 창고 재고에서 빠집니다 (생산 투입 · 외주 · 반품 등은 용도 칸에)', ' · Xuất = trừ tồn kho (mục đích ghi ở cột riêng)') };
   }
   function applyWhTx(job) {
     const t = whTxRows(job.S, job.S.adj); const all = DB.rows('stock_tx');   // 조정 줄은 기초재고를 넣었을 때만

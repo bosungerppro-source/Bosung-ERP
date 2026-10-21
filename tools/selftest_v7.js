@@ -74,7 +74,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     for (const t of ['stock', 'compare', 'post', 'codes', 'mat']) { await ev((x) => { ERP.state.matTab = x; ERP.goto('materials'); ERP.render(); }, t); await page.waitForTimeout(250); }
     for (const t of ['mrp', 'struct', 'asm', 'semi_stock', 'bom', 'recipes']) { await ev((x) => { ERP.state.bomTab = x; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }, t); await page.waitForTimeout(250); }
     await ev(() => { ERP.state.asm = Object.assign(ERP.state.asm || {}, { kind: 'stp' }); ERP.render(); ERP.state.asm.kind = 'asm'; });
-    for (const t of ['log', 'entry', 'analysis', 'machines', 'procs']) { await ev((x) => { ERP.state.prodTab = x; ERP.goto('production'); ERP.render(); }, t); await page.waitForTimeout(200); }
+    for (const t of ['log', 'entry', 'analysis', 'monthly', 'machines', 'procs']) { await ev((x) => { ERP.state.prodTab = x; ERP.goto('production'); ERP.render(); }, t); await page.waitForTimeout(200); }
     await ev(() => { ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); ERP.state.dashEdit = false; ERP.render(); });
     for (const t of ['items', 'warehouses', 'partners', 'stock_open', 'uploads']) await ev((x) => { ERP.state.mst = { t: x }; ERP.goStock('master'); ERP.render(); }, t);
     for (const lv of ['stage', 'line', 'cat', 'sub']) await ev((x) => { ERP.state.cod = Object.assign(ERP.state.cod || {}, { level: x }); ERP.goStock('codes'); ERP.render(); }, lv);
@@ -247,24 +247,24 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
   {
     await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); }); await page.waitForTimeout(500);
     const d0 = await ev(() => ({ ids: Array.from(document.querySelectorAll('.wgrid > .w')).map(w => w.dataset.id + ':' + w.dataset.w), txt: document.querySelector('.wgrid').innerText }));
-    eq('기본 배치 12개', d0.ids, ['kpi_pck_day:1', 'kpi_pck_month:1', 'kpi_due:1', 'kpi_low:1', 'procs:4', 'asm_daily:4', 'po_monthly:2', 'due_list:2', 'low_list:2', 'flow:2', 'fresh:2', 'input7:2']);
+    eq('기본 배치 13개 (1.10.1: 월별 조립 생산량)', d0.ids, ['kpi_pck_day:1', 'kpi_pck_month:1', 'kpi_due:1', 'kpi_low:1', 'procs:4', 'asm_daily:4', 'asm_monthly:4', 'po_monthly:2', 'due_list:2', 'low_list:2', 'flow:2', 'fresh:2', 'input7:2']);
     ok('공정별 실적: "설비 (가동 / 전체)"', /설비 \(가동 \/ 전체\)/.test(d0.txt) && !/전체 \/ 가동/.test(d0.txt));
     const asmCard = await ev(() => { const c = Array.from(document.querySelectorAll('.w[data-id=procs] .stage')).find(x => /조립/.test(x.querySelector('.t b').textContent)); return c.querySelectorAll('dd')[1].innerText.replace(/\s+/g, ' ').trim(); });
     const exp = await ev(() => { const ref = ERP.calc.latestProdDate(); const a = ERP.calc.agg(ERP.calc.rowsBetween(ref, ref, 'ASM')); const run = Array.from(a.machines).filter(k => k.indexOf('ASM:') === 0).length; const reg = ERP.db.rows('machines').filter(x => x.process === 'ASM' && x.active !== false).length; return run + ' 대 / ' + Math.max(reg, run) + ' 대'; });
     eq('조립 카드 = 가동 대 / 전체 대', asmCard, exp);
     await page.emulateMedia({ reducedMotion: 'reduce' });   // 편집 모드의 흔들림 애니메이션 끄기 (클릭·끌기 시험용)
     await page.click('main button:has-text("화면 편집")'); await page.waitForTimeout(300);
-    eq('편집 모드: 위젯마다 조작 막대', await ev(() => document.querySelectorAll('.wgrid .w .wbar').length), 12);
+    eq('편집 모드: 위젯마다 조작 막대', await ev(() => document.querySelectorAll('.wgrid .w .wbar').length), 13);
     await page.click('main button:has-text("위젯 추가")'); await page.waitForSelector('.modal .wgal');
     const gal = await ev(() => ({ items: document.querySelectorAll('.modal .wgal-item').length, added: document.querySelectorAll('.modal .wgal-item.added').length }));
     ok('위젯 목록 (이미 있는 것은 "추가됨", 여러 개 가능한 위젯은 제외)', gal.items >= 20 && gal.added === 11, gal);
     await page.click('.modal .wgal-item:has(b:text-is("공정 실적 (기준일)")) button'); await page.waitForTimeout(400);
-    let l = await ev(() => ERP.dashLayout().map(x => x.id)); ok('공정 실적 위젯 추가 (13개)', l.length === 13 && l[12] === 'kpi_proc', l);
+    let l = await ev(() => ERP.dashLayout().map(x => x.id)); ok('공정 실적 위젯 추가 (14개)', l.length === 14 && l[13] === 'kpi_proc', l);
     ok('추가한 위젯 = 기준일 조립 실적 (기본 공정 조립)', await ev(() => /기준일 조립 실적/.test(document.querySelector('.wgrid .w[data-id=kpi_proc]').innerText)));
     await page.click('.w[data-id=procs] .wbar .sz button:text-is("2")'); await page.waitForTimeout(300);
     eq('공정별 실적 가로 4 → 2', await ev(() => document.querySelector('.w[data-id=procs]').dataset.w), '2');
     await page.click('.w[data-id=kpi_proc] .wbar button[title="앞으로"]'); await page.waitForTimeout(300);
-    l = await ev(() => ERP.dashLayout().map(x => x.id)); eq('◀ 로 한 칸 앞으로', l.slice(10, 13), ['fresh', 'kpi_proc', 'input7']);
+    l = await ev(() => ERP.dashLayout().map(x => x.id)); eq('◀ 로 한 칸 앞으로', l.slice(11, 14), ['fresh', 'kpi_proc', 'input7']);
     // HTML5 끌어 놓기 (dragstart → dragover(왼쪽 절반) → drop)
     await ev(() => { const src = document.querySelector('.w[data-id=kpi_proc]'), dst = document.querySelector('.w[data-id=kpi_pck_day]'); const dt = new DataTransfer(); const r = dst.getBoundingClientRect(); const at = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 8, clientY: r.top + 20 };
       src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt })); dst.dispatchEvent(new DragEvent('dragover', at)); dst.dispatchEvent(new DragEvent('drop', at)); src.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt })); }); await page.waitForTimeout(400);
@@ -277,12 +277,12 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     await page.click('main button:has-text("편집 완료")'); await page.waitForTimeout(300);
     await page.reload(); await page.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.querySelector('.wgrid'), null, { timeout: 60000 }); await page.waitForTimeout(500);
     const saved = await ev(() => ({ ids: Array.from(document.querySelectorAll('.wgrid > .w')).map(w => w.dataset.id + ':' + w.dataset.w), n: (ERP.db.setting('dash') || []).length }));
-    ok('다시 켜도 배치 그대로 (설정에 저장)', saved.ids[0] === 'kpi_proc:1' && saved.ids.includes('procs:2') && !saved.ids.some(x => /^due_list/.test(x)) && saved.n === 12, saved);
+    ok('다시 켜도 배치 그대로 (설정에 저장)', saved.ids[0] === 'kpi_proc:1' && saved.ids.includes('procs:2') && !saved.ids.some(x => /^due_list/.test(x)) && saved.n === 13, saved);
     await page.click('.w[data-id=kpi_low]'); await page.waitForTimeout(300);
     eq('숫자 위젯을 누르면 해당 화면 (안전재고 → 원부자재 재고 · 발주 · 안전재고)', await ev(() => [location.hash, ERP.state.mtab]), ['#/materials', 'reorder']);
     await ev(() => { ERP.goto('dashboard'); ERP.state.dashEdit = true; ERP.render(); }); await page.waitForTimeout(300);
     await page.click('main button:has-text("기본 배치로")'); await page.waitForSelector('.modal'); await page.click('.modal .modal-foot button.primary'); await page.waitForTimeout(400);
-    eq('기본 배치로 되돌리기 → 12개', await ev(() => document.querySelectorAll('.wgrid > .w:not(.wadd)').length), 12);
+    eq('기본 배치로 되돌리기 → 13개', await ev(() => document.querySelectorAll('.wgrid > .w:not(.wadd)').length), 13);
     const all = await ev(() => { const ids = Object.keys(ERP.widgets); const res = []; for (const lang of ['ko', 'vi']) { ERP.lang = lang; ERP.state.dashEdit = false; ERP.dashSave(ids.map((id, i) => ({ k: id + '-t' + i, id, w: ERP.widgets[id].w, o: ERP.widgets[id].defaults }))); ERP.render(); res.push(document.querySelectorAll('.wgrid > .w').length); res.push(Array.from(document.querySelectorAll('.wgrid > .w')).filter(w => /^Error:/.test(w.innerText.split('\n').pop() || '') || /Error: /.test(w.innerText)).length); } ERP.lang = 'ko'; ERP.db.setSetting('dash', null); ERP.render(); return { n: ids.length, res }; });
     ok('위젯 ' + all.n + '종 모두 한/베로 그림 (오류 0)', all.res[0] === all.n && all.res[2] === all.n && all.res[1] === 0 && all.res[3] === 0, all);
   }
@@ -379,7 +379,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     console.log('  이전 ' + before.v + ' → 이번 ' + after.v);
     eq('이전 버전 자료 그대로 (품목 · 기초재고 · PO)', [after.items, after.open, after.po], [before.items, before.open, before.po]);
     eq('직접 만든 BOM 줄 · 수불 · 설정 유지', [after.manual, after.tx, after.keep], [1, 1, 9]);
-    ok('새 기능 바로 사용: 위젯 기본 배치 12 · 코드 연결 0 · 조립 BOM 제안 · 생산 반영/조립 BOM 화면', after.widgets === 12 && after.maps === 0 && after.plan > 100 && after.postOk && after.asmOk && after.mode === 'in_bom', after);
+    ok('새 기능 바로 사용: 위젯 기본 배치 13 · 코드 연결 0 · 조립 BOM 제안 · 생산 반영/조립 BOM 화면', after.widgets === 13 && after.maps === 0 && after.plan > 100 && after.postOk && after.asmOk && after.mode === 'in_bom', after);
     ok('업그레이드 화면 오류 0 (이전 · 이번)', eP.length === 0 && eN.length === 0, eP.concat(eN).slice(0, 5)); await q2.close(); SN.close();
   }
 
@@ -389,7 +389,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const p2 = await browser.newPage(); const e2 = []; p2.on('pageerror', e => e2.push(e.message));
     await p2.goto('file://' + path.join(ROOT, 'dist/ERP_Demo.html') + '#/materials'); await p2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 }); await p2.waitForTimeout(800);
     const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.goStock('floor'); ERP.render(); const b = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b], widgets: document.querySelectorAll('.wgrid .w').length }; });
-    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고 13) · 위젯 12', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 13], 12]); ok('데모 오류 0', e2.length === 0, e2);
+    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고 13) · 위젯 13', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, 13], 13]); ok('데모 오류 0', e2.length === 0, e2);
   }
 
   section('18. 저장 표시 · 닫기 전 저장 · 베트남어 빈 글자');

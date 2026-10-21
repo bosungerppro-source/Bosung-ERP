@@ -225,13 +225,23 @@ input{font:inherit;min-height:42px;padding:0 12px;border:1px solid #C9CFD6;borde
       d.due.length ? el('div', '', d.due.map(function (o) { return el('div', 'row', [el('div', '', [el('b', '', [o.po]), el('div', 'muted', [[o.customer, o.item, o.kind].filter(Boolean).join(' · ')])]), el('div', 'r', [n(o.packed) + ' / ' + n(o.sets) + ' set', el('div', 'muted', [o.due]), chipD(o.dday, o.st)])]); })) : el('p', 'muted', [L('납기 임박 수주가 없습니다', 'Không có PO sắp đến hạn')]),
       el('h3', '', [L('안전재고 미달 자재', 'NVL dưới tồn an toàn')]),
       d.low.length ? el('div', '', d.low.map(function (s) { return el('div', 'row', [el('div', '', [el('b', '', [s.code]), el('div', 'muted', [s.name])]), el('div', 'r', [n(s.bal, 1) + ' ' + s.prim + ' / ' + n(s.safety), el('div', '', [el('span', 'chip ' + (s.neg ? 'bad' : 'warn'), [s.neg ? L('마이너스', 'Âm') : L('미달', 'Thiếu')])])])]); })) : el('p', 'muted', [L('모든 자재가 안전재고 이상입니다', 'Tất cả NVL đạt mức an toàn')])]);
-    var ps = d.daily.procs;
+    var ps = d.daily.procs, ad = d.asmDaily, am = d.asmMonthly;
+    var mL = function (i) { return L((i + 1) + '월', 'T' + (i + 1)); };
+    var th = function (t) { return el('th', '', [t]); };
+    // 일별 · 월별 조립 생산량 (종합 현황 위젯과 같은 숫자, 품목군별) — 옛 ERP 가 보낸 요약에는 없음
+    var asmD = ad && ad.days && ad.days.length ? [el('h3', '', [L('일별 ' + pn(ad) + ' 생산량 · ', 'Sản lượng ' + pn(ad) + ' theo ngày · ') + ad.month]),
+      el('div', 'tw', [el('table', '', [el('thead', '', [el('tr', '', [th(L('날짜', 'Ngày')), th(L('합계', 'Tổng'))].concat(ad.divs.map(function (x) { return th(x.label); })))]),
+        el('tbody', '', ad.days.map(function (x, i) { return i; }).reverse().map(function (i) { return el('tr', '', [el('td', '', [md(ad.days[i])]), el('td', '', [el('b', '', [n(ad.total[i])])])].concat(ad.divs.map(function (x) { return el('td', '', [x.vals[i] ? n(x.vals[i]) : '·']); }))); }))])])] : [];
+    var asmM = am && am.grand ? [el('h3', '', [L('월별 ' + pn(am) + ' 생산량 · ', 'Sản lượng ' + pn(am) + ' theo tháng · ') + am.year]),
+      el('div', 'tw', [el('table', '', [el('thead', '', [el('tr', '', [th(L('월', 'Tháng')), th(L('합계', 'Tổng'))].concat(am.divs.map(function (x) { return th(x.label); })))]),
+        el('tbody', '', am.total.map(function (v, i) { return el('tr', '', [el('td', '', [mL(i)]), el('td', '', [v ? el('b', '', [n(v)]) : '·'])].concat(am.divs.map(function (x) { return el('td', '', [x.m[i] ? n(x.m[i]) : '·']); }))); })
+          .concat([el('tr', '', [el('td', '', [el('b', '', [am.year + L(' 합계', ' tổng')])]), el('td', '', [el('b', '', [n(am.grand)])])].concat(am.divs.map(function (x) { return el('td', '', [n(x.t)]); })))]))])])] : [];
     var prod = el('div', 'card', [el('h2', '', [L('생산 관리', 'Sản xuất')]), el('h3', '', [L('이번 달 누계 (전월 같은 기간 대비)', 'Lũy kế tháng (so cùng kỳ)')]),
-      el('div', '', d.month.map(function (p) { return el('div', 'row', [el('b', '', [pn(p)]), el('div', 'r', [el('b', '', [n(p.val)]), ' ' + un(p) + '  ', el('span', 'muted', [pct(p.val, p.prev)])])]); })),
+      el('div', '', d.month.map(function (p) { return el('div', 'row', [el('b', '', [pn(p)]), el('div', 'r', [el('b', '', [n(p.val)]), ' ' + un(p) + '  ', el('span', 'muted', [pct(p.val, p.prev)])])]); }))].concat(asmD, asmM, [
       el('h3', '', [L('최근 14일 생산량', 'Sản lượng 14 ngày')]),
       el('div', 'tw', [el('table', '', [el('thead', '', [el('tr', '', [el('th', '', [L('날짜', 'Ngày')])].concat(ps.map(function (p) { return el('th', '', [pn(p)]); })))]),
         el('tbody', '', d.daily.days.map(function (day, i) { return el('tr', '', [el('td', '', [md(day)])].concat(ps.map(function (p) { return el('td', '', [p.vals[i] ? n(p.vals[i]) : '·']); }))); }))])]),
-      el('p', 'muted', [L('생산일보 양품 기준 · 포장은 세트, 나머지는 pcs · ERP 가 켜져 있는 동안 15분마다 새로 보냅니다.', 'Theo SL đạt của báo cáo · đóng gói tính bộ, còn lại pcs · ERP gửi lại mỗi 15 phút khi đang chạy.')])]);
+      el('p', 'muted', [L('생산일보 양품 기준 · 포장은 세트, 나머지는 pcs · ERP 가 켜져 있는 동안 15분마다 새로 보냅니다.', 'Theo SL đạt của báo cáo · đóng gói tính bộ, còn lại pcs · ERP gửi lại mỗi 15 phút khi đang chạy.')])]));
     m.replaceChildren(head, dash, prod);
   }
   function btn(t, fn) { var b = el('button', 'btn', [t]); b.type = 'button'; b.onclick = fn; return b; }

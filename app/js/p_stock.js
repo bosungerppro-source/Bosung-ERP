@@ -145,7 +145,7 @@
     // 11차: 공정 중 재고의 기준(현장 실사)과 원부자재의 기준(ECOUNT)을 따로 보여 준다
     const odAll = INV.openDates();
     const basis = group === 'floor'
-      ? (odAll.FLOOR ? h('p', { class: 'help', style: { marginTop: 0 } }, ERP.chip('info', L('현장 실사 기준일 ', 'Ngày kiểm kê ') + odAll.FLOOR), ' ', L('공정 중 품목은 현장 실사 수량에서 시작해 다음 날부터의 생산 · 소모를 더합니다. 원부자재 재고(ECOUNT 기준일 ', 'Mã đang SX bắt đầu từ số kiểm kê, cộng SX · tiêu hao từ ngày hôm sau. Tồn NVL (ngày ECOUNT ') + (odAll.FAC || odAll.WH || '–') + L(')와 따로 관리합니다.', ') quản lý riêng.'))
+      ? (odAll.FLOOR ? h('p', { class: 'help', style: { marginTop: 0 } }, ERP.chip('info', L('현장 실사 기준일 ', 'Ngày kiểm kê ') + odAll.FLOOR), ' ', L('공정 중 품목은 현장 실사 수량에서 시작해 다음 날부터의 생산 · 소모를 더합니다. 원부자재 재고(ECOUNT 기준일 ', 'Mã đang SX bắt đầu từ số kiểm kê, cộng SX · tiêu hao từ ngày hôm sau. Tồn NVL (ngày ECOUNT ') + (odAll.FAC || odAll.WH || '–') + L(')와 따로 관리합니다. 외주에서 받아 창고에 있는 반제품(창고 입출고장에 있는 것)은 창고 칸에 창고 입출고장 수량이 들어가고, 현장으로 분출하면 수불 입력의 이동(창고 → 공장)으로 옮깁니다.', ') quản lý riêng. BTP nhận từ gia công đang ở kho (có trong bảng kê kho) nằm ở cột Kho; khi xuất ra xưởng, nhập phiếu chuyển (Kho → Xưởng).'))
         : h('p', { class: 'help', style: { marginTop: 0 } }, ERP.chip('warn', L('현장 실사 없음', 'Chưa kiểm kê')), ' ', L('엑셀 업로드에 현장 재고 실사 파일(TỒN KHO)을 올리면 공정 중 재고의 기초가 됩니다 (그 전에는 ECOUNT 공장 재고를 씁니다).', 'Tải file kiểm kê hiện trường (TỒN KHO) ở Tải Excel để làm tồn đầu cho hàng đang SX (trước đó dùng tồn Xưởng ECOUNT).')))
       : null;
     put(host, h('p', { class: 'help', style: { marginTop: 0 } }, G.help, ' ', L('칸을 누르면 아래 표가 그 단계로 바뀝니다. 숫자 = 재고 있는 품목 / 전체 품목.', 'Bấm vào ô để lọc bảng. Số = mã có tồn / tổng mã.')), ...[basis].filter(Boolean), flow,

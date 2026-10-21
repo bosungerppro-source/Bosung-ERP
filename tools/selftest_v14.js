@@ -1,9 +1,9 @@
 'use strict';
 /* 14차(v1.9.0) 자동 시험: 창고 입출고장(BẢNG KÊ NHẬP XUẤT) → 원부자재 품목 · 거래처 · 기초재고 · 입출고, ECOUNT 재고현황으로 보완
    1 I 칸 나누기 (용도 · Lot · 색깔 · 비고) · 베트남어 품목명 → 한국어 · 2 두 파일 같이 올리기 (미리보기 · 보완 방식) ·
-   3 품목 맞추기 (같은 코드 · 제품번호로 적은 카톤 → ECOUNT 카톤 · 새 품목 · 반제품 코드는 뺌 · 두 코드를 한 품목에 합치지 않음) ·
+   3 품목 맞추기 (같은 코드 · 제품번호로 적은 카톤 → ECOUNT 카톤 · 새 품목 · 반제품 코드는 그 품목의 창고 재고로 (1.10.1) · 완제품 코드는 뺌 · 두 코드를 한 품목에 합치지 않음) ·
    4 재고 = 창고 기말 재고 (기초재고 = 기말 − 입고 + 출고, 마이너스면 0 + 조정) · ECOUNT 보완 (같은 품목은 창고 수량, 마이너스 0, 공정 중은 뺌) ·
-   5 수불 칸 (업체코드 · 용도 · Lot · 색깔) · 6 다시 올려도 늘지 않음 · 7 화면 · 오류 없음
+   4-2 공정 중 품목의 창고 재고 (창고 입출고장 기준일 · 현장 실사와 따로 · 분출 이동) · 5 수불 칸 (업체코드 · 용도 · Lot · 색깔) · 6 다시 올려도 늘지 않음 · 7 화면 · 오류 없음
    사용:  npm run test:v14   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -65,7 +65,10 @@ function ecountBook(rows) {
     ['2026-01-10', 'YID001', 'CTY NHỰA YIDING', 'MH', 'R-200VN', 'MINI HOLDER', 'Nhập vật tư dùng cho sx', 0.001, 0, 500, 0, 0, 0, 500],
     ['2026-07-01', 'DG', 'Bộ phận Đóng gói', '68-7408-0-013', 'R-430VN', 'CARTON - US PENCIL 12', 'Xuất vật tư dùng cho sx', 0.2, 0, 0, 2, 10, 4, 20],
     ['2026-01-11', 'DNV', 'CTY BAO BÌ ĐÔNG NAM VIỆT', '68-7408-0-013', 'R-430VN', 'CARTON - US PENCIL 12', 'Nhập NVL dùng cho sx', 0.2, 6, 30, 0, 0, 4, 20],
-    ['2026-01-12', 'DNV', 'CTY BAO BÌ ĐÔNG NAM VIỆT', '68-7408-0-813', 'R-430VN', '12CT PENCILS CARTON 013', 'Nhập NVL dùng cho sx', 0.2, 10, 50, 0, 0, 10, 50]];
+    ['2026-01-12', 'DNV', 'CTY BAO BÌ ĐÔNG NAM VIỆT', '68-7408-0-813', 'R-430VN', '12CT PENCILS CARTON 013', 'Nhập NVL dùng cho sx', 0.2, 10, 50, 0, 0, 10, 50],
+    // 완제품 번호로 적은 포장 카톤 (실제 창고 파일처럼 CARTON … · 자재 입고/출고) → 완제품 재고로 넣지 않음 (ECOUNT 완제품 수량 그대로)
+    ['2026-02-10', 'DNV', 'CTY BAO BÌ ĐÔNG NAM VIỆT', 'FGT-001', 'R-430VN', 'CARTON - TEST FG', 'Nhập NVL dùng cho sx', 0.1, 1, 10, 0, 0, 0.6, 6],
+    ['2026-03-10', 'DG', 'Bộ phận Đóng gói', 'FGT-001', 'R-430VN', 'CARTON - TEST FG', 'Xuất vật tư dùng cho sx', 0.1, 0, 0, 0.4, 4, 0.6, 6]];
   const EC = [
     ['R-100', 'RM-EP-PP-R-100', 'R-100', 'POLYPROPYLENE', 'kg', 999],
     ['04-5225-0-806', 'SM-CT-PEN-04-5225-0-806', 'R-430VN', 'CARTON 04-5225-0-005', 'PCS', 500],
@@ -73,7 +76,8 @@ function ecountBook(rows) {
     ['68-7408-0-813', 'SM-CT-PEN-68-7408-0-813', 'R-430VN', '12CT PENCILS CARTON 013', 'PCS', 77],
     ['MH', 'WIP03-MINI-HD-MH', 'R-200VN', 'MINI HOLDER', 'PCS', 1000],
     ['R-999', 'RM-WAX-WX-R-999', 'R-999', 'TEST WAX', 'kg', 50],
-    ['SM-ONLY', 'SM-LB-MINI-SM-ONLY', 'R-411VN', 'NHÃN DÁN TEST', 'PCS', 7]];
+    ['SM-ONLY', 'SM-LB-MINI-SM-ONLY', 'R-411VN', 'NHÃN DÁN TEST', 'PCS', 7],
+    ['FGT-001', 'FG-PEN-CRA-FGT-001', '', 'TEST FG [FG]', 'PCS', 99]];
   const fw = path.join(xdir, 'kho_nhap_xuat.xlsx'), fe = path.join(xdir, 'ecount_ton_kho.xlsx');
   XLSX.writeFile(ledgerBook(WH), fw); XLSX.writeFile(ecountBook(EC), fe);
 
@@ -106,7 +110,7 @@ function ecountBook(rows) {
     const by = Object.fromEntries(j.map(x => [x.kind, x]));
     eq('작업 6개', Object.keys(by).sort(), ['ecount_items_stock', 'ecount_stock', 'wh_ledger_items', 'wh_ledger_open', 'wh_ledger_partners', 'wh_ledger_tx']);
     eq('ECOUNT 재고현황 = 보완 · 창고 범위 (같이 올렸으므로)', [by.ecount_stock.mode, by.ecount_stock.scope], ['fill', 'WH']);
-    ok('창고 품목 미리보기: 같은 코드 2 (R-100 · 68-7408-0-813) · 제품번호 카톤 1 · 새 품목 4 · 뺀 코드 1 · 따로 둔 코드 1', by.wh_ledger_items.p.includes('같은 코드로 맞춤=2') && by.wh_ledger_items.p.includes('세관 코드 + 제품번호로 맞춤 (카톤 · 케이스)=1') && by.wh_ledger_items.p.some(x => /^새 품목/.test(x) && /=4$/.test(x)) && by.wh_ledger_items.p.includes('완제품 · 반제품 코드라 원부자재에서 뺌=1') && by.wh_ledger_items.p.includes('같은 물건일 수 있어 따로 둔 코드 (확인 필요)=1'), by.wh_ledger_items.p);
+    ok('창고 품목 미리보기: 같은 코드 2 (R-100 · 68-7408-0-813) · 제품번호 카톤 1 · 새 품목 4 · 반제품 → 창고 재고 1 (MH) · 완제품 코드 뺌 1 (FGT-001) · 따로 둔 코드 1', by.wh_ledger_items.p.includes('같은 코드로 맞춤=2') && by.wh_ledger_items.p.includes('세관 코드 + 제품번호로 맞춤 (카톤 · 케이스)=1') && by.wh_ledger_items.p.some(x => /^새 품목/.test(x) && /=4$/.test(x)) && by.wh_ledger_items.p.includes('반제품 코드 → 그 품목의 창고 재고로 (외주에서 받아 창고에 있는 것)=1') && by.wh_ledger_items.p.includes('완제품 코드라 뺌 (창고 줄은 포장 카톤)=1') && by.wh_ledger_items.p.includes('같은 물건일 수 있어 따로 둔 코드 (확인 필요)=1') && !by.wh_ledger_items.p.some(x => /건너뜀/.test(x)), by.wh_ledger_items.p);
     ok('기초재고 미리보기: 마이너스 → 0 한 품목', by.wh_ledger_open.p.some(x => /마이너스 → 0/.test(x) && /=1$/.test(x)), by.wh_ledger_open.p);
   });
 
@@ -117,13 +121,13 @@ function ecountBook(rows) {
     await A.waitForFunction(() => !!Array.from(document.querySelectorAll('main h3')).find(x => /반영 결과/.test(x.textContent)), null, { timeout: 60000 });
     await ev(async () => { const D = ERP.db; if (D.flush) await D.flush(); });
     const r = await ev(() => { const I = ERP.inv; const it = (c) => { const m = I.item(c); return m ? { stage: I.info(m).stage, unit: I.unitN(m.unit), name: m.name, name_vn: m.name_vn || null, xnk: m.xnk || null, src: m.src } : null; };
-      return { r100: it('R-100'), carton: it('04-5225-0-806'), fg: it('04-5225-0-005'), bk48: it('BK48'), r302: it('R-302'), neg: it('CT-NEG'), mh: it('MH'), p013: it('68-7408-0-013'), p813: it('68-7408-0-813'),
+      return { r100: it('R-100'), carton: it('04-5225-0-806'), fg: it('04-5225-0-005'), bk48: it('BK48'), r302: it('R-302'), neg: it('CT-NEG'), mh: it('MH'), p013: it('68-7408-0-013'), p813: it('68-7408-0-813'), fgt: it('FGT-001'),
         partners: ERP.db.rows('partners').map(p => p.code).sort() }; });
     eq('R-100: ECOUNT 원재료 (kg) 와 같은 코드', [r.r100.stage, r.r100.unit, r.r100.src], ['RM', 'kg', 'ecount']);
     eq('제품번호로 적은 카톤 04-5225-0-005 → ECOUNT 카톤 04-5225-0-806 (완제품 04-5225-0-005 는 그대로 FG)', [r.carton.stage, r.fg.stage], ['SM', 'FG']);
     eq('BK48: 새 부자재 · 한국어 이름 · 원래 이름 · 세관 코드', r.bk48, { stage: 'SM', unit: 'PCS', name: '투명 테이프 48 MM', name_vn: 'BĂNG KEO TRONG 48 MM', xnk: 'R-411VN', src: 'wh' });
     eq('R-302 (색깔만 적힌 종이): 새 부자재 (개)', [r.r302.stage, r.r302.unit], ['SM', 'PCS']);
-    eq('반제품 코드 MH 는 원부자재로 만들지 않음 (ECOUNT WIP03 그대로)', r.mh.stage, 'WIP03');
+    eq('반제품 MH · 완제품 FGT-001 은 원부자재로 만들지 않음 (단계 · 이름 · 출처 그대로)', [r.mh.stage, r.fgt.stage, r.fgt.name, r.fgt.src, r.fgt.xnk], ['WIP03', 'FG', 'TEST FG [FG]', 'ecount', null]);
     eq('제품번호 카톤 68-7408-0-013 은 이미 있는 68-7408-0-813 에 합치지 않고 따로', [r.p013 && r.p013.src, r.p813 && r.p813.src], ['wh', 'ecount']);
     ok('거래처 (업체코드)', ['DG', 'DNV', 'DVT001', 'GC01', 'GLO001', 'IN7', 'NBIN', 'NBW', 'YID001'].every(c => r.partners.includes(c)), r.partners);
   });
@@ -132,8 +136,8 @@ function ecountBook(rows) {
   await sec('4. 재고 = 창고 기말 재고 · ECOUNT 보완', async () => {
     const r = await ev(() => { const st = ERP.calc.stock(); const b = (c) => { const s = st.get(c); return s ? Math.round(s.bal * 1000) / 1000 : null; };
       const op = (c) => { const o = ERP.db.rows('stock_open').find(x => x.code === c && x.scope === 'WH'); return o ? [o.qty, o.grp, o.date] : null; };
-      return { bal: { r100: b('R-100'), carton: b('04-5225-0-806'), bk48: b('BK48'), r302: b('R-302'), neg: b('CT-NEG'), p013: b('68-7408-0-013'), p813: b('68-7408-0-813'), r999: b('R-999'), smonly: b('SM-ONLY'), fg: b('04-5225-0-005'), mh: b('MH') },
-        open: { r100: op('R-100'), neg: op('CT-NEG'), fg: op('04-5225-0-005'), mh: op('MH'), r999: op('R-999') }, od: ERP.db.meta.openDate,
+      return { bal: { r100: b('R-100'), carton: b('04-5225-0-806'), bk48: b('BK48'), r302: b('R-302'), neg: b('CT-NEG'), p013: b('68-7408-0-013'), p813: b('68-7408-0-813'), r999: b('R-999'), smonly: b('SM-ONLY'), fg: b('04-5225-0-005'), mh: b('MH'), fgt: b('FGT-001') },
+        open: { r100: op('R-100'), neg: op('CT-NEG'), fg: op('04-5225-0-005'), mh: op('MH'), r999: op('R-999'), fgt: op('FGT-001') }, od: ERP.db.meta.openDate,
         adj: ERP.db.rows('stock_tx').filter(t => t.kind === 'ADJ').map(t => [t.code, t.qty, t.date, t.purpose]) }; });
     eq('원부자재 재고 = 창고 기말 재고 (R-100 140 kg · 카톤 270 · BK48 60 · R-302 600 · 68-7408-0-013 20 · 68-7408-0-813 50)', [r.bal.r100, r.bal.carton, r.bal.bk48, r.bal.r302, r.bal.p013, r.bal.p813], [140, 270, 60, 600, 20, 50]);
     eq('기초재고 2026-01-04 (첫 입출고일 전날) = 기말 − 입고 + 출고 (R-100: 140 − 100 + 60 = 100)', r.open.r100, [100, 'wh', '2026-01-04']);
@@ -141,19 +145,39 @@ function ecountBook(rows) {
     eq('창고 범위 기준일 = 2026-01-04 (현장 실사 기준일은 그대로)', r.od, { FLOOR: '2026-10-20', WH: '2026-01-04' });
     eq('ECOUNT 에만 있는 품목은 보완 (R-999 50 kg · SM-ONLY 7)', [r.bal.r999, r.bal.smonly, r.open.r999 && r.open.r999[1]], [50, 7, 'fill']);
     eq('ECOUNT 마이너스(완제품 −217) → 0', [r.open.fg && r.open.fg[0], r.bal.fg], [0, 0]);
-    eq('공정 중(반제품 MH)은 현장 실사 기준이라 ECOUNT 수량을 넣지 않음', r.open.mh, null);
+    eq('반제품 MH: 창고 입출고장 기초재고 (500 − 500 + 0 = 0) · ECOUNT 수량(1000)은 넣지 않음 · 재고 = 창고 기말 500', [r.open.mh, r.bal.mh], [[0, 'wh', '2026-01-04'], 500]);
+    eq('완제품 FGT-001: 창고 줄(포장 카톤)은 넣지 않고 ECOUNT 완제품 수량(99)으로 보완', [r.open.fgt, r.bal.fgt], [[99, 'fill', '2026-01-04'], 99]);
+  });
+
+  // ------------------------------------------------------------------------------------------
+  await sec('4-2. 공정 중 품목의 창고 재고 (1.10.1: 외주에서 받아 창고에 있는 반제품)', async () => {
+    const r = await ev(async () => {
+      const I = ERP.inv, C = ERP.calc;
+      const s0 = C.stock().get('MH'); const od = I.openDateFor(I.item('MH')), od2 = I.openDateFor(I.item('RM102'));
+      ERP.db.add('stock_tx', { date: '2026-10-25', kind: 'MOVE', from_scope: 'WH', to_scope: 'FAC', code: 'MH', qty: 100, unit: 'PCS' });   // 현장으로 분출
+      ERP.db.add('stock_tx', { date: '2026-10-15', kind: 'IN', to_scope: 'WH', code: 'RM102', qty: 9, unit: 'PCS' });   // 창고 입출고장에 없는 공정 중 품목: 현장 실사일 전은 세지 않음 (예전 그대로)
+      await ERP.db.flush();
+      const s1 = C.stock().get('MH'), r1 = C.stock().get('RM102');
+      return { s0: [s0.by.WH, s0.by.FAC, s0.bal, I.groupOf(s0)], od, od2, s1: [s1.by.WH, s1.by.FAC, s1.bal], r1: [r1.by.WH, r1.by.FAC],
+        led: I.ledger('MH').rows.map(x => [x.date, x.kind, x.wh, x.fac, x.before === true]) };
+    });
+    eq('MH: 창고 500 · 공장 0 · 현장 재고 메뉴 품목', r.s0, [500, 0, 500, 'floor']);
+    eq('기준일: MH 창고 = 창고 입출고장 기준일 · 공장 = 현장 실사일 / RM102 = 현장 실사일', [r.od, r.od2], [{ WH: '2026-01-04', FAC: '2026-10-20' }, { WH: '2026-10-20', FAC: '2026-10-20' }]);
+    eq('현장으로 분출 (이동 100) → 창고 400 · 공장 100', r.s1, [400, 100, 500]);
+    eq('창고 입출고장에 없는 공정 중 품목은 예전 그대로 (현장 실사일 전 입고는 세지 않음)', r.r1, [0, 5]);
+    eq('수불부: 기초(창고 입출고장 기준일) · 입고 500 · 이동', r.led, [['2026-01-04', 'OPEN', 0, 0, false], ['2026-01-10', 'IN', 500, 0, false], ['2026-10-25', 'MOVE', -100, 100, false]]);
   });
 
   // ------------------------------------------------------------------------------------------
   await sec('5. 수불 칸 (업체코드 · 용도 · Lot · 색깔)', async () => {
     const r = await ev(() => { const T = ERP.db.rows('stock_tx').filter(t => t.src === 'wh'); const f = (c, d) => { const t = T.find(x => x.code === c && x.date === d); return t ? { kind: t.kind, qty: t.qty, unit: t.unit, partner: t.partner, pc: t.partner_code, purpose: t.purpose || null, lot: t.lot || null, color: t.color || null, note: t.note || null, from: t.from_scope || null, to: t.to_scope || null } : null; };
-      return { out: f('R-100', '2026-02-01'), gc: f('R-100', '2026-02-03'), in: f('R-100', '2026-01-05'), paper: f('R-302', '2026-01-08'), red: f('R-302', '2026-05-01'), mh: T.filter(t => t.code === 'MH').length, n: T.length }; });
+      return { out: f('R-100', '2026-02-01'), gc: f('R-100', '2026-02-03'), in: f('R-100', '2026-01-05'), paper: f('R-302', '2026-01-08'), red: f('R-302', '2026-05-01'), mh: T.filter(t => t.code === 'MH').length, fgt: T.filter(t => t.code === 'FGT-001').map(t => t.kind + t.qty).join(), n: T.length }; });
     eq('원료 출고 = 원부자재 재고에서 빠짐 (창고 → 외부) · 업체코드 · 생산 투입 · Lot', r.out, { kind: 'OUT', qty: 40, unit: 'kg', partner: 'Bộ phận Ép nhựa', pc: 'NBIN', purpose: '생산 투입', lot: 'E250713', color: null, note: null, from: 'WH', to: null });
     eq('외주 가공 출고 + Lot', [r.gc.purpose, r.gc.lot], ['외주 가공 출고', '601442']);
     eq('입고 = 외부 → 창고', [r.in.kind, r.in.to, r.in.purpose, r.in.pc], ['IN', 'WH', '생산용 입고', 'DVT001']);
     eq('색깔 칸 · 팔레트는 비고', [r.paper.color, r.paper.note, r.red.color], ['WHITE', '팔레트 2', 'RED']);
-    eq('뺀 반제품(MH)의 줄은 넣지 않음', r.mh, 0);
-    eq('수불 줄 수 (입고 7 · 출고 7 · 조정 1)', r.n, 15);
+    eq('반제품 MH 의 입출고는 창고 수불로 · 완제품 FGT-001 줄(포장 카톤)은 넣지 않음', [r.mh, r.fgt], [1, '']);
+    eq('수불 줄 수 (입고 8 · 출고 7 · 조정 1)', r.n, 16);
   });
 
   // ------------------------------------------------------------------------------------------
