@@ -13,6 +13,7 @@
     { kinds: ['ecount_items'], title: L('ECOUNT 품목등록', 'ECOUNT · Danh mục mặt hàng'), when: L('품목이 추가·변경될 때', 'Khi thêm/sửa mã hàng'), text: L('신규는 추가, 바뀐 값은 갱신, 지우지는 않습니다 (파일에 없는 품목은 "숨김 후보").', 'Thêm mới, cập nhật thay đổi, không xóa (mã không có trong file = đề xuất ẩn).') },
     { kinds: ['ecount_stock'], title: L('ECOUNT 재고현황 (창고 · 공장)', 'ECOUNT · Tồn kho (Kho · Xưởng)'), when: L('처음 1회', 'Lần đầu'), text: L('창고 · 공장 재고를 기초재고로 설정합니다. 그 뒤 재고는 이 ERP 의 수불 · 생산 반영으로 계산합니다 (다시 올리면 그 범위의 기초재고를 바꿉니다).', 'Đặt tồn Kho · Xưởng làm tồn đầu kỳ. Sau đó tồn được tính bằng phiếu · cập nhật SX trong ERP này (tải lại sẽ thay tồn đầu của phạm vi đó).') },
     { kinds: ['ecount_wh', 'ecount_codes'], title: L('창고리스트 · ERP CODE 설명', 'Danh sách kho · Giải thích ERP CODE'), when: L('바뀔 때만', 'Khi có thay đổi'), text: L('창고 범위(창고/공장)와 코드 이름(한/베)을 정합니다.', 'Xác định phạm vi kho và tên mã (Hàn/Việt).') },
+    { kinds: ['wh_ledger_tx'], title: L('창고 입출고장 (BẢNG KÊ NHẬP XUẤT)', 'Bảng kê nhập xuất NVL'), when: L('창고 장부를 정리할 때', 'Khi chốt sổ kho'), text: L('원부자재 품목(F 코드 · 세관 코드 G)을 맞추거나 만들고, 첫 입출고일 전날 기초재고(기말 재고 − 입고 + 출고)와 입고 · 출고를 넣습니다. ECOUNT 재고현황을 같이 올리면 없는 품목만 보완합니다.', 'Khớp/tạo mã NVL, đặt tồn đầu (cuối kỳ − nhập + xuất) và nhập · xuất. Tải kèm tồn kho ECOUNT để bổ sung mã còn thiếu.') },
     { kinds: ['stock_tx'], title: L('재고 수불 (입고·출고·이동·조정)', 'Nhập · xuất · chuyển · điều chỉnh'), when: L('매일', 'Hằng ngày'), daily: true, text: L('수불 양식 또는 KHO NVL 입출고장을 그대로 올립니다. 급한 건은 원부자재 재고 → 수불 입력.', 'Tải mẫu nhập xuất hoặc sổ KHO NVL. Việc gấp: Tồn NVL → Nhập phiếu.'), btn: [L('수불 양식 받기', 'Tải mẫu'), () => ERP.ecount.txTemplate()] },
     { kinds: ['prod_log'], title: L('생산일보 (공정별)', 'Báo cáo sản xuất'), when: L('매일', 'Hằng ngày'), daily: true, text: L('올리면 생산량 입고 · BOM 현장 부품 차감이 재고에 자동 반영됩니다. 원부자재는 차감하지 않습니다.', 'Tự động nhập SX · trừ linh kiện hiện trường theo BOM. Không trừ NVL.'), btn: [L('일보 양식 받기', 'Tải mẫu báo cáo'), () => XL.dailyTemplate()] },
     { kinds: ['floor_count'], title: L('현장 재고 실사 (TỒN KHO · 공정 중)', 'Kiểm kê tồn hiện trường (TỒN KHO)'), when: L('실사할 때', 'Khi kiểm kê'), text: L('공정 중 부품 · 조립 색연필의 현장 수량. 파일 이름의 날짜가 현장 기초재고 기준일이 되고, 원부자재(ECOUNT)와 따로 관리합니다.', 'Số lượng linh kiện · bút đã lắp tại hiện trường. Ngày trong tên file = ngày tồn đầu hiện trường; quản lý riêng với NVL (ECOUNT).') },
@@ -47,9 +48,10 @@
       try { fi.value = ''; } catch (e) { /* ignore */ }
       st.jobs = [];
       for (const f of files) {
-        try { const wb = await XL.readFile(f); const jobs = XL.analyze(wb, {}); jobs.forEach(j => { j.file = f.name; if (j.table && !j.mode) j.mode = 'upsert'; if (typeof j.onFile === 'function') j.onFile(j); }); st.jobs.push(...jobs); }
+        try { const wb = await XL.readFile(f); const jobs = XL.analyze(wb, { file: f.name }); jobs.forEach(j => { j.file = f.name; if (j.S && !j.S.file) j.S.file = f.name; if (j.table && !j.mode) j.mode = 'upsert'; if (typeof j.onFile === 'function') j.onFile(j); }); st.jobs.push(...jobs); }
         catch (e) { console.error(e); ERP.toast(f.name + ': ' + e.message, 'bad'); }
       }
+      st.jobs.forEach(j => { if (typeof j.onBatch === 'function') j.onBatch(st.jobs, j); });   // j = 화면이 쓰는 작업 (XL.analyze 가 복사본을 만든다)   // 14차: 같이 올린 파일끼리 (예: 창고 입출고장 + ECOUNT 재고현황 → 보완)
       show();
     }
     function show() {
@@ -102,7 +104,7 @@
       const sel = st.jobs.filter(j => j.include && j.table && j.rows.length); if (!sel.length) { ERP.toast(L('반영할 항목이 없습니다', 'Chưa chọn mục nào'), 'warn'); return; }
       if (sel.some(j => j.mode === 'replace') && !(await ERP.confirm(L('"전체 교체"가 선택되어 있습니다. 기존 데이터가 삭제됩니다. 계속할까요?', 'Đã chọn "Thay toàn bộ" – dữ liệu cũ sẽ bị xóa. Tiếp tục?')))) return;
       const noScope = sel.filter(j => j.custom === 'stock' && !j.scope); if (noScope.length) { ERP.toast(L('재고현황의 범위(창고/공장)를 고르세요', 'Hãy chọn phạm vi cho file tồn kho'), 'warn'); return; }
-      const reopen = sel.filter(j => j.custom === 'stock' && j.mode === 'open' && DB.rows('stock_open').some(r => r.scope === j.scope));
+      const reopen = sel.filter(j => (j.custom === 'stock' || j.custom === 'whopen') && j.mode === 'open' && DB.rows('stock_open').some(r => r.scope === j.scope && r.grp !== 'floor'));
       if (reopen.length && !(await ERP.confirm(L('기초재고를 다시 설정합니다: ', 'Đặt lại tồn đầu: ') + reopen.map(j => ERP.scopeName(j.scope) + ' ' + j.date).join(', ') + L('\n그 날짜까지의 수불은 기초재고에 포함된 것으로 보고 재고에 더하지 않습니다. 계속할까요?', '\nPhiếu đến ngày này coi như đã nằm trong tồn đầu. Tiếp tục?'), L('재설정', 'Đặt lại'), true))) return;
       // 11차: 현장 재고 실사 — 기준일 필수, 이전 실사를 바꿀 때는 확인
       const floorJobs = sel.filter(j => j.custom === 'floor');

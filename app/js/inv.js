@@ -590,7 +590,7 @@
       const eff = { WH: 0, FAC: 0 }; let before = true;
       INV.effects(t).forEach(([sc, q]) => { if (counts(t.date, sc, od)) { eff[sc] += q; before = false; } });
       bal.WH += eff.WH; bal.FAC += eff.FAC;
-      rows.push({ date: t.date, kind: t.kind, doc_no: t.doc_no, partner: t.partner, note: t.note || (t.parent ? L('상위: ', 'Cha: ') + t.parent : ''), src: t.src, proc: t.proc, manual: !!t._manual, _id: t._id,
+      rows.push({ date: t.date, kind: t.kind, doc_no: t.doc_no, partner: t.partner, partner_code: t.partner_code, purpose: t.purpose, lot: t.lot, color: t.color, note: t.note || (t.parent ? L('상위: ', 'Cha: ') + t.parent : ''), src: t.src, proc: t.proc, manual: !!t._manual, _id: t._id,
         wh: eff.WH, fac: eff.FAC, balWH: r4(bal.WH), balFAC: r4(bal.FAC), bal: r4(bal.WH + bal.FAC), before });
     });
     return { code: key, item: m, rows, open: { WH: ow ? ow.qty : 0, FAC: of ? of.qty : 0, date: od } };

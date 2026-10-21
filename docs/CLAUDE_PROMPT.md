@@ -151,6 +151,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **일보 교체**: 일보(`source:'daily-report'`) · ERP 양식(`'template'`) 행은 날짜 · 공정 · 출처 · 조(`shift`) · 작업장(`workplace`)이 모두 같을 때만 바꾼다. 누적 시트(`'history'`)는 공정 · 기간 전체를 바꾼다. 같은 날짜 · 공정에 누적 행이 있으면 일보는 기본 건너뜀(`job.overlap`), `job.overlapMode='replace'` 면 그날 누적 행 대신 일보. 조 = 시트 이름 → 행의 DAY/NIGHT 칸 → D. 작업장 = 일보의 "1. 작업장명" 칸.
 - **수주 키**: `po.nat` = po_no · po_no2 · item_no · date · kind · kind2 · color, `po.multi` → `DB.upsert` 는 같은 키 줄을 순번으로 맞춘다 (합치지 않음).
 - **강제 완료 (13차)**: PO 줄의 `done_at`(완료 처리일)이 있으면 포장 실적과 상관없이 완료. 수주 목록의 완료 버튼 · `C.closeByDue`. 아래 2-12.
+- **원부자재의 기준 (14차)**: 창고 입출고장(BẢNG KÊ NHẬP XUẤT) — 품목 · 1월 1일 기초재고(기말 − 입고 + 출고) · 입출고. ECOUNT 재고현황은 없는 품목만 보완 (마이너스 0). 아래 2-13.
 - **취소 · 보류**: `C.poCond(p)` ('cancel' · 'hold', Condition 칸). 표시가 있으면 줄 상태 = cancel/hold. PO 는 모든 줄이 취소/보류면 취소/보류, 아니면 그 줄을 뺀 줄로 계산. 진행 중 = `C.isOpen(o)`.
 - **포장 일보**: `code` = PO 품번(열 1 → 열 0), `item` = 재고 품목코드(완제품 열 1), `ok_ct` = 실적 CT. 생산 반영은 `item` → `code` → `code_map`, CT 품목은 `ok_ct` 가 있으면 그대로.
 - **품목군(일보)**: 누적 시트의 같은 코드 → ERP CODE 제품군별 누적 최빈값 → 설비 이름. **설비** = `C.machKey(r)` (공정 + 종류 + 번호).
@@ -217,3 +218,15 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - 수주 엑셀을 다시 올려도(upsert) `done_at` 은 남는다. "전체 교체" 는 지운다.
 - AI 비서 수주 도구: 강제 완료면 `remaining_sets` 0, `marked_done`.
 - 시험: `npm run test:v13` 28개 + v12 · v11 · v9 · v8 · v7 · assistant.
+
+### 2-13. 14차: 창고 입출고장 → 원부자재 재고 · ECOUNT 재고현황으로 보완 (v1.9.0, 2026-10-21)
+자세한 요청 · 결정은 `docs/PROMPT_v14_WAREHOUSE.md`, 작업 기록은 `docs/history/v14_work_log.md`.
+
+**규칙 (이후 버전에서도 지킬 것)**
+- **열**: A 전표번호 쓰지 않음 · C 입출고일 · D 업체코드 → `partner_code` · E 업체 → `partner` · F 품목코드 · G 세관신고 코드 → 품목 `xnk` · H 품목명 (베트남어 → 한국어 `EC.viToKo`, 원문 `name_vn`) · I 내용 → `purpose` · `lot` · `color` · `note` (`EC.splitContent`) · J 개당 kg → `kg_per_ea` · L/M 입고 · N/O 출고 · P/Q 기말 재고 (품목마다 같은 값).
+- **품목 맞추기** (`resolveWh`, 반영할 때): 같은 코드 원부자재 → 제품번호(마지막 마디 0xx)로 적은 카톤 · 케이스는 Mã XNK + 앞 3마디가 같은 원부자재 하나 → 그 밖은 새 품목 (출고 내용 NL → RM kg, vật tư → SM 개). 한 ERP 품목에 창고 코드 둘 이상이면 합치지 않는다 (`pairs` 로 알림). 같은 코드가 FG · SG · WIP 면 원부자재로 넣지 않는다.
+- **기초재고**: WH, 첫 입출고일 전날, 기말 − 입고 + 출고 (품목 단위로 환산), 마이너스면 0 + 마지막 날 ADJ (`purpose: '기말 재고 맞춤'`). 0 인 품목도 줄을 만든다. `grp: 'wh'`, `meta.openDate.WH` = 그 날.
+- **출고 = 창고 → 외부** (원부자재 재고에서 빠짐, 생산 투입 포함 — 11차 규칙과 맞춤). `src: 'wh'`, 다시 올리면 같은 기간을 바꾼다.
+- **ECOUNT 재고현황**: ERP CODE · Mã XNK 칸이 있으면 품목 작업(`ecount_items_stock`, 있는 칸만 · 숨김 후보 없음). 창고 입출고장과 같이 올리거나 `grp: 'wh'` 기초재고가 있으면 방식 `fill` — 기초재고가 있는 품목은 그대로, 없는 품목만 (마이너스 0, 현장 실사가 있으면 공정 중 품목은 뺌), `grp: 'fill'`.
+- 업로드 화면은 파일을 모두 읽은 뒤 `job.onBatch(jobs, self)` 를 부른다 (XL.analyze 가 작업을 복사하므로 self 를 고친다).
+- 시험: `npm run test:v14` 42개 + v13 · v12 · v11 · v9 · v8 · v7 · assistant.

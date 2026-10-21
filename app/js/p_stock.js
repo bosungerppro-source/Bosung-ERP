@@ -35,7 +35,10 @@
   };
   const scopeChip = (v) => (v ? ERP.chip(v === 'WH' ? 'info' : 'neutral', ERP.scopeName(v)) : '');
   const kindChip = (k) => ERP.chip({ IN: 'info', OUT: 'warn', MOVE: 'neutral', ADJ: 'neutral', PROD: 'ok', USE: 'warn' }[k] || 'neutral', ERP.txKindName(k));
-  const srcLabel = (t) => { const s = String(t.src || ''); if (s.indexOf('daily:') === 0) return L('생산 자동', 'Tự động SX'); if (s === 'manual') return L('화면 입력', 'Nhập tay'); if (s === 'ledger') return L('KHO NVL 엑셀', 'Excel KHO NVL'); if (s.indexOf('xl') === 0) return L('엑셀 양식', 'Mẫu Excel'); if (s.indexOf('auto:') === 0) return L('자동 제안', 'Đề xuất'); if (s === 'outsource') return L('외주', 'Gia công'); return s; };
+  /** 14차: 거래처 (업체코드) · 용도 · Lot · 색깔 · 비고 (창고 입출고장 I 칸에서 나눈 것) */
+  const partnerText = (t) => (t.partner ? t.partner + (t.partner_code ? ' (' + t.partner_code + ')' : '') : (t.partner_code || ''));
+  const txNote = (t) => [t.purpose, t.lot ? 'Lot ' + t.lot : '', t.color ? L('색깔 ', 'màu ') + t.color : '', t.note].filter(Boolean).join(' · ');
+  const srcLabel = (t) => { const s = String(t.src || ''); if (s.indexOf('daily:') === 0) return L('생산 자동', 'Tự động SX'); if (s === 'manual') return L('화면 입력', 'Nhập tay'); if (s === 'wh') return L('창고 입출고장', 'Bảng kê NXT'); if (s === 'ledger') return L('KHO NVL 엑셀', 'Excel KHO NVL'); if (s.indexOf('xl') === 0) return L('엑셀 양식', 'Mẫu Excel'); if (s.indexOf('auto:') === 0) return L('자동 제안', 'Đề xuất'); if (s === 'outsource') return L('외주', 'Gia công'); return s; };
 
   function basisLine() {
     const m = INV.meta(); const od = m.open;
@@ -54,7 +57,8 @@
     const S = STAT(); const u = s ? s.prim : (m ? INV.unitShow(m.unit) : '');
     const kv = (k, v) => [h('dt', k), h('dd', v === undefined || v === null || v === '' ? '–' : v)];
     const info = h('dl', { class: 'kv' }, kv(L('품목코드', 'Mã hàng'), key), kv(L('품명', 'Tên'), m ? m.name : (s ? s.name : '')), kv('ERP CODE', m ? m.erp_code : ''), kv(L('분류', 'Phân loại'), s ? ERP.codeChips(s) : ''),
-      kv('Mã XNK', m ? m.xnk : ''), kv(L('품목구분 (ECOUNT)', 'Loại (ECOUNT)'), m ? m.etype : ''), kv(L('단위', 'Đơn vị'), u),
+      kv(L('세관신고 코드 (Mã XNK)', 'Mã XNK'), m ? m.xnk : ''), kv(L('품목구분', 'Loại'), m ? m.etype : ''), kv(L('단위', 'Đơn vị'), u + (m && m.kg_per_ea ? L(' (개당 ', ' (') + F.n(m.kg_per_ea, 4) + ' kg)' : '')),
+      m && m.name_vn ? kv(L('품명 (베트남어 원문)', 'Tên tiếng Việt'), m.name_vn) : null,
       m && (m.set_per_ct || m.pcs_per_set) ? kv(L('환산', 'Quy đổi'), [m.set_per_ct ? F.n(m.set_per_ct, 2) + ' set/CT' : null, m.pcs_per_set ? F.n(m.pcs_per_set, 2) + ' pcs/set' : null].filter(Boolean).join(' · ')) : null,
       m && m.missing ? kv(L('주의', 'Lưu ý'), ERP.chip('warn', L('최근 ECOUNT 품목등록 파일에 없음', 'Không có trong file ECOUNT gần nhất'))) : null);
     const kpis = s ? h('div', { class: 'kpis' },
@@ -63,14 +67,17 @@
       ERP.kpi(L('합계', 'Tổng'), fq(s.bal, u), u, s.status === 'na' ? (s.negative ? 'bad' : 'neutral') : S[s.status][1], s.status !== 'na' ? S[s.status][0] : (s.susp ? L('이동 누락 의심', 'Nghi thiếu phiếu chuyển') : null), s.sets !== null && s.sets !== undefined ? F.n(s.sets) + ' set' + (s.pcs !== null && s.pcs !== undefined ? ' · ' + F.n(s.pcs) + ' pcs' : '') : null),
       ERP.kpi(L('안전재고', 'Tồn an toàn'), s.safety === null ? '–' : F.n(s.safety), u, 'neutral', null)) : null;
     const rows = led.rows.length > 160 ? [led.rows[0]].concat(led.rows.slice(-159)) : led.rows;
+    // 기초재고 출처 (14차: 창고 입출고장 · ECOUNT 보완 · 현장 실사)
+    const o0 = DB.rows('stock_open').find(r => String(r.code).toUpperCase() === String(key).toUpperCase() && (led.rows[0] && led.rows[0].floor ? r.grp === 'floor' : r.grp !== 'floor'));
+    const openSrc = !o0 ? '–' : o0.grp === 'floor' ? L('현장 실사', 'Kiểm kê hiện trường') : o0.grp === 'wh' ? L('창고 입출고장', 'Bảng kê nhập xuất') : o0.grp === 'fill' ? L('ECOUNT 보완', 'Bổ sung ECOUNT') : 'ECOUNT';
     const ledger = ERP.simpleTable([
       { label: L('일자', 'Ngày'), render: r => F.d(r.date) }, { label: L('구분', 'Loại'), render: r => r.open ? ERP.chip('neutral', L('기초재고', 'Tồn đầu')) : kindChip(r.kind) },
-      { label: L('전표 / 출처', 'Số CT / nguồn'), render: r => r.open ? 'ECOUNT' : [r.doc_no, r.proc ? ERP.procName(r.proc) : null, r.manual ? null : null].filter(Boolean).join(' · ') || srcLabel(r) },
+      { label: L('전표 / 출처', 'Số CT / nguồn'), render: r => r.open ? openSrc : [r.doc_no, r.proc ? ERP.procName(r.proc) : null, r.manual ? null : null].filter(Boolean).join(' · ') || srcLabel(r) },
       { label: L('창고 ±', 'Kho ±'), num: 1, render: r => (r.open ? fq(r.wh, u) : (r.wh ? (r.wh > 0 ? '+' : '') + fq(r.wh, u) : '')), style: r => negStyle(r.wh) },
       { label: L('공장 ±', 'Xưởng ±'), num: 1, render: r => (r.open ? fq(r.fac, u) : (r.fac ? (r.fac > 0 ? '+' : '') + fq(r.fac, u) : '')), style: r => negStyle(r.fac) },
       { label: L('창고 잔액', 'Tồn kho'), num: 1, render: r => fq(r.balWH, u), style: r => negStyle(r.balWH) }, { label: L('공장 잔액', 'Tồn xưởng'), num: 1, render: r => fq(r.balFAC, u), style: r => negStyle(r.balFAC) },
       { label: L('합계', 'Tổng'), num: 1, render: r => h('b', fq(r.bal, u)), style: r => negStyle(r.bal) },
-      { label: L('비고', 'Ghi chú'), render: r => r.before ? ERP.chip('neutral', L('기준일 이전 (반영 안 됨)', 'Trước ngày chốt (không tính)')) : [r.partner, r.note].filter(Boolean).join(' · ') }], rows, { maxH: '320px' });
+      { label: L('비고', 'Ghi chú'), render: r => r.before ? ERP.chip('neutral', L('기준일 이전 (반영 안 됨)', 'Trước ngày chốt (không tính)')) : [partnerText(r), txNote(r)].filter(Boolean).join(' · ') }], rows, { maxH: '320px' });
     // where used
     const used = [];
     DB.rows('bom_lines').forEach(l => { if (String(l.child) === key) used.push(L('BOM: ', 'BOM: ') + l.parent + ' (' + F.n(l.qty, 3) + ')'); });
@@ -418,7 +425,7 @@
     let rows = manual.concat(G === 'floor' ? pp.rows.filter(inG) : []).filter(t => !t.date || (t.date >= st.from && t.date <= st.to));
     if (st.kind) rows = rows.filter(t => t.kind === st.kind);
     if (st.src === 'auto') rows = rows.filter(t => !t._manual); else if (st.src === 'manual') rows = rows.filter(t => t._manual && t.src === 'manual'); else if (st.src === 'upload') rows = rows.filter(t => t._manual && t.src !== 'manual');
-    if (st.q) { const k = INV.normName(st.q); rows = rows.filter(t => [t.code, t.name, t.doc_no, t.partner, t.ref, t.parent].some(v => INV.normName(v).includes(k))); }
+    if (st.q) { const k = INV.normName(st.q); rows = rows.filter(t => [t.code, t.name, t.doc_no, t.partner, t.partner_code, t.ref, t.parent, t.lot, t.color, t.purpose].some(v => INV.normName(v).includes(k))); }
     rows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.doc_no || '').localeCompare(String(a.doc_no || '')));
     const ps = 100; const pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page >= pages) st.page = pages - 1; const slice = rows.slice(st.page * ps, st.page * ps + ps);
     const d = pp.diag;
@@ -432,12 +439,12 @@
         h('select', { class: 'inp', onchange: (e) => { st.kind = e.target.value; st.page = 0; ERP.render(); } }, h('option', { value: '' }, L('구분: 전체', 'Loại: tất cả')), ERP.TX_KINDS.map(k => h('option', { value: k.v, selected: st.kind === k.v }, L(k.ko, k.vi)))),
         h('select', { class: 'inp', onchange: (e) => { st.src = e.target.value; st.page = 0; ERP.render(); } }, [['', L('출처: 전체', 'Nguồn: tất cả')], ['manual', L('화면 입력', 'Nhập tay')], ['upload', L('엑셀 업로드', 'Tải Excel')]].concat(G === 'floor' ? [['auto', L('생산 자동', 'Tự động SX')]] : []).map(o => h('option', { value: o[0], selected: st.src === o[0] }, o[1]))),
         h('span', { class: 'sp' }),
-        h('button', { class: 'btn sm', onclick: () => ERP.xl.exportAoa('stock_tx', [L('일자', 'Ngày'), L('전표', 'Số CT'), L('구분', 'Loại'), L('출발', 'Từ'), L('도착', 'Đến'), L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('수량', 'SL'), L('단위', 'ĐV'), L('거래처', 'Đối tác'), L('참조', 'Tham chiếu'), L('비고', 'Ghi chú'), L('출처', 'Nguồn')], rows.map(t => [t.date, t.doc_no || '', ERP.txKindName(t.kind), t.from_scope ? ERP.scopeName(t.from_scope) : '', t.to_scope ? ERP.scopeName(t.to_scope) : '', t.code, t.name || '', t.qty, t.unit || '', t.partner || '', t.ref || (t.parent || ''), t.note || '', srcLabel(t)])) }, L('엑셀', 'Excel'))),
+        h('button', { class: 'btn sm', onclick: () => ERP.xl.exportAoa('stock_tx', [L('일자', 'Ngày'), L('전표', 'Số CT'), L('구분', 'Loại'), L('출발', 'Từ'), L('도착', 'Đến'), L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('수량', 'SL'), L('단위', 'ĐV'), L('거래처', 'Đối tác'), L('업체코드', 'Mã ĐV'), L('용도', 'Mục đích'), 'Lot', L('색깔', 'Màu'), L('참조', 'Tham chiếu'), L('비고', 'Ghi chú'), L('출처', 'Nguồn')], rows.map(t => [t.date, t.doc_no || '', ERP.txKindName(t.kind), t.from_scope ? ERP.scopeName(t.from_scope) : '', t.to_scope ? ERP.scopeName(t.to_scope) : '', t.code, t.name || '', t.qty, t.unit || '', t.partner || '', t.partner_code || '', t.purpose || '', t.lot || '', t.color || '', t.ref || (t.parent || ''), t.note || '', srcLabel(t)])) }, L('엑셀', 'Excel'))),
       rows.length ? h('div', { class: 'tbl-wrap', style: { maxHeight: '56vh' } }, h('table', { class: 'tbl' }, h('thead', h('tr', [L('일자', 'Ngày'), L('전표', 'Số CT'), L('구분', 'Loại'), L('범위', 'Phạm vi'), L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('수량', 'SL'), L('거래처 · 참조', 'Đối tác · tham chiếu'), L('비고', 'Ghi chú'), L('출처', 'Nguồn'), ''].map((x, i) => h('th', { class: i === 6 ? 'num' : '' }, x)))),
         h('tbody', slice.map(t => h('tr', { class: t._manual ? '' : 'dim' }, h('td', F.d(t.date)), h('td', t.doc_no || ''), h('td', kindChip(t.kind)),
           h('td', [t.from_scope ? ERP.scopeName(t.from_scope) : (t.kind === 'IN' ? L('외부', 'Ngoài') : ''), t.to_scope ? ERP.scopeName(t.to_scope) : (t.kind === 'OUT' ? L('외부', 'Ngoài') : '')].filter(Boolean).join(' → ')),
           h('td', h('a', { href: 'javascript:void 0', onclick: () => ERP.itemDetail(t.code) }, t.code)), h('td', (t.name || '').slice(0, 36)), h('td', { class: 'num' }, fq(t.qty) + ' ' + (t.unit || '')),
-          h('td', [t.partner, t.ref, t.parent ? L('상위 ', 'cha ') + t.parent : null].filter(Boolean).join(' · ')), h('td', (t.note || '').slice(0, 40)), h('td', srcLabel(t)),
+          h('td', [partnerText(t), t.ref, t.parent ? L('상위 ', 'cha ') + t.parent : null].filter(Boolean).join(' · ')), h('td', { title: txNote(t) }, txNote(t).slice(0, 60)), h('td', srcLabel(t)),
           h('td', t._manual ? h('button', { class: 'icon-btn', title: L('삭제', 'Xóa'), onclick: async () => { if (await ERP.confirm(L('이 수불을 삭제할까요?', 'Xóa phiếu này?'), L('삭제', 'Xóa'), true)) { DB.remove('stock_tx', [t._id]); ERP.render(); } } }, '×') : ''))))))
         : h('div', { class: 'empty' }, L('이 기간의 수불이 없습니다.', 'Không có phát sinh trong kỳ.')),
       rows.length > ps ? h('div', { class: 'pager' }, h('span', F.n(rows.length) + L('건', ' dòng')), h('span', { style: { display: 'inline-flex', gap: '8px', alignItems: 'center' } }, h('button', { class: 'btn', disabled: st.page === 0, onclick: () => { st.page--; ERP.render(); } }, '‹'), (st.page + 1) + ' / ' + pages, h('button', { class: 'btn', disabled: st.page >= pages - 1, onclick: () => { st.page++; ERP.render(); } }, '›'))) : null);

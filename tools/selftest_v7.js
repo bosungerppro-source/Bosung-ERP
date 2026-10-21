@@ -168,7 +168,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const j = await ev(() => ERP.state.imp.jobs.map(x => ({ kind: x.kind, mode: x.mode, scope: x.scope, prev: x.preview ? x.preview(x) : null })));
     const it = j.find(x => x.kind === 'ecount_items'); eq('품목등록 다시: 신규 0 · 변경 0 · 없음 0', it.prev.parts.map(p => p[1]), [0, 0, 0]);
     const stk = j.filter(x => x.kind === 'ecount_stock'); eq('재고현황 다시: 방식 = 기초재고로 설정, 범위 자동', stk.map(x => x.mode + ':' + x.scope).sort(), ['open:FAC', 'open:WH']);
-    eq('재고현황 반영 방식은 하나뿐 (비교만 없음)', await ev(() => ERP.state.imp.jobs.filter(x => x.kind === 'ecount_stock').map(x => Object.keys(x.modes()))), [['open'], ['open']]);
+    eq('재고현황 반영 방식 = 기초재고로 설정 · 보완 (14차) — 비교만은 없음', await ev(() => ERP.state.imp.jobs.filter(x => x.kind === 'ecount_stock').map(x => Object.keys(x.modes()))), [['open', 'fill'], ['open', 'fill']]);
     ok('합계 일치 표시', stk.every(x => /일치/.test(x.prev.parts[0][0])), stk.map(x => x.prev.parts[0]));
     ok('다시 올리면 기초재고 재설정 경고', stk.every(x => /기초재고 재설정/.test(x.prev.detail)), stk.map(x => x.prev.detail));
     const pg = await ev(() => ({ t: document.querySelector('main').innerText, tables: Object.keys(ERP.TABLES) }));

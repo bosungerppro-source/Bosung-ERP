@@ -231,7 +231,9 @@
       { k: 'code', ko: '품목코드', vi: 'Mã mặt hàng', t: 't', list: 1, req: 1 },
       { k: 'name', ko: '품명', vi: 'Tên', t: 't', list: 1 },
       { k: 'erp_code', ko: 'ERP CODE', vi: 'ERP CODE', t: 't', list: 1 },
-      { k: 'xnk', ko: 'Mã XNK', vi: 'Mã XNK', t: 't', list: 1 },
+      { k: 'xnk', ko: '세관신고 코드 (Mã XNK)', vi: 'Mã XNK', t: 't', list: 1 },
+      { k: 'name_vn', ko: '품명 (베트남어 원문)', vi: 'Tên (tiếng Việt gốc)', t: 't' },   // 14차: 베트남어 품목명을 한국어로 바꿀 때 원래 이름
+      { k: 'kg_per_ea', ko: '개당 kg', vi: 'Kg / cái', t: 'n' },
       { k: 'etype', ko: '품목구분', vi: 'Loại (ECOUNT)', t: 't', list: 1 },
       { k: 'unit', ko: '단위', vi: 'Đơn vị', t: 't', list: 1, opts: ['PCS', 'CT', 'SET', 'kg', 'ROLL', 'CHAI', 'g', 'm', 'ea', 'box'] },
       { k: 'safety', ko: '안전재고', vi: 'Tồn an toàn', t: 'n', list: 1 },
@@ -300,6 +302,10 @@
       { k: 'qty', ko: '수량 (주 단위)', vi: 'Số lượng (ĐV chính)', t: 'n', list: 1, req: 1 },
       { k: 'unit', ko: '단위', vi: 'Đơn vị', t: 't', list: 1 },
       { k: 'partner', ko: '거래처', vi: 'Đối tác', t: 't', list: 1 },
+      { k: 'partner_code', ko: '업체코드', vi: 'Mã ĐV', t: 't' },   // 14차: 창고 입출고장 D 칸
+      { k: 'purpose', ko: '용도', vi: 'Mục đích', t: 't' },   // 14차: 창고 입출고장 I 칸에서 나눔 (생산 투입 · 외주 가공 · 반품 …)
+      { k: 'lot', ko: 'Lot', vi: 'Lot', t: 't' },
+      { k: 'color', ko: '색깔', vi: 'Màu', t: 't' },
       { k: 'ref', ko: '참조 (PO 등)', vi: 'Tham chiếu (PO…)', t: 't' },
       { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
       { k: 'src', ko: '출처', vi: 'Nguồn', t: 't' },

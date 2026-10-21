@@ -165,7 +165,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
   await sec('6. ECOUNT 비교 없음', async () => {
     const r = await ev(() => { const j = ERP.ecount.stockJob([{ code: 'WAX1', qty: 1 }], { scopeLabel: '', date: '2026-10-16' }); return { tables: Object.keys(ERP.TABLES), mode: j.mode, modes: Object.keys(j.modes()) }; });
     ok('ecount_snap(비교용) 표 없음', !r.tables.includes('ecount_snap'), r.tables);
-    eq('ECOUNT 재고현황 반영 방식 = 기초재고로 설정 하나', [r.mode, r.modes], ['open', ['open']]);
+    eq('ECOUNT 재고현황 반영 방식 = 기초재고로 설정 (14차부터 보완도) — 비교만은 없음', [r.mode, r.modes], ['open', ['open', 'fill']]);
     await ev(() => { ERP.state.dataTab = 'import'; ERP.goto('data'); ERP.render(); }); await settle();
     const d = await ev(() => document.querySelector('main').innerText);
     ok('자료 올리기 안내에 비교 없음 · 새 메뉴 이름 (원부자재 재고 → 수불 입력)', !/비교만|ECOUNT 비교|품목·재고/.test(d) && /원부자재 재고 → 수불 입력/.test(d), d.match(/.{0,40}(비교|품목·재고).{0,40}/));
