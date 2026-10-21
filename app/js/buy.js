@@ -15,6 +15,8 @@
      권장 주문량은 안전재고 자릿수 단위로 올림 (백 단위 → 100, 천 단위 → 1,000 …, 품목별 주문 단위로 바꿀 수 있음),
      [주문 파일 만들기] = 권장 주문량을 주문일 칸에 넣고 자재구매 파일과 같은 서식의 엑셀(Oder Korea · 제목 · Author · Date · 머리 · Total 수식)을 만든다.
      따로 관리하는 재고는 표에서 직접 고치고, 그 주문을 입고 완료하면 그 재고에 더한다 (창고 입출고장에 없으므로).
+   · 1.11.5: 파일을 다시 올려도 ERP 에서 넣은 주문(src 'erp')은 바꾸거나 지우지 않고, ERP 에서 정한 안전재고(처음 목록에 들어온 뒤)와
+     따로 관리 재고(파일 날짜가 ERP 에서 고친 날보다 새것일 때만 파일 값)는 그대로 둔다 — 2026-10-21 다시 올리기가 사용자의 주문 21건 · 안전재고를 지웠던 일.
    · 입고 완료는 주문을 입고 대기에서 빼기만 한다 — 재고는 창고 입출고장 · 수불 입력으로 들어온다 (두 번 세지 않게). */
 (function () {
   'use strict';
@@ -87,9 +89,15 @@
     });
     return { created };
   }
+  /** 1.11.5: 파일의 안전재고를 넣을까 — 처음 해외 주문 목록에 들어오는 품목이거나 안전재고가 비어 있을 때만 (그 뒤는 ERP 값) */
+  function safetyFromFile(it, o) {
+    if (!it || !it.buy) return true;
+    const same = !o.unit || unitSame(o.unit, it.unit); const v = same ? it.safety : it.buy_safety;
+    return v === null || v === undefined || v === '';
+  }
   function previewItems(job) {
     const Bx = job.B; const IT = INV.items(); let have = 0, saf = 0; const miss = [], diff = []; const main = Bx.rows.filter(o => !o.pool), pools = Bx.rows.filter(o => o.pool);
-    main.forEach(o => { const it = IT.get(o.code); if (it) { have++; if (o.unit && !unitSame(o.unit, it.unit)) diff.push(o.code + ' (' + o.unit + ' ≠ ' + INV.unitShow(it.unit) + ')'); } else miss.push(o.code); if (o.safety !== null && o.safety !== undefined) saf++; });
+    main.forEach(o => { const it = IT.get(o.code); if (it) { have++; if (o.unit && !unitSame(o.unit, it.unit)) diff.push(o.code + ' (' + o.unit + ' ≠ ' + INV.unitShow(it.unit) + ')'); } else miss.push(o.code); if (o.safety !== null && o.safety !== undefined && safetyFromFile(it, o)) saf++; });
     const inFile = new Set(main.map(o => up(o.code))); const off = DB.rows('items').filter(it => it.buy && !inFile.has(up(it.code))).length;
     const parts = [[L('해외 주문 품목', 'Mã đặt nước ngoài'), main.length, 'info'], [L('ERP 품목과 같은 코드', 'Cùng mã ERP'), have, 'info'], [L('안전재고 넣음', 'Đặt tồn AT'), saf, 'info']];
     if (pools.length) parts.push([L('같은 코드 · 다른 구분 → 따로 관리하는 재고', 'Cùng mã · khác nhóm → tồn quản lý riêng'), pools.length, 'info']);
@@ -97,6 +105,8 @@
     if (diff.length) parts.push([L('단위가 ERP 와 다름 (안전재고는 파일 단위로 따로)', 'ĐV khác ERP (tồn AT theo ĐV file)'), diff.length, 'warn']);
     if (Bx.dups.length) parts.push([L('같은 코드 · 같은 구분이 두 번 (첫 줄 사용)', 'Mã lặp cùng nhóm (dùng dòng đầu)'), Bx.dups.length, 'warn']);
     if (off) parts.push([L('목록에서 빠짐 (이 파일에 없음)', 'Bỏ khỏi danh sách (không có trong file)'), off, 'neutral']);
+    const keepS = main.filter(o => { const it = IT.get(o.code); if (!it || o.safety === null || o.safety === undefined || safetyFromFile(it, o)) return false; const same = !o.unit || unitSame(o.unit, it.unit); return +(same ? it.safety : it.buy_safety) !== o.safety; });
+    if (keepS.length) parts.push([L('ERP 에서 정한 안전재고는 그대로 (파일과 다름)', 'Giữ tồn AT đã đặt trong ERP (khác file)'), keepS.length, 'neutral']);
     const list = (a) => a.slice(0, 8).join(', ') + (a.length > 8 ? ' …' : '');
     const pool = (o) => o.code + ' (' + o.pool + L(' — 재고 ', ' — tồn ') + F.n(o.inv) + L(' · 안전재고 ', ' · tồn AT ') + F.n(o.safety) + ')';
     return { parts, detail: [miss.length ? L('새 품목: ', 'Mã mới: ') + list(miss) : '', diff.length ? L('단위 다름: ', 'ĐV khác: ') + list(diff) : '', pools.length ? L('따로 관리: ', 'Quản lý riêng: ') + list(pools.map(pool)) : '',
@@ -113,7 +123,8 @@
       const patch = { buy: true, buy_cat: o.cat || undefined, buy_ord: o.ord, buy_unit: o.unit || undefined, buy_inv: o.inv === null || o.inv === undefined ? undefined : o.inv, buy_inv_date: Bx.fdate };
       if (o.kr) patch.name_kr = o.kr;
       // 안전재고: 파일 단위가 ERP 단위와 같으면 품목의 안전재고(원부자재 재고 · 발주에도 쓰임), 다르면 해외 주문 표에서만 쓰는 buy_safety
-      if (o.safety !== null && o.safety !== undefined) { if (!o.unit || unitSame(o.unit, it.unit)) { patch.safety = o.safety; patch.buy_safety = undefined; } else patch.buy_safety = o.safety; }
+      // 1.11.5: 처음 목록에 들어올 때 · 비어 있을 때만 파일 값 — 그 뒤 ERP 에서 정한 값은 그대로
+      if (o.safety !== null && o.safety !== undefined && safetyFromFile(it, o)) { if (!o.unit || unitSame(o.unit, it.unit)) { patch.safety = o.safety; patch.buy_safety = undefined; } else patch.buy_safety = o.safety; }
       DB.update('items', it._id, patch); updated++;
     });
     DB.rows('items').forEach(it => { if (it.buy && !inFile.has(it._id)) { DB.update('items', it._id, { buy: false }); off++; } });
@@ -123,7 +134,11 @@
       const it = IT.get(o.code); const code = it ? it.code : o.code; const k = pkey({ code, pool: o.pool }); keepP.add(k);
       const p = { code, cat: o.pool, name: o.name || (it ? it.name : undefined), name_kr: o.kr || undefined, unit: o.unit || undefined, safety: o.safety === null ? undefined : o.safety,
         inv: o.inv === null ? undefined : o.inv, inv_date: Bx.fdate, ord: o.ord };
-      const e = idxP.get(k); if (e) { DB.update('buy_pools', e._id, p); updated++; } else { DB.add('buy_pools', pick(p)); poolAdd++; }
+      const e = idxP.get(k);
+      if (e) {   // 1.11.5: 안전재고는 ERP 값 그대로, 재고는 파일 날짜가 ERP 에서 고친 날보다 새것일 때만
+        delete p.safety; if (!(str(Bx.fdate) > str(e.inv_date))) { delete p.inv; delete p.inv_date; }
+        DB.update('buy_pools', e._id, p); updated++;
+      } else { DB.add('buy_pools', pick(p)); poolAdd++; }
     });
     const goneP = curP.filter(p => !keepP.has(pkey({ code: p.code, pool: p.cat }))).map(p => p._id); if (goneP.length) DB.remove('buy_pools', goneP);
     return { added: r.created.length + poolAdd, updated, removed: off + goneP.length, skipped: Bx.dups.length };
@@ -135,18 +150,20 @@
     const want = new Map(), incW = new Map();
     job.rows.forEach(r => { if (r.kind === 'inc') incW.set(pkey(r), r); else want.set(okey(r.date, r), r); });
     const codes = new Set(Bx.rows.map(o => pkey(o))), dates = new Set(Bx.dates);   // 품목코드 + 따로 관리하는 구분
-    const add = [], upd = [], del = []; let kept = 0;
-    want.forEach((r, k) => { const e = dated.get(k); if (!e) add.push(r); else if (e.status === 'recv') kept++; else if (num(e.qty) !== r.qty || str(e.unit) !== str(r.unit)) upd.push([e, { qty: r.qty, unit: r.unit || undefined }]); });
-    cur.forEach(o => { if (o.kind !== 'inc' && o.status !== 'recv' && dates.has(o.date) && codes.has(pkey(o)) && !want.has(okey(o.date, o))) del.push(o); });
+    const add = [], upd = [], del = []; let kept = 0, erp = 0;
+    const mine = (o) => o.src === 'file';   // 1.11.5: 파일에서 온 주문만 파일 값으로 바꾸거나 지운다 (ERP 에서 넣은 주문은 그대로)
+    want.forEach((r, k) => { const e = dated.get(k); if (!e) add.push(r); else if (e.status === 'recv') kept++; else if (!mine(e)) erp++; else if (num(e.qty) !== r.qty || str(e.unit) !== str(r.unit)) upd.push([e, { qty: r.qty, unit: r.unit || undefined }]); });
+    cur.forEach(o => { if (o.kind !== 'inc' && o.status !== 'recv' && mine(o) && dates.has(o.date) && codes.has(pkey(o)) && !want.has(okey(o.date, o))) del.push(o); });
     // 입고예정 칸: 품목마다 입고 대기 '입고예정' 한 줄 = 파일 값 (파일에 없으면 지움)
     codes.forEach(c => {
-      const os = cur.filter(o => o.kind === 'inc' && o.status !== 'recv' && pkey(o) === c); const w = incW.get(c);
+      if (cur.some(o => o.kind === 'inc' && o.status !== 'recv' && !mine(o) && pkey(o) === c)) { erp++; return; }   // ERP 에서 넣은 입고예정은 그대로
+      const os = cur.filter(o => o.kind === 'inc' && o.status !== 'recv' && mine(o) && pkey(o) === c); const w = incW.get(c);
       if (!w) { os.forEach(o => del.push(o)); return; }
       if (!os.length) { add.push(w); return; }
       if (num(os[0].qty) !== w.qty || str(os[0].unit) !== str(w.unit)) upd.push([os[0], { qty: w.qty, unit: w.unit || undefined, date: w.date }]);
       os.slice(1).forEach(o => del.push(o));
     });
-    return { add, upd, del, kept };
+    return { add, upd, del, kept, erp };
   }
   function previewOrders(job) {
     const Bx = job.B; const p = planOrders(job); const byDate = {}; job.rows.forEach(r => { if (r.kind !== 'inc') byDate[r.date] = (byDate[r.date] || 0) + 1; });
@@ -154,6 +171,7 @@
     const parts = [[L('주문', 'Đơn'), job.rows.length, 'info'], [L('새 주문', 'Đơn mới'), p.add.length, p.add.length ? 'info' : 'neutral']];
     if (p.upd.length) parts.push([L('수량 바뀜', 'Đổi SL'), p.upd.length, 'info']); if (p.del.length) parts.push([L('파일에서 지운 주문', 'Đơn đã xóa trong file'), p.del.length, 'warn']);
     if (p.kept) parts.push([L('입고 완료로 둔 주문은 그대로', 'Giữ đơn đã nhập'), p.kept, 'neutral']);
+    if (p.erp) parts.push([L('ERP 에서 넣은 주문은 그대로', 'Giữ đơn nhập trong ERP'), p.erp, 'neutral']);
     return { parts, detail: L('주문일 칸: ', 'Cột ngày đặt: ') + (Bx.dates.length ? Bx.dates.map(d => d + ' (' + (byDate[d] || 0) + ')').join(' · ') : L('없음', 'không có')) + (inc ? L(' · 입고예정 ', ' · Sắp nhập ') + inc : '') + ' · ' + L('파일 날짜 ', 'Ngày file ') + Bx.fdate };
   }
   function applyOrders(job) {

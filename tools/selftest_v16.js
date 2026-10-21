@@ -215,20 +215,26 @@ function buyBook(rows, fileDate) {
   });
 
   // ------------------------------------------------------------------------------------------
-  await sec('6. 같은 파일을 다시 올려도 늘지 않음 (입고 완료 · ERP 주문은 그대로)', async () => {
+  await sec('6. 같은 파일을 다시 올려도 늘지 않음 · ERP 에서 넣은 주문과 정한 안전재고는 그대로 (1.11.5)', async () => {
+    // ERP 에서: R-011 안전재고 360 으로 · 파일의 주문일(10-21)에 R-021 주문 30 (+ 5장에서 넣은 R-015 입고예정 60)
+    await ev(async () => { const DB = ERP.db; DB.update('items', ERP.inv.item('R-011')._id, { safety: 360 }); DB.add('buy_orders', { date: '2026-10-21', code: 'R-021', name: 'YELLOW 2GS', qty: 30, unit: 'kg', status: 'open', src: 'erp' }); await DB.flush(); });
     const before = await ev(() => ({ items: ERP.db.rows('items').length, orders: ERP.db.rows('buy_orders').length, recv: ERP.db.rows('buy_orders').filter(o => o.status === 'recv').length, buy: ERP.db.rows('items').filter(m => m.buy).length }));
     await ev(() => { ERP.state.dataTab = 'import'; ERP.state.imp = { jobs: [] }; ERP.goto('data'); ERP.render(); }); await A.waitForTimeout(300);
     await A.setInputFiles('.drop input[type=file]', [fb]); await A.waitForFunction(() => ERP.state.imp.jobs.length >= 2, null, { timeout: 60000 }); await A.waitForTimeout(300);
-    const p = await ev(() => ERP.state.imp.jobs.filter(x => x.kind === 'buy_orders').map(x => x.preview(x).parts.map(q => q[0] + '=' + q[1]))[0]);
-    ok('미리보기: 새 주문 0 · 입고 완료로 둔 주문 1 그대로 · 파일의 입고예정 칸에 없는 R-015 입고예정 1 지움', p.includes('새 주문=0') && p.includes('입고 완료로 둔 주문은 그대로=1') && p.includes('파일에서 지운 주문=1'), p);
+    const pv = await ev(() => { const g = (k) => { const x = ERP.state.imp.jobs.find(j => j.kind === k); return x.preview(x).parts.map(q => q[0] + '=' + q[1]); }; return { o: g('buy_orders'), i: g('buy_items') }; });
+    ok('미리보기: 새 주문 0 · 입고 완료 1 그대로 · ERP 에서 넣은 입고예정 1 그대로 · 지우는 주문 없음 / ERP 에서 정한 안전재고 1 그대로', pv.o.includes('새 주문=0') && pv.o.includes('입고 완료로 둔 주문은 그대로=1') && pv.o.includes('ERP 에서 넣은 주문은 그대로=1') && !pv.o.some(x => /파일에서 지운 주문/.test(x)) && pv.i.includes('ERP 에서 정한 안전재고는 그대로 (파일과 다름)=1'), pv);
     await ev(() => { ERP.state.imp.jobs.filter(x => x.kind === 'buy_stock').forEach(x => { x.include = false; }); });   // 재고 맞춤은 8-2 에서
     await A.click('text=선택 항목 모두 반영');
     await A.waitForFunction(() => !!Array.from(document.querySelectorAll('main h3')).find(x => /반영 결과/.test(x.textContent)), null, { timeout: 60000 });
     const after = await ev(() => ({ items: ERP.db.rows('items').length, orders: ERP.db.rows('buy_orders').length, recv: ERP.db.rows('buy_orders').filter(o => o.status === 'recv').length, buy: ERP.db.rows('items').filter(m => m.buy).length }));
-    eq('품목 · 입고 완료 · 해외 주문 품목 그대로, 주문은 R-015 입고예정만 빠짐 (ERP 에서 넣은 10-25 주문은 그대로)', after, Object.assign({}, before, { orders: before.orders - 1 }));
+    eq('품목 · 주문 수 · 입고 완료 · 해외 주문 품목 그대로 (ERP 에서 넣은 주문은 지우지 않음)', after, before);
+    eq('ERP 에서 넣은 주문 그대로: 10-21 R-021 30 · R-015 입고예정 60', await ev(() => ERP.db.rows('buy_orders').filter(o => o.src === 'erp' && ((o.code === 'R-021' && o.date === '2026-10-21') || (o.code === 'R-015' && o.kind === 'inc'))).map(o => [o.code, o.kind || '', o.qty]).sort()), [['R-015', 'inc', 60], ['R-021', '', 30]]);
+    eq('ERP 에서 정한 안전재고 그대로 (R-011 360, 파일은 350)', await ev(() => ERP.inv.item('R-011').safety), 360);
     eq('10-25 주문 그대로 (파일에 없는 날짜, 따로 관리 줄 주문 포함)', await ev(() => ERP.db.rows('buy_orders').filter(o => o.date === '2026-10-25').length), 6);
     eq('따로 관리하는 재고 그대로 (1줄)', await ev(() => ERP.db.rows('buy_pools').length), 1);
     eq('R-011 품목별 리드타임 그대로', await ev(() => ERP.inv.item('R-011').lead_days), 60);
+    // 다음 장을 위해 되돌림 (안전재고 350 · 넣었던 주문 지움)
+    await ev(async () => { const DB = ERP.db; DB.update('items', ERP.inv.item('R-011')._id, { safety: 350 }); DB.remove('buy_orders', DB.rows('buy_orders').filter(o => o.src === 'erp' && ((o.code === 'R-021' && o.date === '2026-10-21') || (o.code === 'R-015' && o.kind === 'inc'))).map(o => o._id)); await DB.flush(); });
   });
 
   // ------------------------------------------------------------------------------------------
