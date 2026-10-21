@@ -24,8 +24,8 @@ const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, 
 const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 0.01;
 
 /** 자재구매 파일 흉내 (Oder Korea: 제목 · Date : · 머리 줄(날짜 칸은 날짜 숫자) · 엑셀 표 머리 줄 · 자료) + 다른 시트 */
-function buyBook(rows) {
-  const head = [[null, 'Bosung Vina Purchase of materials', null, 'Author : ', 'Test'], [null, null, null, 'Date : ', serial('2026-10-21')], [],
+function buyBook(rows, fileDate) {
+  const head = [[null, 'Bosung Vina Purchase of materials', null, 'Author : ', 'Test'], [null, null, null, 'Date : ', serial(fileDate || '2026-10-21')], [],
     [null, 'Category', 'Item Code', 'Item Name', 'Item Name Kr', 'Safety stock', 'Unit', 'Inventory', '입고예정', serial('2026-10-21'), serial('2026-09-21'), 'Total', 'kg/month', 'ea/month', 'Max', 'Min', 'Average'],
     [null, 'Category', 'Item Code', 'Item Name', 'Item Name Kr', 'Safety stock', 'Unit', 'Inventory', '열3', '열2', '열1', '3일', 'Column132', 'Column133', 'Column134', 'Column135', 'Column136']];
   const wb = XLSX.utils.book_new();
@@ -93,7 +93,7 @@ function buyBook(rows) {
     const j = await ev(() => ERP.state.imp.jobs.map(x => ({ sheet: x.sheet, kind: x.kind || null, n: x.rows.length, include: !!x.include, B: x.B ? { dates: x.B.dates, fdate: x.B.fdate, dups: x.B.dups.map(d => d.code), codes: x.B.rows.map(r => r.code) } : null,
       p: x.preview ? x.preview(x).parts.map(q => q[0] + '=' + q[1]) : null, rows: x.kind === 'buy_orders' ? x.rows : null })));
     const by = Object.fromEntries(j.filter(x => x.kind).map(x => [x.kind, x]));
-    eq('작업: 해외 주문 품목 · 주문 (다른 시트는 인식 안 함)', [Object.keys(by).sort(), j.filter(x => !x.kind).map(x => x.sheet).sort()], [['buy_items', 'buy_orders'], ['Sheet1', 'Sheet3']]);
+    eq('작업: 해외 주문 품목 · 주문 (다른 시트는 인식 안 함)', [Object.keys(by).sort(), j.filter(x => !x.kind).map(x => x.sheet).sort()], [['buy_items', 'buy_orders', 'buy_stock'], ['Sheet1', 'Sheet3']]);
     eq('파일 순서 · 엑셀 표 머리 줄 건너뜀 · 두 번 있는 코드는 첫 줄', [by.buy_items.B.codes, by.buy_items.B.dups], [['R-200', 'R-011', 'R-021', 'R-015', 'R-031A', 'R-001', 'R-380', 'R-300C', 'R-027P'], ['R-015', 'R-027P']]);
     eq('주문일 칸 (머리 칸의 날짜) · 파일 날짜 (Date : 옆 칸)', [by.buy_items.B.dates, by.buy_items.B.fdate], [['2026-10-21', '2026-09-21'], '2026-10-21']);
     const p = by.buy_items.p;
@@ -104,6 +104,7 @@ function buyBook(rows) {
 
   // ------------------------------------------------------------------------------------------
   await sec('2. 반영 → 품목 · 안전재고 · 주문', async () => {
+    await ev(() => { ERP.state.imp.jobs.filter(x => x.kind === 'buy_stock').forEach(x => { x.include = false; }); });   // 재고 맞춤은 8-2 에서
     await A.click('text=선택 항목 모두 반영');
     await A.waitForFunction(() => !!Array.from(document.querySelectorAll('main h3')).find(x => /반영 결과/.test(x.textContent)), null, { timeout: 60000 });
     await ev(async () => { if (ERP.db.flush) await ERP.db.flush(); });
@@ -197,6 +198,7 @@ function buyBook(rows) {
     await A.setInputFiles('.drop input[type=file]', [fb]); await A.waitForFunction(() => ERP.state.imp.jobs.length >= 2, null, { timeout: 60000 }); await A.waitForTimeout(300);
     const p = await ev(() => ERP.state.imp.jobs.filter(x => x.kind === 'buy_orders').map(x => x.preview(x).parts.map(q => q[0] + '=' + q[1]))[0]);
     ok('미리보기: 새 주문 0 · 입고 완료로 둔 주문 1 그대로 · 파일의 입고예정 칸에 없는 R-015 입고예정 1 지움', p.includes('새 주문=0') && p.includes('입고 완료로 둔 주문은 그대로=1') && p.includes('파일에서 지운 주문=1'), p);
+    await ev(() => { ERP.state.imp.jobs.filter(x => x.kind === 'buy_stock').forEach(x => { x.include = false; }); });   // 재고 맞춤은 8-2 에서
     await A.click('text=선택 항목 모두 반영');
     await A.waitForFunction(() => !!Array.from(document.querySelectorAll('main h3')).find(x => /반영 결과/.test(x.textContent)), null, { timeout: 60000 });
     const after = await ev(() => ({ items: ERP.db.rows('items').length, orders: ERP.db.rows('buy_orders').length, recv: ERP.db.rows('buy_orders').filter(o => o.status === 'recv').length, buy: ERP.db.rows('items').filter(m => m.buy).length }));
@@ -231,6 +233,41 @@ function buyBook(rows) {
   });
 
   // ------------------------------------------------------------------------------------------
+  await sec('8-2. 재고를 파일 재고(Inventory 칸)에 맞춤 (1.11.1 — 파일 날짜에 조정)', async () => {
+    // 오늘 날짜 파일: R-011 250 (ERP 200 → +50) · R-021 380 (400 → −20) · R-380 1,100 kg (16.8 ROLL → 17.6 ROLL) · R-300C 재고 칸 빈칸 · 나머지는 ERP 와 같음
+    const inv = { 'R-011': 250, 'R-021': 380, 'R-380': 1100 };
+    const mk = (over) => ROWS.map(r => { const x = r.slice(); if (x[2] in over) x[7] = over[x[2]]; return x; });
+    const f2 = path.join(xdir, 'buy_today.xlsx'), f3 = path.join(xdir, 'buy_today_b.xlsx');
+    XLSX.writeFile(buyBook(mk(inv), today), f2); XLSX.writeFile(buyBook(mk(Object.assign({}, inv, { 'R-011': 260 })), today), f3);
+    const up = async (f) => {
+      await ev(() => { ERP.state.dataTab = 'import'; ERP.state.imp = { jobs: [] }; ERP.goto('data'); ERP.render(); }); await A.waitForTimeout(300);
+      await A.setInputFiles('.drop input[type=file]', [f]); await A.waitForFunction(() => ERP.state.imp.jobs.length >= 3, null, { timeout: 60000 }); await A.waitForTimeout(300);
+      const p = await ev(() => { const j = ERP.state.imp.jobs.find(x => x.kind === 'buy_stock'); const v = j.preview(j); return { parts: v.parts.map(q => q[0] + '=' + q[1]), detail: v.detail, include: !!j.include }; });
+      await A.click('text=선택 항목 모두 반영');
+      await A.waitForFunction(() => !!Array.from(document.querySelectorAll('main h3')).find(x => /반영 결과/.test(x.textContent)), null, { timeout: 60000 });
+      await ev(async () => { if (ERP.db.flush) await ERP.db.flush(); });
+      return p;
+    };
+    const adjOf = () => ev(() => ERP.db.rows('stock_tx').filter(t => t.src === 'buy').map(t => [t.date, t.code, t.kind, t.qty, t.unit, t.to_scope, t.purpose]).sort((a, b) => a[1].localeCompare(b[1])));
+    const balOf = () => ev(() => ['R-011', 'R-021', 'R-380', 'R-200', 'R-001'].map(c => Math.round(ERP.calc.stock().get(c).bal * 10000) / 10000));
+    let p = await up(f2);
+    ok('미리보기: 재고 맞춤 3 (오늘 조정) · 이미 같음 5 · 파일에 재고 없음 1 · 기본으로 반영', p.include && p.parts.includes('재고 맞춤 (' + today + ' 조정)=3') && p.parts.includes('이미 같음=5') && p.parts.includes('파일에 재고 없음 (그대로)=1'), p);
+    ok('미리보기 내용: R-011 200 → 250 kg (+50) · R-021 400 → 380 (-20) · R-380 16.8 → 17.6 ROLL (+0.8)', /R-011 200 → 250 kg \(\+50\)/.test(p.detail) && /R-021 400 → 380 kg \(-20\)/.test(p.detail) && /R-380 16\.8 → 17\.6 ROLL \(\+0\.8\)/.test(p.detail), p.detail);
+    eq('조정 3줄 (파일 날짜 · 창고 · 재고 맞춤)', await adjOf(), [[today, 'R-011', 'ADJ', 50, 'kg', 'WH', '자재구매 파일 재고 맞춤'], [today, 'R-021', 'ADJ', -20, 'kg', 'WH', '자재구매 파일 재고 맞춤'], [today, 'R-380', 'ADJ', 0.8, 'ROLL', 'WH', '자재구매 파일 재고 맞춤']]);
+    eq('ERP 재고 = 파일 재고 (R-011 250 · R-021 380 · R-380 17.6 ROLL = 1,100 kg) · 같던 품목은 그대로', await balOf(), [250, 380, 17.6, 4662000, 1380]);
+    p = await up(f2);
+    ok('같은 파일을 다시 올리면: 같은 날 예전 조정 3을 바꿈 (늘지 않음)', p.parts.includes('같은 날 예전 조정은 바꿈=3') && p.parts.includes('재고 맞춤 (' + today + ' 조정)=3'), p);
+    eq('다시 올려도 조정 3줄 · 재고 그대로', [(await adjOf()).length, await balOf()], [3, [250, 380, 17.6, 4662000, 1380]]);
+    await up(f3);
+    eq('같은 날 파일의 R-011 이 260 이면 그 날 조정만 다시 (+60) → 260', [(await adjOf()).map(a => [a[1], a[3]]), (await balOf())[0]], [[['R-011', 60], ['R-021', -20], ['R-380', 0.8]], 260]);
+    await ev(() => ERP.goStock('buy')); await A.waitForFunction(() => !!document.querySelector('main table.buy-tbl'), null, { timeout: 15000 });
+    const r = await rowOf('R-011'); const t = await buyText();
+    ok('해외 주문 표: R-011 재고 260 (파일과 같아 "파일 …" 없음) · 위 숫자에 "파일 재고와 다름" 없음', r[6] === '260' && !/파일 재고와 다름/.test(t), { r6: r[6] });
+    await ev(() => { ERP.state.txl = { from: '2000-01-01', to: '2099-12-31', kind: '', src: '', q: 'R-011', page: 0 }; ERP.goStock('ledger'); ERP.render(); }); await A.waitForTimeout(400);
+    const lt = await buyText();
+    ok('수불 내역: 출처 자재구매 파일 · 용도 자재구매 파일 재고 맞춤', /자재구매 파일 재고 맞춤/.test(lt) && /자재구매 파일/.test(lt), lt.slice(0, 400));
+  });
+
   await sec('9. 휴대폰 폭 · 베트남어 · 오류 없음', async () => {
     await A.setViewportSize({ width: 375, height: 812 }); await ev(() => { ERP.goStock('buy'); ERP.render(); }); await A.waitForTimeout(500);
     const w = await ev(() => ({ doc: document.documentElement.scrollWidth, win: window.innerWidth, tbl: !!document.querySelector('main table.buy-tbl') }));

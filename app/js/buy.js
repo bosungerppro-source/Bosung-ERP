@@ -7,6 +7,8 @@
      월 사용량 = 창고 출고(외부 출고 + 공장으로 이동) 월별 합.
    · 리드타임(주문 → 입고 일수, 품목별 또는 기본값): 도착 예정 = 주문일 + 리드타임, 주문 필요 = 합계 − 리드타임 동안 쓸 양(월 평균 ÷ 30 × 일) < 안전재고.
    · 파일을 다시 올리면 파일에 있는 주문일 칸 · 입고예정 칸이 그 품목의 입고 대기 값이 된다 (입고 완료는 그대로, 파일에 없는 날짜의 주문도 그대로).
+   · 1.11.1: 자재구매 파일의 재고(Inventory 칸)가 맞다 (사용자 2026-10-21) → 올리면 파일 날짜에 조정(ADJ, src 'buy')으로 ERP 재고를 그 값에 맞춘다.
+     같은 날짜의 파일을 다시 올리면 그 날의 이 조정만 다시 계산한다 (창고 입출고장을 다시 올려도 이 조정은 그대로).
    · 입고 완료는 주문을 입고 대기에서 빼기만 한다 — 재고는 창고 입출고장 · 수불 입력으로 들어온다 (두 번 세지 않게). */
 (function () {
   'use strict';
@@ -55,7 +57,9 @@
       { table: 'items', rows: rows.map(o => ({ code: o.code, name: o.name })), custom: 'buy', mode: 'buy', prio: 0.6, kind: 'buy_items', B: Bx, date: fdate,
         label: label + ' → ' + L('해외 주문 품목 · 안전재고', 'mã đặt nước ngoài · tồn AT'), modes: () => ({ buy: L('해외 주문 품목으로 표시 · 안전재고 · 없는 품목 만들기', 'Đánh dấu · tồn AT · thêm mã thiếu') }), apply: applyItems, preview: previewItems },
       { table: 'buy_orders', rows: orderRows, custom: 'buy', mode: 'buy', prio: 4.5, kind: 'buy_orders', B: Bx,
-        label: label + ' → ' + L('주문 (주문일별 수량)', 'đơn đặt (theo ngày)'), modes: () => ({ buy: L('주문일 칸 · 입고예정 칸 그대로 (입고 완료로 둔 주문은 그대로)', 'Theo cột ngày đặt · sắp nhập (giữ đơn đã nhập)') }), apply: applyOrders, preview: previewOrders }];
+        label: label + ' → ' + L('주문 (주문일별 수량)', 'đơn đặt (theo ngày)'), modes: () => ({ buy: L('주문일 칸 · 입고예정 칸 그대로 (입고 완료로 둔 주문은 그대로)', 'Theo cột ngày đặt · sắp nhập (giữ đơn đã nhập)') }), apply: applyOrders, preview: previewOrders },
+      { table: 'stock_tx', rows: rows.filter(o => o.inv !== null && o.inv !== undefined).map(o => ({ date: fdate, code: o.code, qty: o.inv })), custom: 'buy', mode: 'buy', prio: 4.6, kind: 'buy_stock', B: Bx, date: fdate,
+        label: label + ' → ' + L('재고를 파일 재고(Inventory)에 맞춤', 'khớp tồn theo file (Inventory)'), modes: () => ({ buy: L('파일 날짜에 조정으로 맞춤 (다시 올리면 그 날 조정만 다시)', 'Điều chỉnh tại ngày file (tải lại thì tính lại)') }), apply: applyStock, preview: previewStock }];
   });
 
   /** 파일 품목 → ERP 품목. 없으면 새로 (kg 은 원재료, 그 밖은 부자재 — 이름 · 단위는 파일 그대로) */
@@ -133,6 +137,38 @@
     return { added: p.add.length, updated: p.upd.length, removed: p.del.length, skipped: p.kept };
   }
 
+  /** 1.11.1: 파일의 재고(Inventory) → 파일 날짜의 ERP 재고와의 차이만큼 조정. 같은 날의 예전 조정(src 'buy')은 빼고 계산해 바꾼다 */
+  function planStock(job) {
+    const Bx = job.B; const d = Bx.fdate; const IT = INV.items(); const st = C.stock(d); const codes = new Set(Bx.rows.map(o => up(o.code)));
+    const old = DB.rows('stock_tx').filter(t => t.src === 'buy' && t.kind === 'ADJ' && t.date === d && codes.has(up(t.code)));
+    const oldBy = new Map(); old.forEach(t => { const k = up(t.code); oldBy.set(k, (oldBy.get(k) || 0) + num(t.qty)); });
+    const adj = [], same = [], noInv = [], noConv = [];
+    Bx.rows.forEach(o => {
+      if (o.inv === null || o.inv === undefined) { noInv.push(o.code); return; }
+      const it = IT.get(o.code);   // 없으면 품목 작업이 파일 단위로 만든다 (재고 0)
+      const want = it ? B.toErp(it, o.inv, o.unit) : o.inv; if (want === null) { noConv.push(o.code + ' (' + o.unit + ' ≠ ' + INV.unitShow(it.unit) + ')'); return; }
+      const s = it ? st.get(it.code) : null; const bal = (s ? s.bal : 0) - (oldBy.get(up(o.code)) || 0);
+      const q = Math.round((want - bal) * 10000) / 10000;
+      if (Math.abs(q) < 1e-6) { same.push(o.code); return; }
+      adj.push({ code: it ? it.code : o.code, name: it ? it.name : (o.name || o.kr || o.code), unit: it ? INV.unitShow(it.unit) : (INV.unitN(o.unit) === 'kg' ? 'kg' : o.unit), qty: q, from: bal, to: want });
+    });
+    return { d, adj, same, noInv, noConv, old };
+  }
+  function previewStock(job) {
+    const p = planStock(job); const fmt = (v) => F.n(v, isInt(v) ? 0 : 2);
+    const parts = [[L('재고 맞춤 (' + p.d + ' 조정)', 'Khớp tồn (điều chỉnh ' + p.d + ')'), p.adj.length, p.adj.length ? 'info' : 'neutral'], [L('이미 같음', 'Đã khớp'), p.same.length, 'neutral']];
+    if (p.noInv.length) parts.push([L('파일에 재고 없음 (그대로)', 'File không có tồn (giữ nguyên)'), p.noInv.length, 'neutral']);
+    if (p.noConv.length) parts.push([L('단위를 못 바꿈 (그대로)', 'Không đổi được ĐV (giữ nguyên)'), p.noConv.length, 'warn']);
+    if (p.old.length) parts.push([L('같은 날 예전 조정은 바꿈', 'Thay điều chỉnh cũ cùng ngày'), p.old.length, 'neutral']);
+    return { parts, detail: p.adj.slice(0, 8).map(a => a.code + ' ' + fmt(a.from) + ' → ' + fmt(a.to) + ' ' + a.unit + ' (' + (a.qty > 0 ? '+' : '') + fmt(a.qty) + ')').join(' · ') + (p.adj.length > 8 ? ' …' : '') + (p.noConv.length ? ' · ' + L('단위를 못 바꿈: ', 'Không đổi ĐV: ') + p.noConv.join(', ') : '') };
+  }
+  function applyStock(job) {
+    const p = planStock(job);
+    if (p.old.length) DB.remove('stock_tx', p.old.map(t => t._id));
+    if (p.adj.length) DB.addMany('stock_tx', p.adj.map(a => pick({ date: p.d, kind: 'ADJ', to_scope: 'WH', code: a.code, name: a.name, qty: a.qty, unit: a.unit, purpose: '자재구매 파일 재고 맞춤', note: job.B.file || undefined, src: 'buy' })));
+    return { added: p.adj.length, removed: p.old.length, skipped: p.noInv.length + p.noConv.length };
+  }
+
   // ===================================================================== 계산
   /** 기본 리드타임 (설정, 비어 있으면 null) · 품목 리드타임 */
   B.lead = () => { const v = num(DB.setting('buyLead', '')); return v > 0 ? v : null; };
@@ -147,6 +183,15 @@
     const k = num(it.kg_per_ea); if (!(k > 0)) return null;
     if (bu === 'kg') return q * k;
     if (iu === 'kg') return q / k;
+    return null;
+  };
+  /** 해외 주문 단위 수량 → ERP 단위 (B.toBuy 의 반대). 못 바꾸면 null */
+  B.toErp = function (it, q, unit) {
+    const bu = INV.unitN(unit || B.unitOf(it)), iu = INV.unitN(it.unit);
+    if (!bu || !iu || bu === iu) return q;
+    const k = num(it.kg_per_ea); if (!(k > 0)) return null;
+    if (bu === 'kg') return q / k;
+    if (iu === 'kg') return q * k;
     return null;
   };
   /** 해외 주문 표에서 쓰는 안전재고 (해외 주문 단위) */

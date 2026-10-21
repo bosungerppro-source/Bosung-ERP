@@ -38,7 +38,7 @@
   /** 14차: 거래처 (업체코드) · 용도 · Lot · 색깔 · 비고 (창고 입출고장 I 칸에서 나눈 것) */
   const partnerText = (t) => (t.partner ? t.partner + (t.partner_code ? ' (' + t.partner_code + ')' : '') : (t.partner_code || ''));
   const txNote = (t) => [t.purpose, t.lot ? 'Lot ' + t.lot : '', t.color ? L('색깔 ', 'màu ') + t.color : '', t.note].filter(Boolean).join(' · ');
-  const srcLabel = (t) => { const s = String(t.src || ''); if (s.indexOf('daily:') === 0) return L('생산 자동', 'Tự động SX'); if (s === 'manual') return L('화면 입력', 'Nhập tay'); if (s === 'wh') return L('창고 입출고장', 'Bảng kê NXT'); if (s === 'ledger') return L('KHO NVL 엑셀', 'Excel KHO NVL'); if (s.indexOf('xl') === 0) return L('엑셀 양식', 'Mẫu Excel'); if (s.indexOf('auto:') === 0) return L('자동 제안', 'Đề xuất'); if (s === 'outsource') return L('외주', 'Gia công'); return s; };
+  const srcLabel = (t) => { const s = String(t.src || ''); if (s.indexOf('daily:') === 0) return L('생산 자동', 'Tự động SX'); if (s === 'manual') return L('화면 입력', 'Nhập tay'); if (s === 'wh') return L('창고 입출고장', 'Bảng kê NXT'); if (s === 'ledger') return L('KHO NVL 엑셀', 'Excel KHO NVL'); if (s.indexOf('xl') === 0) return L('엑셀 양식', 'Mẫu Excel'); if (s.indexOf('auto:') === 0) return L('자동 제안', 'Đề xuất'); if (s === 'outsource') return L('외주', 'Gia công'); if (s === 'buy') return L('자재구매 파일', 'File mua NVL'); return s; };
 
   function basisLine() {
     const m = INV.meta(); const od = m.open;
