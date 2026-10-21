@@ -82,9 +82,10 @@ const logText = () => { try { return fs.readFileSync(path.join(UD, 'update', 'up
   fs.rmSync(W, { recursive: true, force: true }); fs.mkdirSync(W, { recursive: true });
   const setupA = build(A), setupB = build(B);
   ok('설치 파일 A · B', fs.existsSync(setupA) && fs.existsSync(setupB), [setupA, setupB]);
-  // 시험용 데이터 (업데이트 뒤에도 남는지 · 설치 전에 복사되는지)
+  // 시험용 데이터 (업데이트 뒤에도 남는지 · 설치 전에 복사되는지). 이미 쓰던 ERP 처럼 — seeded 표시가 없으면 처음 켤 때 예시 자료로 바뀐다
   fs.mkdirSync(path.join(UD, 'data', 'tables'), { recursive: true });
   fs.writeFileSync(path.join(UD, 'config.json'), JSON.stringify({ lan: false, port: PORT }));
+  const t0 = '2026-10-01T00:00:00.000Z'; fs.writeFileSync(path.join(UD, 'data', 'meta.json'), JSON.stringify({ seeded: t0, v6: t0, v11: t0 }));
   fs.writeFileSync(path.join(UD, 'data', 'tables', 'po.json'), JSON.stringify([{ _id: 'e2e1', po_no: 'E2E-PO-1', due: '2099-01-01', pcs: 1, sets: 1 }]));
   const poKept = () => { try { return JSON.parse(fs.readFileSync(path.join(UD, 'data', 'tables', 'po.json'), 'utf8')).some(r => r.po_no === 'E2E-PO-1'); } catch (e) { return false; } };
   let srv = null;
