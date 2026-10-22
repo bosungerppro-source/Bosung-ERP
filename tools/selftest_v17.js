@@ -5,7 +5,8 @@
    1 기본 표 = 조립 · 품목군 | 현재 재고 · 단계 카드 없음 · 2 월 열 없음 (예전 설정의 월 → 현재 재고)
    3 설정 (공정 · 품목군 · 행 · 열 · 범위 · 제목 · 재고 0 줄) → 저장 (다시 열어도 그대로) · 4 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히
    5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
-   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 8 이번 달 포장 누계 = pcs (1.12.3) · 9 베트남어 · 휴대폰 폭 · 오류 없음
+   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 8 이번 달 포장 누계 = pcs (1.12.3)
+   9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -233,12 +234,36 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     const k = await ev(() => { const e = document.querySelector('.wgrid .w[data-id=kpi_pck_month]'); return e ? { label: e.querySelector('.kpi-label').textContent, v: e.querySelector('.kpi-val .v').textContent, u: e.querySelector('.kpi-val .u').textContent, chip: e.querySelector('.kpi-note .chip').textContent, note: e.querySelector('.kpi-note span:last-child').textContent } : null; });
     // 기준일 10-12 → 이번 달 10-01 ~ 10-12: pcs 1,200 + 600 (10-12 의 30 세트는 pcs 0 이라 빠짐), 전월 동기 09-01 ~ 09-12: 2,400 + 120 = 2,520 → ▼ 29%
     eq('이번 달 포장 누계 = 1,800 pcs (세트 아님) · ▼ 29% (전월 동기 2,520 pcs) · pcs 없는 일보 1줄 (30세트) 빠짐', k, { label: '이번 달 포장 누계', v: '1,800', u: 'pcs', chip: '▼ 29%', note: '전월 동기 대비 · pcs 없는 일보 1줄 (30세트) 빠짐' });
-    eq('휴대폰 요약도 같은 pcs (세트는 예전 칸에 그대로)', await ev(() => ERP.mobileSummary().kpi.pckMonth), { ok: 180, prev: 210, ea: 1800, prevEa: 2520, noN: 1, noSets: 30 });
+    eq('휴대폰 요약도 같은 pcs (세트는 예전 칸에 그대로, 1.12.4 지난달 9월 전체 12,519 pcs)', await ev(() => ERP.mobileSummary().kpi.pckMonth), { ok: 180, prev: 210, ea: 1800, prevEa: 2520, noN: 1, noSets: 30, lastEa: 12519, lastM: 9 });
     eq('기준일 포장 실적(세트)은 그대로', await ev(() => { const e = document.querySelector('.wgrid .w[data-id=kpi_pck_day]'); return [e.querySelector('.kpi-val .v').textContent, e.querySelector('.kpi-val .u').textContent]; }), ['30', '세트']);
     await ev(async () => { ERP.db.replace('prod_log', []); await ERP.db.flush(); });
   });
 
-  await sec('9. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
+  await sec('9. 숫자 카드의 남는 아래쪽에 지난달 값 (1.12.4) — 포장 누계 · 신규 수주 · 수주량, 같은 카드 안', async () => {
+    await ev(async () => { const DB = ERP.db; const pk = (date, set, ea) => ({ date, process: 'PCK', shift: 'D', ok_qty: set, ok_ea: ea, unit: 'set', source: 'test' });
+      DB.replace('prod_log', [pk('2026-10-05', 100, 1200), pk('2026-10-10', 50, 600), pk('2026-10-12', 30, 0), pk('2026-09-05', 200, 2400), pk('2026-09-11', 10, 120), pk('2026-09-20', 999, 9999), pk('2026-09-28', 5, 0)]);
+      const po = (po_no, date, due, pcs) => ({ po_no, item_no: 'T-P1', customer: 'TEST', kind: 'Pencil', sets: pcs / 12, pcs, date, due });
+      DB.replace('po', [po('PO-A', '2026-10-03', '2026-10-20', 1000), po('PO-B', '2026-10-08', '2026-11-05', 500), po('PO-C', '2026-09-02', '2026-09-15', 700), po('PO-C', '2026-09-02', '2026-09-25', 300), po('PO-D', '2026-09-20', '2026-10-25', 200)]);
+      await DB.flush();
+      ERP.db.setSetting('dash', [{ k: 'a', id: 'kpi_pck_month', w: 1 }, { k: 'b', id: 'kpi_new_po', w: 1 }, { k: 'c', id: 'kpi_orders_month', w: 1 }, { k: 'd', id: 'kpi_low', w: 1 }]);
+      ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); });
+    await settle();
+    const k = await ev(() => ['kpi_pck_month', 'kpi_new_po', 'kpi_orders_month'].map(id => { const w = document.querySelector('.wgrid .w[data-id=' + id + ']'); const card = w.querySelector('.card.kpi'); const p = card.querySelector(':scope > .kpi-prev');
+      return { id, v: card.querySelector('.kpi-val .v').textContent, chip: (card.querySelector('.kpi-note .chip') || {}).textContent || '', prev: p ? [p.querySelector('.kpi-prev-l').textContent, p.querySelector('b').textContent, (p.querySelector('.u') || {}).textContent || '', (p.querySelector('.x') || {}).textContent || ''] : null,
+        bottom: p ? Math.round(card.getBoundingClientRect().bottom - p.getBoundingClientRect().bottom) : null }; }));
+    eq('카드 아래 지난달 (9월): 포장 누계 12,519 pcs (9월 전체, pcs 없는 1줄 빠짐) · 신규 수주 1,200 pcs 2건 · 수주량(Checking) 1,000 pcs', k.map(x => [x.id, x.v, x.chip, x.prev]), [
+      ['kpi_pck_month', '1,800', '▼ 29%', ['지난달 (9월) 누계', '12,519', 'pcs', '(pcs 없는 1줄 빠짐)']],
+      ['kpi_new_po', '1,500', '2건', ['지난달 (9월)', '1,200', 'pcs', '2건']],
+      ['kpi_orders_month', '1,200', '▲ 20% 전월 대비', ['지난달 (9월)', '1,000', 'pcs', '']]]);
+    ok('따로 칸이 아니라 같은 카드 안 맨 아래 (카드 아래 여백만 남음) · 위젯 수 그대로 4', k.every(x => x.bottom !== null && x.bottom >= 0 && x.bottom < 30) && (await ev(() => document.querySelectorAll('.wgrid > .w').length)) === 4, k.map(x => x.bottom));
+    eq('휴대폰 요약: 지난달 포장 누계 12,519 pcs (9월)', await ev(() => { const p = ERP.mobileSummary().kpi.pckMonth; return [p.lastEa, p.lastM]; }), [12519, 9]);
+    await ev(() => ERP.setLang('vi')); await ev(() => ERP.render()); await settle();
+    eq('베트남어: Tháng trước (T9)', await ev(() => Array.from(document.querySelectorAll('.wgrid .kpi-prev-l')).map(x => x.textContent)), ['Tháng trước (T9) lũy kế', 'Tháng trước (T9)', 'Tháng trước (T9)']);
+    await ev(() => ERP.setLang('ko'));
+    await ev(async () => { ERP.db.replace('prod_log', []); ERP.db.replace('po', []); ERP.db.setSetting('dash', null); await ERP.db.flush(); });
+  });
+
+  await sec('10. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => ERP.setLang('vi')); await floor();
     const c = (await cards())[0];
     eq('베트남어: 제목 · 머리 · 합계', [c.title, c.head, c.rows.slice(-1)[0][0]], ['Lắp ráp — tồn', ['Nhóm', 'Tồn hiện tại'], 'Tổng']);

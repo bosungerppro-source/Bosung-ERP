@@ -21,6 +21,7 @@
     const pw = ERP.dashPrevMonth(ref);
     const pck = ctx.byProc.PCK || C.agg([]), avP = ctx.avg.PCK || 0, mP = ctx.monthAgg('PCK', ctx.mStart, ref), pP = ctx.monthAgg('PCK', pw[0], pw[1]);
     const mE = ctx.pckPcs(ctx.mStart, ref), pE = ctx.pckPcs(pw[0], pw[1]);   // 1.12.3: 이번 달 포장 누계 = pcs (종합 현황과 같음)
+    const lmEnd = F.addDays(ref.slice(0, 8) + '01', -1), lE = ctx.pckPcs(lmEnd.slice(0, 8) + '01', lmEnd);   // 1.12.4: 지난달 전체 포장 누계 (종합 현황 카드 아래와 같음)
     let run = 0, tot = 0; procs.forEach(p => { const r = ctx.machRun(p.id); run += r; tot += Math.max(ctx.machTotal(p.id), r); });
     const day = C.agg(ctx.dayRows); const inv = ERP.inv.rows();
     const days = []; for (let i = 0; i < 14; i++) days.push(F.addDays(ref, -i));
@@ -29,7 +30,7 @@
       v: 1, app: 'colorpencil-erp', erp: ERP.v, at: new Date().toISOString(), ref, today: F.today(),
       kpi: {
         pckDay: { ok: pck.ok, ea: pck.ea, n: pck.n, avgPct: avP ? Math.round(pck.ea / avP * 100) : null },
-        pckMonth: { ok: mP.ok, prev: pP.ok, ea: mE.pcs, prevEa: pE.pcs, noN: mE.noN, noSets: mE.noSets },
+        pckMonth: { ok: mP.ok, prev: pP.ok, ea: mE.pcs, prevEa: pE.pcs, noN: mE.noN, noSets: mE.noSets, lastEa: lE.pcs, lastM: +lmEnd.slice(5, 7) },
         due: { late: ctx.late.length, soon: ctx.soon.length, open: ctx.open.length },
         open: { n: ctx.open.length, prod: ctx.open.filter(o => o.st === 'prod').length, rem: ctx.open.reduce((a, o) => a + Math.max(0, o.sets - o.packed), 0) },
         low: ctx.low.length,

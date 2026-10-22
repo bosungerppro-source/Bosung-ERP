@@ -123,3 +123,25 @@
   - `test:v7` 148 / 148 (`ERP_PREV` = 1.11.5 소스).
   - `test:v9` 86 / 87: 실패 1개는 Windows 환경 차이로, 예전과 같다.
 - 설치 파일 `ColorPencil-ERP-Setup-1.12.3.exe`: 114,105,096 bytes, SHA-256 `16c37c3d40213285076953dad261d6ed0b853e65a257358f6150eba3775ac525` (electron-builder `--win dir` + NSIS 3.12). 데모 `dist/ERP_Demo.html` 7.4 MB.
+
+## 1.12.4 (2026-10-22) — 숫자 카드 아래 지난달 값
+- 사용자 (이번 달 포장 누계 · 신규 수주 · 수주량 카드 캡처와 함께): "칸듵에 빈공간이 있잖아? 거기에 저번달것도 표시해줘. 따로 칸을 만들라는 말이 아니다. 같은칸 공간 남는거에 저번달 포장누계. 신규수주. 수주량 넣어달라는 말이다. 이해했어?"
+- `p_dashboard.js`: `lastMonth(ref)` (지난달 1일 ~ 말일) · `withLast(카드, 이름, 값, 단위, 덧붙임)` — 카드(`.card.kpi`) 안 맨 아래에 `.kpi-prev` 를 붙인다.
+  - 카드는 세로 flex 이고 칸 높이만큼 늘어나므로 `margin-top:auto` 로 남는 아래쪽에 놓인다. 새 위젯은 없다.
+  - 포장 누계: "지난달 (9월) 누계" 포장 pcs (pcs 없는 줄 알림).
+  - 신규 수주: "지난달 (9월)" pcs · 건수 (수주일).
+  - 수주량: "지난달 (9월)" pcs (Checking, 전월 대비 % 의 그 값).
+- `mobile.js` · `google/Code.gs`: 휴대폰 포장 누계 줄에 지난달 pcs (`pckMonth.lastEa · lastM`). 휴대폰에는 신규 수주 · 수주량 카드가 없다.
+- `app.css`: `.kpi-prev` · `.kpi-prev-l` · `.kpi-prev-v`.
+- 이 PC 자료 복사본 (기준일 10-19):
+  - 포장 누계: 1,743,000 pcs → 지난달 (9월) 누계 7,202,480 pcs (pcs 없는 6줄 빠짐).
+  - 신규 수주: 2,772,608 pcs · 10건 → 지난달 1,195,344 pcs · 9건.
+  - 수주량: 5,696,664 pcs → 지난달 7,305,072 pcs.
+- 시험: `test:v17` 62.
+  - 9장: 세 카드의 지난달 값, 같은 카드 안 맨 아래 (카드 아래 여백 30px 안), 위젯 수 그대로, 휴대폰 요약, 베트남어 "Tháng trước (T9)".
+  - 8장의 휴대폰 요약 기대값에 `lastEa · lastM` 을 더했다.
+- 전체 시험 (1.12.4):
+  - `test:v17` 62 / 62 · `test:v16` 86 / 86 · `test:v15` 155 / 155 · `test:v14` 51 / 51 · `test:v13` 28 / 28 · `test:v12` 126 / 126 · `test:v11` 50 / 50 · `test:v8` 72 / 72 · `test:assistant` 290 / 290.
+  - `test:v7` 148 / 148 (`ERP_PREV` = 1.11.5 소스).
+  - `test:v9` 86 / 87: 실패 1개는 Windows 환경 차이로, 예전과 같다.
+- 설치 파일 `ColorPencil-ERP-Setup-1.12.4.exe`: 114,076,820 bytes, SHA-256 `0ecf57911fbbecadedc366c97074fabfbb189a73f0cb6ba1a46e63ee8be6bfa4` (electron-builder `--win dir` + NSIS 3.12). 데모 `dist/ERP_Demo.html` 7.4 MB.

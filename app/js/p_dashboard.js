@@ -59,6 +59,12 @@
   const procById = (id) => ERP.PROC.find(p => p.id === id) || ERP.PROC.find(p => p.id === 'ASM') || ERP.PROC[0];
   /** same window of the previous month (1st … same day) */
   const prevMonthWindow = (ref) => { const mStart = ref.slice(0, 8) + '01'; const pmLast = F.addDays(mStart, -1); const pm = pmLast.slice(0, 8) + '01'; const pmEnd = pmLast.slice(0, 8) + ref.slice(8, 10); return [pm, pmEnd < pmLast ? pmEnd : pmLast]; };
+  /** 1.12.4: 지난달 전체 (1일 ~ 말일) */
+  const lastMonth = (ref) => { const end = F.addDays(ref.slice(0, 8) + '01', -1); return { from: end.slice(0, 8) + '01', to: end, ym: end.slice(0, 7), m: +end.slice(5, 7) }; };
+  /** 1.12.4 (사용자): 숫자 카드의 남는 아래쪽에 지난달 값 — "따로 칸을 만들라는 말이 아니다. 같은칸 공간 남는거에" (카드 안 맨 아래) */
+  const withLast = (el, label, value, unit, extra) => { el.appendChild(h('div', { class: 'kpi-prev' }, h('div', { class: 'kpi-prev-l' }, label),
+    h('div', { class: 'kpi-prev-v' }, h('b', value), unit ? h('span', { class: 'u' }, unit) : null, extra ? h('span', { class: 'x' }, extra) : null))); return el; };
+  const lastLabel = (lm, ko2, vi2) => L('지난달 (' + lm.m + '월)' + (ko2 || ''), 'Tháng trước (T' + lm.m + ')' + (vi2 || ''));
 
   // ---------------------------------------------------------------- widget registry
   const W = ERP.widgets = {};
@@ -75,7 +81,9 @@
     go: () => () => ERP.goto('production'),
     render(ctx) { const m = ctx.pckPcs(ctx.mStart, ctx.ref); const pw = prevMonthWindow(ctx.ref); const p = ctx.pckPcs(pw[0], pw[1]);
       const miss = m.noN ? L(' · pcs 없는 일보 ' + m.noN + '줄 (' + F.n(m.noSets) + '세트) 빠짐', ' · ' + m.noN + ' dòng không có pcs (' + F.n(m.noSets) + ' bộ) không tính') : '';
-      return ERP.kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), F.n(m.pcs), 'pcs', 'neutral', p.pcs ? (m.pcs >= p.pcs ? '▲ ' : '▼ ') + F.n(Math.abs(m.pcs / p.pcs - 1) * 100, 0) + '%' : '–', L('전월 동기 대비', 'so với cùng kỳ tháng trước') + miss); } });
+      const lm = lastMonth(ctx.ref); const l = ctx.pckPcs(lm.from, lm.to);   // 1.12.4: 지난달 전체 누계
+      return withLast(ERP.kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), F.n(m.pcs), 'pcs', 'neutral', p.pcs ? (m.pcs >= p.pcs ? '▲ ' : '▼ ') + F.n(Math.abs(m.pcs / p.pcs - 1) * 100, 0) + '%' : '–', L('전월 동기 대비', 'so với cùng kỳ tháng trước') + miss),
+        lastLabel(lm, ' 누계', ' lũy kế'), F.n(l.pcs), 'pcs', l.noN ? L('(pcs 없는 ' + l.noN + '줄 빠짐)', '(' + l.noN + ' dòng không có pcs)') : null); } });
   reg('kpi_due', { ko: '납기 임박 / 경과 PO', vi: 'PO sắp / quá hạn', dko: '7일 내 납기 + 납기 경과(60일 이내) PO 수', dvi: 'PO đến hạn ≤7 ngày + quá hạn ≤60 ngày', cat: 'kpi', w: 1, sizes: [1, 2],
     go: () => () => { ERP.state.ord = Object.assign(ERP.state.ord || { view: 'po' }, { tab: 'late' }); ERP.goto('orders'); },
     render(ctx) { const late = ctx.late, soon = ctx.soon, open = ctx.open;
@@ -100,10 +108,14 @@
   reg('kpi_orders_month', { ko: '이번 달 수주량 (Checking)', vi: 'Đơn hàng tháng này (Checking)', dko: 'Checking(납기) 일이 이번 달인 수주 pcs · 전월 대비', dvi: 'Tổng pcs có ngày Checking trong tháng', cat: 'kpi', w: 1, sizes: [1, 2],
     go: () => () => ERP.goto('orders'),
     render(ctx) { const m = C.monthlyPO('due'); const ym = ctx.ref.slice(0, 7), pm = addM(ym, -1); const shown = new Set(C.poKindsShown()); const sum = (k) => Object.entries(m[k] || {}).reduce((a, [kd, v]) => a + (shown.has(kd) ? v : 0), 0); const v = sum(ym), pv = sum(pm);
-      return ERP.kpi(L('이번 달 수주량 (Checking)', 'Đơn hàng tháng (Checking)'), F.n(v), 'pcs', 'info', pv ? (v >= pv ? '▲ ' : '▼ ') + F.n(Math.abs(v / pv - 1) * 100, 0) + L('% 전월 대비', '% so với tháng trước') : '–', ym); } });
+      return withLast(ERP.kpi(L('이번 달 수주량 (Checking)', 'Đơn hàng tháng (Checking)'), F.n(v), 'pcs', 'info', pv ? (v >= pv ? '▲ ' : '▼ ') + F.n(Math.abs(v / pv - 1) * 100, 0) + L('% 전월 대비', '% so với tháng trước') : '–', ym),
+        lastLabel(lastMonth(ctx.ref)), F.n(pv), 'pcs'); } });   // 1.12.4: 지난달 수주량 (전월 대비의 그 값)
   reg('kpi_new_po', { ko: '이번 달 신규 수주', vi: 'PO mới trong tháng', dko: '수주일이 이번 달인 수주 pcs', dvi: 'Tổng pcs có ngày đặt trong tháng', cat: 'kpi', w: 1, sizes: [1, 2],
     go: () => () => ERP.goto('orders'),
-    render(ctx) { const rows = DB.rows('po').filter(p => String(p.date || '') >= ctx.mStart && String(p.date || '') <= ctx.ref); return ERP.kpi(L('이번 달 신규 수주', 'PO mới trong tháng'), F.n(rows.reduce((a, p) => a + C.num(p.pcs), 0)), 'pcs', 'info', new Set(rows.map(p => p.po_no)).size + L('건', ' đơn'), L('수주일 기준', 'theo ngày đặt')); } });
+    render(ctx) { const rows = DB.rows('po').filter(p => String(p.date || '') >= ctx.mStart && String(p.date || '') <= ctx.ref);
+      const lm = lastMonth(ctx.ref); const last = DB.rows('po').filter(p => String(p.date || '') >= lm.from && String(p.date || '') <= lm.to);   // 1.12.4: 지난달 신규 수주
+      return withLast(ERP.kpi(L('이번 달 신규 수주', 'PO mới trong tháng'), F.n(rows.reduce((a, p) => a + C.num(p.pcs), 0)), 'pcs', 'info', new Set(rows.map(p => p.po_no)).size + L('건', ' đơn'), L('수주일 기준', 'theo ngày đặt')),
+        lastLabel(lm), F.n(last.reduce((a, p) => a + C.num(p.pcs), 0)), 'pcs', new Set(last.map(p => p.po_no)).size + L('건', ' đơn')); } });
   reg('kpi_ng', { ko: '불량률 (기준일)', vi: 'Tỷ lệ lỗi (ngày)', dko: '기준일 전체 공정 불량률', dvi: 'Tỷ lệ lỗi các công đoạn trong ngày', cat: 'kpi', w: 1, sizes: [1, 2],
     go: () => () => ERP.goto('production'),
     render(ctx) { const a = C.agg(ctx.dayRows); const r = a.ngRate; return ERP.kpi(L('불량률 (기준일)', 'Tỷ lệ lỗi (ngày)'), r === null ? '–' : F.n(r * 100, 2), '%', r === null ? 'neutral' : r >= 0.03 ? 'bad' : r >= 0.01 ? 'warn' : 'ok', r === null ? L('기록 없음', 'Chưa có') : (r >= 0.03 ? L('높음', 'Cao') : L('양호', 'Tốt')), L('불량 ', 'Lỗi ') + F.n(a.ng) + ' / ' + F.n(a.ea + a.ng)); } });
