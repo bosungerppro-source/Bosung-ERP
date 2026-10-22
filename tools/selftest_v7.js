@@ -94,7 +94,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const pv = await ev(() => { const c = document.querySelector('main .fpiv-card'); return { cards: document.querySelectorAll('main .fpiv-card').length, st: document.querySelectorAll('main .flow .st').length, title: c ? c.querySelector('h2').textContent : '',
       head: c ? Array.from(c.querySelectorAll('thead th')).map(t => t.innerText.replace(/\s+/g, ' ').trim()) : [], rows: c ? Array.from(c.querySelectorAll('tbody tr:not(.tot) td:first-child')).map(td => td.innerText.trim()) : [] }; });
     eq('원부자재 재고 흐름 카드 = RM · SM · CM', cm, ['RM', 'SM', 'CM']);
-    ok('현장 재고 위 = 피벗 표 하나 (조립 재고 · 품목군 \\ 월) · 단계 카드 없음 · 줄 = 품목군 (이름 없는 제품군은 코드만)', pv.cards === 1 && pv.st === 0 && /^조립 재고 · \d{4}$/.test(pv.title) && pv.head[0] === '품목군 \\ 월' && pv.rows.length > 0 && pv.rows.every(t => ['Mini', 'Dial', 'Pencil', 'Click pencil', 'Glass', 'Marker', '기타'].includes(t) || /^[A-Z0-9]+$/.test(t)), pv);
+    ok('현장 재고 위 = 피벗 표 하나 (조립 재고 · 품목군 | 현재 재고, 1.12.1 월 없음) · 단계 카드 없음 · 줄 = 품목군 (이름 없는 제품군은 코드만)', pv.cards === 1 && pv.st === 0 && pv.title === '조립 재고' && pv.head.join(' | ') === '품목군 | 현재 재고' && pv.rows.length > 0 && pv.rows.every(t => ['Mini', 'Dial', 'Pencil', 'Click pencil', 'Glass', 'Marker', '기타'].includes(t) || /^[A-Z0-9]+$/.test(t)), pv);
     await page.click('main .fpiv-card tbody tr:not(.tot) td.pc'); await page.waitForTimeout(300);
     const r = await ev(() => ({ proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, rows: document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr').length }));
     ok('피벗 표 줄 → 아래 표가 그 공정(조립) · 품목군 품목', r.proc === 'ASM' && r.rows > 0, r);

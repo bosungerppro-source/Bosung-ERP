@@ -162,8 +162,10 @@ select.partsel{max-width:150px;min-width:96px;font-size:12px;font-weight:600;pad
 .tbl.dt tr.tot td{background:#F4F6F9;font-weight:700}
 .tbl.dt tr.tot td:first-child,.tbl.dt tr.tot td:nth-child(2){background:#EEF1F6}
 /* 1.12.0: 현장 재고 피벗 표 (pivot.js) */
-.fpiv{display:flex;flex-direction:column;gap:12px;margin:2px 0 6px}
-.fpiv .fpiv-card{margin:0}
+.fpiv{display:flex;flex-wrap:wrap;gap:12px;margin:2px 0 6px;align-items:flex-start}
+.fpiv .fpiv-card{margin:0;flex:1 1 100%;min-width:0}
+.fpiv .fpiv-card.narrow{flex:0 1 auto;max-width:100%}
+.fpiv .fpiv-foot{flex:1 1 100%}
 .fpiv-edit{display:flex;flex-direction:column;gap:8px;background:#FAFBFC;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
 .fpiv-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 .fpiv-row>b{min-width:52px;font-size:12.5px}
@@ -177,6 +179,10 @@ select.partsel{max-width:150px;min-width:96px;font-size:12px;font-weight:600;pad
 .tbl.dt.nostick2 tr.tot td:nth-child(2){background:#F4F6F9}
 .tbl.dt.wide1 th:first-child,.tbl.dt.wide1 td:first-child{width:190px;min-width:190px;max-width:190px}
 .tbl.dt.wide1 th:nth-child(2),.tbl.dt.wide1 td:nth-child(2){left:190px}
+/* 1.12.1: 현재 재고 한 칸 표는 좁게 (숫자가 이름 옆에) */
+.tbl-wrap.one{display:inline-block;max-width:100%;vertical-align:top}
+.tbl.dt.one{width:auto;min-width:300px}
+.tbl.dt.one th.num,.tbl.dt.one td.num{min-width:150px}
 .kchips{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 8px}
 .kc{border:1px solid #C9CFD6;background:#fff;color:#5B6470;border-radius:999px;padding:3px 11px;font:600 12px var(--font);cursor:pointer}
 .kc.on{background:#E4EDFB;border-color:#1F5FBF;color:#174A94}

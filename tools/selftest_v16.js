@@ -318,10 +318,10 @@ function buyBook(rows, fileDate) {
       DB.add('po', { po_no: 'PO-T9', item_no: 'T-P1', customer: 'TEST', kind: 'Pencil', sets: 10, pcs: 120, date: o.today, due: o.today });
       DB.add('prod_log', { date: o.today, process: 'PCK', shift: 'D', code: 'T-P1', name: 'PENCIL 12 MANILA', po_no: 'PO-T9', ok_qty: 5, ok_ea: 60, unit: 'set', source: 'manual' });
       await DB.flush(); }, { openDate, today });
-    // 1.12.0: 현장 재고 위 = 피벗 표 (기본 조립 · 품목군 × 월 — 이번 달 칸 = 지금 재고)
+    // 1.12.0: 현장 재고 위 = 피벗 표 (1.12.1: 기본 조립 · 품목군 | 현재 재고)
     await ev(() => { ERP.state.stk_floor = null; ERP.db.setSetting('floorPivots', null); ERP.goStock('floor'); ERP.render(); }); await A.waitForTimeout(400);
     const fl = await ev(() => ({ stage: document.querySelectorAll('main .flow .st').length, cur: Array.from(document.querySelectorAll('main .fpiv-card tbody tr')).map(x => [x.children[0].innerText.trim(), x.lastElementChild.innerText.trim()]) }));
-    eq('현장 재고 위 = 피벗 표 (조립 · 품목군 × 월, 단계 카드 없음) — 이번 달 칸: Mini 120 · Dial 30 · 합계 150', fl, { stage: 0, cur: [['Mini', '120'], ['Dial', '30'], ['합계', '150']] });
+    eq('현장 재고 위 = 피벗 표 (조립 · 품목군 | 현재 재고, 단계 카드 없음) — Mini 120 · Dial 30 · 합계 150', fl, { stage: 0, cur: [['Mini', '120'], ['Dial', '30'], ['합계', '150']] });
     // 모든 공정 · 공정 × 품목군 = 1.11.4 칸과 같은 숫자 (포장은 SET · CT 나눔 — 마니라 7 + 오늘 포장 일보 5 = 12 SET)
     await ev(() => { ERP.db.setSetting('floorPivots', [{ id: 't', procs: [], rows: 'proc', cols: 'div' }]); ERP.render(); }); await A.waitForTimeout(300);
     eq('공정 × 품목군 (모든 공정): 리필 성형 Mini 50 · 조립 Mini 120 Dial 30 · 포장 Pencil 12 SET 3 CT · 단위별 합계', await ev(() => Array.from(document.querySelectorAll('main .fpiv-card tbody tr')).map(x => Array.from(x.children).map(td => td.innerText.trim()).join(' '))),
@@ -330,6 +330,7 @@ function buyBook(rows, fileDate) {
     await A.click('main .fpiv-card tbody tr[data-k="MINI"] td.pc:last-child'); await A.waitForTimeout(300);
     const f = await ev(() => ({ proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort(), chip: Array.from(document.querySelectorAll('main .toolbar button')).map(b => b.textContent).filter(t => /×$/.test(t)) }));
     eq('조립 표의 Mini 칸 → 아래 표 = 조립 단계의 Mini 품목 (T-M1 · T-M2) · "조립 · Mini ×"', f, { proc: 'ASM', line: 'MINI', codes: ['T-M1', 'T-M2'], chip: ['조립 · Mini ×'] });
+    eq('기본 표 머리 = 품목군 · 현재 재고 (월 없음)', await ev(() => Array.from(document.querySelectorAll('main .fpiv-card thead th')).map(t => t.innerText.trim())), ['품목군', '현재 재고']);
     await A.click('main .toolbar button:has-text("조립 · Mini ×")'); await A.waitForTimeout(300);
     eq('× → 거르기 풀림', await ev(() => [ERP.state.stk_floor.proc, ERP.state.stk_floor.line]), ['', '']);
     // 생산 관리 → 일보 조회: PO 번호 칸 · 수주 보기 → 수주 관리에서 그 PO

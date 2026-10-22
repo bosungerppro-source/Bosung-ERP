@@ -1,13 +1,13 @@
 {
   "name": "colorpencil-erp",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "색연필 제조 수주·생산·재고·원부자재 ERP / ERP bút chì màu",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
     "server": "node server.js",
     "demo": "node tools/build_demo.js",
-    "dist": "electron-builder --win dir --x64 && makensis -DVERSION=1.12.0 build/installer.nsi",
+    "dist": "electron-builder --win dir --x64 && makensis -DVERSION=1.12.1 build/installer.nsi",
     "test": "node tools/selftest_import.js",
     "test:assistant": "node tools/selftest_assistant.js",
     "test:v7": "node tools/selftest_v7.js",
