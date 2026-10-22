@@ -37,7 +37,7 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
   const F_FLOOR2 = asmCopy('asm_floor2_2026-10-20.xlsx', 'BC lắp ráp Ca ngày', { floor: 2 });
   const pckCopy = (() => { const wb = XLSX.readFile(F_PCK); const ws = wb.Sheets['Báo cáo (2)']; ws.M3 = { t: 'n', v: serial('2026-10-20'), z: 'yyyy-mm-dd' }; const p = path.join(work, 'pck_2026-10-20.xlsx'); XLSX.writeFile(wb, p); return p; })();
 
-  const dataDir = tmp('erp-v8-'); const S = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: 4900 + Math.floor(Math.random() * 300) });
+  const dataDir = tmp('erp-v8-'); const S = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: 4900 + Math.floor(Math.random() * 150) /* 5060 · 5061 은 브라우저가 막는 포트라 피함 */ });
   const browser = await pw.chromium.launch(exe ? { executablePath: exe } : {});
   const page = await (await browser.newContext({ viewport: { width: 1480, height: 920 }, acceptDownloads: true, locale: 'en-US' })).newPage();
   const errors = []; page.on('pageerror', e => errors.push('pageerror: ' + e.message)); page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push('console: ' + m.text()); });

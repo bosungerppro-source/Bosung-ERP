@@ -50,6 +50,8 @@
     ctx.machTotal = (pid) => { const reg = DB.rows('machines').filter(m => m.process === pid && m.active !== false).length; return reg || (ctx.seen30[pid] ? ctx.seen30[pid].size : 0); };
     ctx.machRun = (pid) => Array.from((ctx.byProc[pid] || C.agg([])).machines).filter(k => k.indexOf(pid + ':') === 0).length;
     ctx.monthAgg = (pid, from, to) => C.agg(C.rowsBetween(from, to, pid));
+    // 1.12.3: 포장 pcs = 포장 일보의 pcs 칸(ok_ea) 합. pcs 가 비었거나 0 인 줄은 세트를 pcs 로 세지 않고 따로 센다 (noN 줄 · noSets 세트)
+    ctx.pckPcs = (from, to) => C.rowsBetween(from, to, 'PCK').reduce((a, r) => { const e = C.num(r.ok_ea); if (e > 0) a.pcs += e; else if (C.num(r.ok_qty) > 0) { a.noN++; a.noSets += C.num(r.ok_qty); } return a; }, { pcs: 0, noN: 0, noSets: 0 });
     return ctx;
   }
   const valOf = (p, a) => ((p.id === 'PCK' || p.unit === 'set') ? a.ok : a.ea);
@@ -68,10 +70,12 @@
     go: () => () => ERP.goto('production'),
     render(ctx) { const a = ctx.byProc.PCK || C.agg([]); const av = ctx.avg.PCK;
       return ERP.kpi(L('기준일 포장 실적', 'Đóng gói trong ngày'), F.n(a.ok), L('세트', 'bộ'), a.n ? (av && a.ea >= av * 0.9 ? 'ok' : 'warn') : 'neutral', a.n ? (av ? F.n(a.ea / av * 100, 0) + L('% (최근 평균 대비)', '% so với TB') : L('기록', 'Có dữ liệu')) : L('기록 없음', 'Chưa có'), F.n(a.ea) + ' pcs', av ? Math.min(100, a.ea / av * 100) : 0, 'info'); } });
-  reg('kpi_pck_month', { ko: '이번 달 포장 누계', vi: 'Đóng gói lũy kế tháng', dko: '이번 달 포장 세트 누계 · 전월 같은 기간 대비', dvi: 'Lũy kế tháng · so với cùng kỳ', cat: 'kpi', w: 1, sizes: [1, 2],
+  // 1.12.3 (사용자 2026-10-22): "종합 현황 이번달 포장 누계는 pcs로 표시해줘 세트가 아니고" — 포장 일보의 pcs 칸 합 (pcs 없는 줄은 알림)
+  reg('kpi_pck_month', { ko: '이번 달 포장 누계', vi: 'Đóng gói lũy kế tháng', dko: '이번 달 포장 누계 (pcs) · 전월 같은 기간 대비', dvi: 'Lũy kế tháng (pcs) · so với cùng kỳ', cat: 'kpi', w: 1, sizes: [1, 2],
     go: () => () => ERP.goto('production'),
-    render(ctx) { const m = ctx.monthAgg('PCK', ctx.mStart, ctx.ref); const pw = prevMonthWindow(ctx.ref); const p = ctx.monthAgg('PCK', pw[0], pw[1]);
-      return ERP.kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), F.n(m.ok), L('세트', 'bộ'), 'neutral', p.ok ? (m.ok >= p.ok ? '▲ ' : '▼ ') + F.n(Math.abs(m.ok / p.ok - 1) * 100, 0) + '%' : '–', L('전월 동기 대비', 'so với cùng kỳ tháng trước')); } });
+    render(ctx) { const m = ctx.pckPcs(ctx.mStart, ctx.ref); const pw = prevMonthWindow(ctx.ref); const p = ctx.pckPcs(pw[0], pw[1]);
+      const miss = m.noN ? L(' · pcs 없는 일보 ' + m.noN + '줄 (' + F.n(m.noSets) + '세트) 빠짐', ' · ' + m.noN + ' dòng không có pcs (' + F.n(m.noSets) + ' bộ) không tính') : '';
+      return ERP.kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), F.n(m.pcs), 'pcs', 'neutral', p.pcs ? (m.pcs >= p.pcs ? '▲ ' : '▼ ') + F.n(Math.abs(m.pcs / p.pcs - 1) * 100, 0) + '%' : '–', L('전월 동기 대비', 'so với cùng kỳ tháng trước') + miss); } });
   reg('kpi_due', { ko: '납기 임박 / 경과 PO', vi: 'PO sắp / quá hạn', dko: '7일 내 납기 + 납기 경과(60일 이내) PO 수', dvi: 'PO đến hạn ≤7 ngày + quá hạn ≤60 ngày', cat: 'kpi', w: 1, sizes: [1, 2],
     go: () => () => { ERP.state.ord = Object.assign(ERP.state.ord || { view: 'po' }, { tab: 'late' }); ERP.goto('orders'); },
     render(ctx) { const late = ctx.late, soon = ctx.soon, open = ctx.open;

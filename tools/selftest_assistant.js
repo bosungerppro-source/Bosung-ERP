@@ -59,7 +59,7 @@ const textReply = (text) => ({ body: { id: 'msg_x', type: 'message', role: 'assi
 const sysText = (sy) => (typeof sy === 'string' ? sy : (sy || []).map(b => b.text).join('\n'));   // 9차: system 은 캐시 표시를 단 text 블록 배열
 const toolReply = (name, input, id) => ({ body: { id: 'msg_t', type: 'message', role: 'assistant', content: [{ type: 'text', text: '조회합니다' }, { type: 'tool_use', id: id || 'toolu_1', name, input: input || {} }], stop_reason: 'tool_use' } });
 
-let portSeq = 3900 + Math.floor(Math.random() * 300);
+let portSeq = 3700 + Math.floor(Math.random() * 300) /* 4045 · 4190 은 브라우저가 막는 포트라 피함 */;
 async function startServer(dataDir) { return serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir: dataDir || mkTmp(), host: '127.0.0.1', port: portSeq++ }); }
 
 async function openApp(url, errors) {

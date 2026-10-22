@@ -18,7 +18,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
 (async () => {
   const dataDir = tmp('erp-v13-');
-  const S = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: 6600 + Math.floor(Math.random() * 300), backupDelay: 3600000 });
+  const S = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: 6700 + Math.floor(Math.random() * 200) /* 6665~6669 · 6679 · 6697 은 브라우저가 막는 포트라 피함 */, backupDelay: 3600000 });
   const browser = await pw.chromium.launch(exe ? { executablePath: exe } : {});
   const errors = [];
   const ctx = await browser.newContext({ viewport: { width: 1480, height: 920 } });

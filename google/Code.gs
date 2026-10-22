@@ -7,6 +7,7 @@
  * Cài đặt: tạo Google Sheet mới > Tiện ích mở rộng > Apps Script > dán mã > đổi TOKEN > Triển khai ứng dụng web
  *          (Thực thi: tôi, Truy cập: mọi người) > dán URL + TOKEN vào màn hình "Excel · Google" của ERP.
  * 4판: 휴대폰 보기 — 같은 웹 앱 주소를 휴대폰 브라우저로 열면 ERP 가 보낸 요약(종합 현황 · 생산 관리)을 비밀번호로 본다.
+ *      (ERP 1.12.3: '이번 달 포장 누계' 를 pcs 로 — 이미 배포했다면 이 코드를 다시 붙여넣고 새 버전으로 배포하면 pcs 로 보인다. 예전 코드도 그대로 쓸 수 있다: 세트로 보임)
  *      비밀번호는 ERP 설정 → 휴대폰으로 보기에서 정한다 (여기에는 해시로만 저장). Apps Script 기본(V8) 실행 환경이 필요하다.
  */
 var TOKEN = 'CHANGE-ME';            // <-- 반드시 변경 / bắt buộc đổi
@@ -212,7 +213,9 @@ input{font:inherit;min-height:42px;padding:0 12px;border:1px solid #C9CFD6;borde
       el('div', 'bar', [btn(L('새로 고침', 'Làm mới'), function () { load(pw, !!LS.get('erpm_pw')); }), btn(L('잠그기', 'Khóa'), function () { LS.set('erpm_pw', null); pw = ''; data = null; login(''); })])]);
     var dash = el('div', 'card', [el('h2', '', [L('종합 현황', 'Tổng quan')]), el('div', 'kpis', [
       kpi(L('기준일 포장 실적', 'Đóng gói trong ngày'), n(k.pckDay.ok), L('세트', 'bộ'), k.pckDay.avgPct === null ? '' : k.pckDay.avgPct + L('% (최근 평균 대비)', '% so với TB'), k.pckDay.n ? (k.pckDay.avgPct >= 90 ? 'ok' : 'warn') : ''),
-      kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), n(k.pckMonth.ok), L('세트', 'bộ'), L('전월 동기 ', 'so cùng kỳ ') + pct(k.pckMonth.ok, k.pckMonth.prev)),
+      // 1.12.3: 이번 달 포장 누계 = pcs (ERP 1.12.3 이상이 보낸 요약에 ea 가 있으면, 옛 요약은 세트)
+      k.pckMonth.ea === undefined ? kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), n(k.pckMonth.ok), L('세트', 'bộ'), L('전월 동기 ', 'so cùng kỳ ') + pct(k.pckMonth.ok, k.pckMonth.prev))
+        : kpi(L('이번 달 포장 누계', 'Đóng gói lũy kế tháng'), n(k.pckMonth.ea), 'pcs', L('전월 동기 ', 'so cùng kỳ ') + pct(k.pckMonth.ea, k.pckMonth.prevEa) + (k.pckMonth.noN ? L(' · pcs 없는 일보 ', ' · không có pcs ') + k.pckMonth.noN + L('줄', ' dòng') : '')),
       kpi(L('납기 임박 / 경과 PO', 'PO sắp / quá hạn'), n(k.due.soon + k.due.late), L('건', 'đơn'), L('경과 ', 'Quá hạn ') + k.due.late + L(' · 7일 내 ', ' · ≤7 ngày ') + k.due.soon, k.due.late ? 'bad' : (k.due.soon ? 'warn' : 'ok')),
       kpi(L('진행 중 PO', 'PO đang mở'), n(k.open.n), L('건', 'đơn'), L('생산 중 ', 'Đang SX ') + k.open.prod + L(' · 남은 ', ' · còn ') + n(k.open.rem) + ' set'),
       kpi(L('안전재고 미달 자재', 'NVL dưới tồn an toàn'), n(k.low), L('품목', 'mã'), '', k.low ? 'bad' : 'ok'),

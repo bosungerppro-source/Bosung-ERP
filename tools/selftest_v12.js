@@ -20,7 +20,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
 (async () => {
   const dataDir = tmp('erp-v12-');
-  const S = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: 5900 + Math.floor(Math.random() * 300), backupDelay: 3600000 });
+  const S = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: 6200 + Math.floor(Math.random() * 300) /* 6000 은 브라우저가 막는 포트라 피함 */, backupDelay: 3600000 });
   const browser = await pw.chromium.launch(exe ? { executablePath: exe } : {});
   const errors = [];
   const ctx = await browser.newContext({ viewport: { width: 1480, height: 920 } });
