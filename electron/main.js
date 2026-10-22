@@ -25,7 +25,7 @@ else {
       fetch: (url, init) => net.fetch(url, init), spawn, auto: cfg.autoUpdate !== false,
       saveAuto: (v) => { const c = readCfg(); c.autoUpdate = v; writeCfg(c); buildMenu(readCfg()); },
       base: process.env.ERP_UPDATE_BASE || undefined, firstCheck: process.env.ERP_UPDATE_FIRST_CHECK ? Number(process.env.ERP_UPDATE_FIRST_CHECK) : undefined,
-      beforeInstall: () => flushRenderer(), quit: () => { if (info) info.close(); app.exit(0); }, log: (m) => console.log('[update] ' + m) });
+      beforeInstall: () => flushAll(), quit: () => { if (info) info.close(); app.exit(0); }, log: (m) => console.log('[update] ' + m) });
     // 받아 둔 새 버전이 있으면 ERP 를 띄우기 전에 설치한다 (설치 프로그램이 끝나면 새 버전을 다시 켠다)
     if (up.startup()) { app.exit(0); return; }
     info = await server.start({
@@ -45,9 +45,9 @@ else {
     const openOut = (url) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); };
     win.webContents.setWindowOpenHandler(({ url }) => { openOut(url); return { action: 'deny' }; });
     win.webContents.on('will-navigate', (e, legacyUrl) => { const url = String((e && e.url) || legacyUrl || ''); if (url !== info.url && !url.startsWith(info.url + '/')) { e.preventDefault(); openOut(url); } });
-    // 닫기 전에 화면에서 대기 중인 저장(0.7초)을 먼저 보낸다 → 마지막 입력이 사라지지 않게
+    // 닫기 전에 화면에서 대기 중인 저장(0.7초)을 먼저 보낸다 → 마지막 입력이 사라지지 않게 (18차: 구글 드라이브 공유가 켜져 있으면 구글에도)
     let flushed = false;
-    win.on('close', (e) => { if (flushed) return; e.preventDefault(); flushRenderer().then(() => { flushed = true; if (win && !win.isDestroyed()) win.close(); }); });
+    win.on('close', (e) => { if (flushed) return; e.preventDefault(); flushAll().then(() => { flushed = true; if (win && !win.isDestroyed()) win.close(); }); });
     win.on('closed', () => { win = null; });
     up.schedule();
   });
@@ -58,6 +58,14 @@ else {
 async function flushRenderer() {
   if (!win || win.isDestroyed()) return;
   try { await Promise.race([win.webContents.executeJavaScript('(window.ERP && ERP.db && ERP.db.flush) ? ERP.db.flush() : 0', true), new Promise(r => setTimeout(r, 5000))]); } catch (e) { /* 화면이 이미 닫힘 */ }
+}
+
+/** 18차: 화면 저장 → 구글 드라이브 공유 (켜져 있고 아직 보내지 않은 변경이 있으면, 최대 15초) */
+async function flushAll() {
+  await flushRenderer();
+  if (!info || !info.cloud || !info.cloud.pending()) return;
+  if (win && !win.isDestroyed()) win.webContents.executeJavaScript("window.ERP && ERP.toast && ERP.toast(L('구글 드라이브에 보내는 중… (공유)', 'Đang gửi lên Google Drive…'), 'info')", true).catch(() => {});
+  try { await info.cloud.flush(15000); } catch (e) { /* 다음에 켤 때 보냄 */ }
 }
 
 /** 메뉴 → 업데이트 확인: 새 버전이 있으면 받기를 시작하고, 받아 둔 것이 있으면 지금 설치할지 묻는다 */
@@ -88,7 +96,7 @@ function buildMenu(cfg) {
           const pinMsg = info.hasPin() ? '\n\n다른 PC 의 브라우저는 처음 한 번 PIN 을 넣어야 합니다.\nMáy khác phải nhập mã PIN một lần.'
             : '\n\n아직 PIN 이 없습니다. 재시작 뒤 설정 → 사내망 접속 · 자동 백업에서 PIN 을 정해야 다른 PC 가 들어올 수 있습니다.\nChưa có mã PIN. Sau khi khởi động lại, hãy đặt PIN ở Cài đặt → Mạng nội bộ · Sao lưu thì máy khác mới vào được.';
           await dialog.showMessageBox({ message: c.lan ? '다음 실행부터 같은 네트워크의 PC에서 접속할 수 있습니다.\nLAN access ON after restart.' + pinMsg : 'LAN access OFF after restart.' });
-          await flushRenderer(); app.relaunch(); app.exit(0);
+          await flushAll(); app.relaunch(); app.exit(0);
         } },
       { label: '자동 백업 폴더 고르기… / Chọn thư mục sao lưu…', click: async () => {
           const r = await dialog.showOpenDialog(win, { title: '매일 자동 백업 폴더 / Thư mục sao lưu hằng ngày', properties: ['openDirectory', 'createDirectory'], defaultPath: info.backup.cfg().dir || undefined });

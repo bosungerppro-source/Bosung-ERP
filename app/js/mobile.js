@@ -58,7 +58,7 @@
   try { mob.last = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { mob.last = null; }
   const remember = (o) => { mob.last = o; try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* 저장소 없음 */ } };
   /** 옛 Code.gs 이면 알아듣게 */
-  ERP.gErr = (e) => { const m = String((e && e.message) || e); return /unknown action/.test(m) ? L('Apps Script 가 옛 판입니다 — google/Code.gs 4판을 다시 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요', 'Apps Script là bản cũ — hãy dán lại google/Code.gs bản 4 và triển khai phiên bản mới') : m; };
+  ERP.gErr = (e) => { const m = String((e && e.message) || e); return /unknown action/.test(m) ? L('Apps Script 가 옛 판입니다 — 엑셀 · 구글 연동의 [Apps Script 코드 복사] 로 새 코드(5판)를 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요', 'Apps Script là bản cũ — hãy dán mã mới (bản 5, [Sao chép mã Apps Script] ở Excel · Google) và triển khai phiên bản mới') : m; };
   ERP.mobileSend = function () {
     if (mob.busy) return mob.busy;
     mob.busy = (async () => {
@@ -111,7 +111,7 @@
       const part = h('div', { style: { borderTop: '1px solid var(--line2)', marginTop: '12px', paddingTop: '6px' } }, h('h4', { style: { margin: '6px 0' } }, L('② 공장 밖에서 — 구글 웹 앱 요약 (종합 현황 · 생산 관리)', '② Ngoài nhà máy — tóm tắt qua ứng dụng web Google')));
       const url = DB.setting('gUrl', '');
       if (!url) {
-        ERP.put(part, h('p', { class: 'help' }, L('먼저 엑셀 · 구글 연동 → 구글 시트 · 드라이브에서 Apps Script 주소와 TOKEN 을 넣으세요 (google/Code.gs 4판으로 배포).', 'Trước tiên nhập URL Apps Script và TOKEN ở Excel · Google → Google Sheet · Drive (triển khai google/Code.gs bản 4).')),
+        ERP.put(part, h('p', { class: 'help' }, L('먼저 엑셀 · 구글 연동 → 구글 시트 · 드라이브의 "여러 PC 자료 공유" 카드에서 Apps Script 를 배포하고 연결하세요 (휴대폰 화면도 같은 웹 앱 주소입니다).', 'Trước tiên triển khai Apps Script và kết nối ở thẻ "Dùng chung dữ liệu nhiều máy" (Excel · Google → Google Sheet · Drive); điện thoại dùng cùng URL ứng dụng web.')),
           h('button', { class: 'btn', onclick: () => { ERP.state.dataTab = 'google'; ERP.goto('data'); } }, L('구글 연동으로', 'Sang kết nối Google')));
         return part;
       }
@@ -126,6 +126,8 @@
       ERP.put(part, h('div', { class: 'toolbar' }, ERP.chip(on ? 'ok' : 'neutral', on ? L('켜짐', 'Bật') : L('꺼짐', 'Tắt')),
           h('span', { class: 'muted' }, on ? L('마지막 보냄: ', 'Gửi lần cuối: ') + (last ? when(last.at) + (last.ok ? '' : ' · ' + L('실패', 'lỗi')) : '–') : L('비밀번호를 정하면 켜집니다', 'Đặt mật khẩu để bật'))),
         on && last && !last.ok ? h('p', { class: 'warn-text' }, last.error || '') : null,
+        // 18차: 구글 드라이브 공유에 참여한 PC — 비밀번호는 웹 앱 하나에 하나 (모든 휴대폰 · 모든 PC 같음)
+        DB.cloud && DB.cloud.on && (DB.cloud.mode === 'replace' || DB.cloud.mode === 'merge') ? h('p', { class: 'help' }, L('ⓘ 이 PC 는 구글 드라이브 공유에 참여한 PC 입니다. 휴대폰 보기 비밀번호는 웹 앱 하나에 하나라서, 여기서 바꾸면 모든 휴대폰에서 새 비밀번호를 넣어야 합니다. 요약은 휴대폰 보기를 켠 PC 가 보냅니다.', 'ⓘ Máy này tham gia dùng chung qua Google Drive. Mật khẩu xem trên điện thoại là chung cho cả ứng dụng web — đổi ở đây thì mọi điện thoại phải nhập mật khẩu mới. Tóm tắt do máy đã bật xem trên điện thoại gửi.')) : null,
         h('div', { class: 'qr' }, ERP.qrImg(url, L('구글 웹 앱 주소 QR', 'QR ứng dụng web')), h('div', h('div', { class: 'muted' }, L('휴대폰 주소 (어디서나)', 'Địa chỉ trên điện thoại (mọi nơi)')), h('code', url))),
         own ? h('div', { class: 'toolbar', style: { marginTop: '10px' } }, h('span', { class: 'muted' }, L('휴대폰 보기 비밀번호', 'Mật khẩu xem trên điện thoại')), pwIn,
             h('button', { class: 'btn' + (on ? '' : ' primary'), onclick: setPw }, on ? L('비밀번호 바꾸기', 'Đổi mật khẩu') : L('비밀번호 정하고 켜기', 'Đặt mật khẩu và bật')),

@@ -11,6 +11,7 @@ on:
       - 'electron/**'
       - 'build/installer.nsi'
       - 'server.js'
+      - 'cloudsync.js'
       - 'package.json'
       - 'tools/update_e2e.js'
       - '.github/workflows/update-test.yml'

@@ -1,13 +1,15 @@
 'use strict';
 /* Lightweight local ERP server: static files + JSON table store + Google relay.
    No external dependencies (Node >= 18). Used by Electron and by `npm run server`.
-   9차(v1.4.0): 표마다 버전(다른 PC 와 저장 충돌 → 409) · 설정 항목별 저장 · Host/Origin 검사 · 사내망 PIN · 매일 자동 백업 */
+   9차(v1.4.0): 표마다 버전(다른 PC 와 저장 충돌 → 409) · 설정 항목별 저장 · Host/Origin 검사 · 사내망 PIN · 매일 자동 백업
+   18차(v1.13.0): 여러 PC 자료 공유 — 구글 드라이브 (cloudsync.js) */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const cloudsync = require('./cloudsync.js');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
@@ -232,6 +234,9 @@ function start(opts) {
   const auth = createAuth(dataDir);
   const backup = createBackup(dataDir, store, opts.googleHosts, doFetch);
   const up = opts.update || null;   // 15차: electron/updater.js (설치형에서만)
+  // 18차: 여러 PC 자료 공유 (구글 드라이브). 켜져 있으면 30초마다 · 이 PC 에서 저장한 뒤 3초에 구글과 맞춘다
+  const cloud = cloudsync.create({ dataDir, store, fetch: doFetch, urlOk: (u) => googleUrlOk(u, opts.googleHosts), codeFile: path.join(__dirname, 'google', 'Code.gs'),
+    every: opts.cloudEvery, poke: opts.cloudPoke, log: opts.cloudLog });
 
   /** 다른 웹사이트(DNS rebinding · 다른 출처의 요청)는 막는다: Host 는 이 PC 이름, Origin 이 있으면 같은 곳, 쓰기 요청은 JSON 만 */
   function guard(req, isApi) {
@@ -277,15 +282,15 @@ function start(opts) {
 
     if (p === '/api/info') return send(200, { dataDir: store.dir, port, host, lan: lanAddresses(port), lanOn: host !== '127.0.0.1' && host !== 'localhost', platform: process.platform, hasPin: auth.hasPin(), loopback: loop });
     if (p === '/api/db' && req.method === 'GET') return send(200, store.readAll());
-    if (p === '/api/versions' && req.method === 'GET') return send(200, store.versions());
+    if (p === '/api/versions' && req.method === 'GET') return send(200, Object.assign(store.versions(), { cloud: cloud.brief() }));
     if (p === '/api/meta' && req.method === 'GET') return send(200, { meta: store.readMeta(), ver: store.versions().meta });
     // 설정: 바뀐 항목만 합친다 (다른 PC 가 바꾼 다른 항목은 그대로)
     if (p === '/api/meta' && req.method === 'PATCH') {
       const b = JSON.parse(await readBody(req, 5e6)); const m = store.readMeta();
       Object.keys(b.set || {}).forEach(k => { m[k] = b.set[k]; }); (b.del || []).forEach(k => { delete m[k]; });
-      const ver = store.writeMeta(m); return send(200, { ok: true, ver, meta: m });
+      const ver = store.writeMeta(m); cloud.poke(); return send(200, { ok: true, ver, meta: m });
     }
-    if (p === '/api/meta' && req.method === 'PUT') { const ver = store.writeMeta(JSON.parse(await readBody(req, 5e6))); return send(200, { ok: true, ver }); }   // 옛 화면(1.3.0 이전)용
+    if (p === '/api/meta' && req.method === 'PUT') { const ver = store.writeMeta(JSON.parse(await readBody(req, 5e6))); cloud.poke(); return send(200, { ok: true, ver }); }   // 옛 화면(1.3.0 이전)용
     let m = p.match(/^\/api\/t\/([A-Za-z0-9_]+)$/);
     if (m && req.method === 'GET') { const name = safeName(m[1]); if (!name) return send(400, { error: 'bad name' }); return send(200, { rows: store.readTable(name), ver: store.ver(name) }); }
     if (m && req.method === 'PUT') {
@@ -295,7 +300,7 @@ function start(opts) {
       // 화면이 받은 뒤 다른 PC 가 먼저 저장했으면 덮어쓰지 않고 지금 서버 자료를 돌려준다 → 화면이 행 단위로 합쳐 다시 저장
       const base = req.headers['x-base-ver'];
       if (base !== undefined && Number(base) !== store.ver(name)) return send(409, { error: 'CONFLICT', ver: store.ver(name), rows: store.readTable(name) });
-      const ver = store.writeTable(name, rows);
+      const ver = store.writeTable(name, rows); cloud.poke();
       return send(200, { ok: true, count: rows.length, ver });
     }
     // ---- 사내망 PIN · 자동 백업 설정 (ERP 가 실행 중인 PC 에서만) ----
@@ -311,6 +316,22 @@ function start(opts) {
       try { return send(200, backup.set(JSON.parse(await readBody(req, 1e5)))); } catch (e) { return send(400, { error: e.message }); }
     }
     if (p === '/api/backup/run' && req.method === 'POST') return send(200, await backup.run());
+    // ---- 18차: 여러 PC 자료 공유 (구글 드라이브). 상태 · 지금 맞추기는 누구나, 연결 확인 · 연결 · 끄기 · 코드는 ERP 가 실행 중인 PC 에서만 ----
+    if (p === '/api/cloud' && req.method === 'GET') return send(200, Object.assign(cloud.status(), { local: loop }));
+    if (p === '/api/cloud/sync' && req.method === 'POST') return send(200, Object.assign(await cloud.syncNow(), { local: loop }));
+    if (p.startsWith('/api/cloud/')) {
+      if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
+      if (req.method !== 'POST') return send(404, { error: 'unknown api' });
+      let b; try { b = JSON.parse(await readBody(req, 1e6) || '{}'); } catch (e) { return send(400, { code: 'BAD_JSON', error: e.message }); }
+      try {
+        if (p === '/api/cloud/check') return send(200, await cloud.check(b.url, b.token));
+        if (p === '/api/cloud/preview') return send(200, await cloud.preview(b.url, b.token, b.nat));
+        if (p === '/api/cloud/connect') return send(200, await cloud.connect(b));
+        if (p === '/api/cloud/off') return send(200, await cloud.off());
+        if (p === '/api/cloud/code') return send(200, { ok: true, code: cloud.code(b.token) });
+      } catch (e) { return send(e.code ? 400 : 500, { code: e.code || 'ERR', error: e.detail || e.message }); }
+      return send(404, { error: 'unknown api' });
+    }
     // ---- 15차: 프로그램 자동 업데이트 (설치형 Electron 만 opts.update 가 있음). 보기는 누구나, 확인 · 설치 · 켜고 끄기는 ERP 가 실행 중인 PC 에서만 ----
     if (p === '/api/update' && req.method === 'GET') return send(200, up ? Object.assign(up.status(), { desktop: true, local: loop }) : { desktop: false, local: loop });
     if (p === '/api/update' || p.startsWith('/api/update/')) {
@@ -387,7 +408,8 @@ function start(opts) {
       const tick = () => { if (backup.due()) backup.run().catch(e => console.error('backup', e.message)); };
       const timer = setInterval(tick, 15 * 60000); timer.unref && timer.unref();
       const first = setTimeout(tick, opts.backupDelay !== undefined ? opts.backupDelay : 60000); first.unref && first.unref();
-      resolve({ server, port, host, url: 'http://127.0.0.1:' + port, dataDir, hasPin: () => auth.hasPin(), backup, close: () => { clearInterval(timer); clearTimeout(first); server.close(); } });
+      cloud.start(opts.cloudFirst);   // 18차: 공유가 켜져 있으면 5초 뒤 첫 판
+      resolve({ server, port, host, url: 'http://127.0.0.1:' + port, dataDir, hasPin: () => auth.hasPin(), backup, cloud, close: () => { clearInterval(timer); clearTimeout(first); cloud.stop(); server.close(); } });
     });
     listen();
   });

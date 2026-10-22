@@ -125,9 +125,11 @@
         h('div', { class: 'lang', role: 'group', 'aria-label': 'language' }, h('button', { class: ERP.lang === 'ko' ? 'on' : '', onclick: () => ERP.setLang('ko') }, '한국어'), h('button', { class: ERP.lang === 'vi' ? 'on' : '', onclick: () => ERP.setLang('vi') }, 'Tiếng Việt')),
         h('div', { id: 'savestate', class: 'saved' }, h('i'), h('span', L('저장됨', 'Đã lưu'))),
         h('a', { id: 'remote', href: '#', style: { display: 'none' }, onclick: (e) => { e.preventDefault(); ERP.refresh(); } }, '↻ ' + L('다른 PC 변경 있음 · 새로 고침', 'Có thay đổi từ máy khác · Làm mới')),
+        // 18차: 구글 드라이브 공유 상태 (켜져 있을 때만) — 누르면 엑셀 · 구글 연동의 공유 카드
+        h('a', { id: 'cloudstate', href: '#/data', style: { display: 'none' }, onclick: () => { ERP.state.dataTab = 'google'; } }),
         h('div', DB.mode === 'server' ? L('서버 저장 모드 (PC 설치형)', 'Lưu trên máy chủ (bản cài đặt)') : L('브라우저 저장 모드 (테스트)', 'Lưu trong trình duyệt (bản thử)'))));
     const main = h('main', { class: 'main', id: 'main' }, updBar());
-    app.append(nav, main); DB._state && DB._state();
+    app.append(nav, main); DB._state && DB._state(); ERP.cloudBrief && ERP.cloudBrief();
     document.title = L(page.ko, page.vi) + ' · ColorPencil ERP';
     try { page.render(main); } catch (e) { console.error(e); main.appendChild(h('div', { class: 'card' }, h('h2', 'Error'), h('pre', String(e.stack || e)))); }
     window.scrollTo(0, 0);
@@ -139,6 +141,8 @@
     try { await DB.init(); ERP.loadProcs(); ERP.aiReady && ERP.aiReady(); } catch (e) { console.error(e); app.replaceChildren(h('div', { class: 'card', style: { margin: '40px' } }, h('h2', 'Startup error'), h('pre', String(e.stack || e)))); return; }
     window.addEventListener('hashchange', ERP.render);
     ERP.render();
+    // 18차: 구글 드라이브 공유 상태 (왼쪽 아래) — 그다음은 20초마다 db.js poll 이 받는다
+    if (DB.mode === 'server') fetch('/api/versions', { cache: 'no-store' }).then(r => r.json()).then(v => { if (v && v.cloud) ERP.cloudBrief(v.cloud); }).catch(() => { /* 다음 poll */ });
     // 9차: ERP 가 실행 중인 PC 에서 — 자동 백업을 켰는데 이틀 넘게 성공하지 못했으면 알린다 (USB 빠짐 · NAS 꺼짐 등)
     if (DB.mode === 'server' && DB.ping && DB.ping.loopback) fetch('/api/backup').then(r => r.json()).then(b => {
       if (!(b.dir || b.google) || !b.lastTry) return;

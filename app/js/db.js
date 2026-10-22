@@ -402,6 +402,7 @@
         if (r.status === 401) { DB._needLogin(); return 0; }
         if (!r.ok) return 0;
         const v = await r.json(); const tv = v.t || {};
+        if (v.cloud && ERP.cloudBrief) ERP.cloudBrief(v.cloud);   // 18차: 구글 드라이브 공유 상태 (왼쪽 아래)
         for (const n of Object.keys(ERP.TABLES)) {
           if ((tv[n] || 0) === (DB.sver[n] || 0) || DB._saving[n]) continue;
           const g = DB._gen[n];

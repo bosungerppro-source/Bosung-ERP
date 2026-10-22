@@ -20,6 +20,7 @@ nav.side{flex:0 0 232px;width:232px;background:var(--side);color:#E6E9ED;padding
 #savestate{display:flex;align-items:center;gap:6px}#savestate i{width:8px;height:8px;border-radius:50%;background:#0E7A5F;display:inline-block}
 #savestate.saving i{background:#F2C531}#savestate.error i{background:#E5594F}
 #remote{color:#F2C531;font-size:12px;text-decoration:none}#remote:hover{text-decoration:underline}
+#cloudstate{color:#7FD3B8;font-size:12px;text-decoration:none}#cloudstate.bad{color:#F28B82}#cloudstate:hover{text-decoration:underline}
 main.main{flex:1;min-width:0;padding:26px 30px 44px;display:flex;flex-direction:column;gap:20px}
 .page-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px}
 .page-head h1{margin:0;font-size:25px;font-weight:700}.page-head p{margin:4px 0 0;color:var(--muted);font-size:13.5px}
@@ -215,3 +216,9 @@ tr.subrow td{font-size:12.5px;color:#3C4551}
 .flow .grp{max-width:100%}.flow .grp>div{min-width:0}
 @media (max-width:640px){main.main{padding:14px 10px 30px;gap:14px}.grid2{grid-template-columns:minmax(0,1fr)}label.nowrap{white-space:normal}.flow .arrow{display:none}.page-head h1{font-size:21px}.card{padding:14px}.kv{grid-template-columns:minmax(90px,38%) 1fr}#toasts{left:10px;right:10px}.toast{max-width:none}.search input{width:120px}.modal-back{padding:8px}.modal-body{padding:14px}.inp{max-width:100%}}
 .qr{display:flex;flex-wrap:wrap;gap:14px;align-items:center}.qr img{width:150px;height:150px;image-rendering:pixelated;border:1px solid var(--line);border-radius:8px;background:#fff}.qr code{font-size:13px;word-break:break-all}
+/* 18차: 여러 PC 자료 공유 (구글 드라이브) */
+.cloud-setup h4,.cloud-again h4{margin:14px 0 6px;font-size:14px}.cloud-setup h4:first-child{margin-top:4px}
+ol.steps{margin:0 0 12px;padding-left:22px;font-size:13.5px;line-height:1.7}ol.steps li{margin:5px 0}
+.cloud-res{border-top:1px dashed var(--line);margin-top:6px;padding-top:8px}.cloud-res:empty{display:none}
+.cloud-again{border-top:1px solid var(--line2);margin-top:12px;padding-top:6px}
+.cloud-log{margin-top:6px}.cloud-log summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.cloud-log>div{max-height:220px;overflow:auto}

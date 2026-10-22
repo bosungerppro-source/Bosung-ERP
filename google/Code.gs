@@ -1,23 +1,29 @@
 /**
- * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 4판 (v1.10.0)
- * 설치: 1) 구글 시트를 새로 만든다  2) 확장 프로그램 > Apps Script  3) 이 코드를 붙여넣기
- *       4) TOKEN 값을 원하는 비밀번호로 변경  5) 배포 > 새 배포 > 웹 앱 (실행: 나, 액세스: 모든 사용자)
- *       6) 발급된 URL 과 TOKEN 을 ERP "엑셀·구글 연동" 화면에 입력
- *       (이미 배포했으면: 코드를 바꾼 뒤 배포 > 배포 관리 > 수정(연필) > 버전: 새 버전 > 배포 — 주소는 그대로)
- * Cài đặt: tạo Google Sheet mới > Tiện ích mở rộng > Apps Script > dán mã > đổi TOKEN > Triển khai ứng dụng web
- *          (Thực thi: tôi, Truy cập: mọi người) > dán URL + TOKEN vào màn hình "Excel · Google" của ERP.
+ * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 5판 (v1.13.0)
+ * 설치 (ERP → 엑셀 · 구글 연동 → 구글 시트 · 드라이브 → "여러 PC 자료 공유" 카드의 순서와 같다):
+ *   1) ERP 의 [Apps Script 코드 복사] — 이 코드에 비밀 키(TOKEN)를 넣어서 복사해 준다
+ *   2) 새 구글 시트 (sheets.new) > 확장 프로그램 > Apps Script > 원래 코드를 모두 지우고 붙여넣기 > 저장
+ *   3) 배포 > 새 배포 > 유형 선택(톱니바퀴) > 웹 앱 (다음 사용자 인증 정보로 실행: 나, 액세스 권한이 있는 사용자: 모든 사용자) > 배포 > 액세스 승인
+ *   4) 웹 앱 URL 을 ERP 에 붙여넣고 [연결 확인]
+ *   (이 파일을 직접 붙여넣을 때는 아래 TOKEN 을 16자 이상 아무 글자로 바꾸고 ERP 의 TOKEN 칸에도 같은 값을 넣는다. 'CHANGE-ME' 그대로는 받지 않는다)
+ *   (이미 배포했으면: 코드를 바꾼 뒤 배포 > 배포 관리 > 수정(연필) > 버전: 새 버전 > 배포 — 주소는 그대로)
+ * Cài đặt: ERP > [Sao chép mã Apps Script] (đã có TOKEN) > Google Sheet mới > Tiện ích mở rộng > Apps Script > dán mã > Lưu
+ *          > Triển khai (Deploy) > Bản triển khai mới > Ứng dụng web (Thực thi: Tôi, Truy cập: Bất kỳ ai / Anyone) > dán URL vào ERP > [Kiểm tra kết nối].
+ * 5판: 여러 PC 자료 공유 — PC 마다 ERP 가 바뀐 표만 주고받는다. 표 하나 = 드라이브 폴더 'ColorPencil ERP Data' 의 파일 하나
+ *      (ERP 가 보낸 gzip + base64 글자 그대로), 저장 번호는 스크립트 속성. 합치기(행 단위)는 ERP 가 한다. 시트 없이 만든 스크립트에서도 된다.
  * 4판: 휴대폰 보기 — 같은 웹 앱 주소를 휴대폰 브라우저로 열면 ERP 가 보낸 요약(종합 현황 · 생산 관리)을 비밀번호로 본다.
  *      (ERP 1.12.3 · 1.12.4: '이번 달 포장 누계' 를 pcs 로, 지난달 누계도 — 이미 배포했다면 이 코드를 다시 붙여넣고 새 버전으로 배포하면 pcs 로 보인다. 예전 코드도 그대로 쓸 수 있다: 세트로 보임)
  *      비밀번호는 ERP 설정 → 휴대폰으로 보기에서 정한다 (여기에는 해시로만 저장). Apps Script 기본(V8) 실행 환경이 필요하다.
  */
-var TOKEN = 'CHANGE-ME';            // <-- 반드시 변경 / bắt buộc đổi
+var TOKEN = 'CHANGE-ME';            // <-- ERP 의 [Apps Script 코드 복사] 가 채운다 / ERP điền sẵn
 var SNAPSHOT_FOLDER = 'ColorPencil ERP Backup';  // Drive folder for snapshots
 var MOBILE_FILE = 'ERP_mobile.json';             // 4판: 휴대폰 요약 (SNAPSHOT_FOLDER 안)
+var DATA_FOLDER = 'ColorPencil ERP Data';        // 5판: 여러 PC 자료 공유 (표마다 파일 하나)
 
 // 4판: 브라우저로 열면 휴대폰 화면 (?ping=1 이면 예전처럼 상태 JSON)
 function doGet(e) {
   var p = (e && e.parameter) || {};
-  if (p.ping) return out_({ ok: true, app: 'colorpencil-erp-bridge', ver: 4, time: new Date().toISOString() });
+  if (p.ping) return out_({ ok: true, app: 'colorpencil-erp-bridge', ver: 5, time: new Date().toISOString() });
   return HtmlService.createHtmlOutput(MOBILE_HTML_).setTitle('ColorPencil ERP')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
 }
@@ -25,10 +31,12 @@ function doGet(e) {
 function doPost(e) {
   try {
     var req = JSON.parse(e.postData.contents);
-    if (req.token !== TOKEN) return out_({ ok: false, error: 'bad token' });
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (TOKEN === 'CHANGE-ME' || req.token !== TOKEN) return out_({ ok: false, error: 'bad token' });
+    if (/^cloud_/.test(String(req.action))) return out_(cloud_(req));   // 5판: 시트가 없어도 된다
+    var ss = SpreadsheetApp.getActiveSpreadsheet();                   // 시트 없이 만든 스크립트(독립형)는 null
+    if (!ss && { list: 1, put: 1, get: 1, snapshot: 1 }[req.action]) return out_({ ok: false, error: 'no spreadsheet — 구글 시트의 확장 프로그램 > Apps Script 에서 만든 스크립트에서만 됩니다' });
     switch (req.action) {
-      case 'ping': return out_({ ok: true, ver: 4, sheet: ss.getName(), url: ss.getUrl() });
+      case 'ping': return out_({ ok: true, ver: 5, sheet: ss ? ss.getName() : '', url: ss ? ss.getUrl() : '' });
       case 'list': return out_({ ok: true, tables: list_(ss) });
       case 'put': return out_(put_(ss, req));
       case 'get': return out_(get_(ss, req));
@@ -112,6 +120,73 @@ function backup_(req) {
   files.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });
   for (var i = keep; i < files.length; i++) files[i].setTrashed(true);
   return { ok: true, name: name, url: f.getUrl(), size: blob.getBytes().length };
+}
+
+// ---------------------------------------------------------------- 5판: 여러 PC 자료 공유
+// 표마다 스크립트 속성 T_<표> = {v: 저장 번호, f: 드라이브 파일 id, s: 글자 수, n: 행 수, at: 저장 시각}, 파일 = DATA_FOLDER/<표>.json.gz.b64.
+// cloud_info {} → {cid, tables: {표: {v, s, n, at}}}   (cid = 이 저장소의 이름표 — 주소가 바뀌어도 같은 저장소인지 ERP 가 안다)
+// cloud_get {names: [표]} → {tables: {표: {v, b64}}}
+// cloud_put {tables: {표: {base, b64, n}}} → {vers: {표: 새 번호}, conflicts: {표: 지금 번호}}
+//   ERP 가 마지막으로 본 번호(base)가 지금 번호와 같을 때만 쓴다. 다르면 다른 PC 가 먼저 쓴 것 → ERP 가 받아서 합친 뒤 다시 보낸다.
+//   쓰기는 잠금(LockService) 안에서 파일을 먼저 쓰고 번호를 올린다 → 읽기는 잠금 없이 해도 번호보다 옛 내용을 받지 않는다.
+var NAME_RE_ = /^[A-Za-z0-9_]{1,40}$/;
+function cloud_(req) {
+  var props = PropertiesService.getScriptProperties(), p = props.getProperties();
+  if (!p.CLOUD_ID || req.action === 'cloud_put') {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      p = props.getProperties();
+      if (!p.CLOUD_ID) { p.CLOUD_ID = Utilities.getUuid(); props.setProperty('CLOUD_ID', p.CLOUD_ID); }
+      if (req.action === 'cloud_put') return cloudPut_(props, p, req.tables || {});
+    } finally { lock.releaseLock(); }
+  }
+  if (req.action === 'cloud_info') return { ok: true, ver: 5, cid: p.CLOUD_ID, tables: cloudTables_(p), at: new Date().toISOString() };
+  if (req.action === 'cloud_get') return { ok: true, cid: p.CLOUD_ID, tables: cloudGet_(p, req.names || []) };
+  return { ok: false, error: 'unknown action' };
+}
+function cloudMeta_(p, n) { try { return JSON.parse(p['T_' + n] || 'null'); } catch (e) { return null; } }
+function cloudTables_(p) {
+  var t = {};
+  Object.keys(p).forEach(function (k) {
+    if (k.indexOf('T_') !== 0) return;
+    var x = cloudMeta_(p, k.slice(2)); if (x) t[k.slice(2)] = { v: x.v, s: x.s, n: x.n, at: x.at };
+  });
+  return t;
+}
+function cloudGet_(p, names) {
+  var out = {};
+  names.forEach(function (n) {
+    n = String(n); if (!NAME_RE_.test(n)) return;
+    var x = cloudMeta_(p, n);
+    out[n] = x && x.f ? { v: x.v, b64: DriveApp.getFileById(x.f).getBlob().getDataAsString() } : { v: 0, b64: '' };
+  });
+  return out;
+}
+function cloudPut_(props, p, tables) {
+  var vers = {}, conflicts = {}, folder = null, now = new Date().toISOString();
+  Object.keys(tables).forEach(function (n) {
+    if (!NAME_RE_.test(n)) return;
+    var x = cloudMeta_(p, n), cur = x ? Number(x.v) || 0 : 0, t = tables[n] || {};
+    if (Number(t.base) !== cur) { conflicts[n] = cur; return; }
+    var b64 = String(t.b64 || ''), f = null;
+    if (x && x.f) { try { f = DriveApp.getFileById(x.f); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
+    if (f && b64.length <= 9000000) f.setContent(b64);                 // 같은 파일을 고쳐 쓴다 (setContent 는 10MB 까지)
+    else {
+      folder = folder || dataFolder_();
+      var nf = folder.createFile(Utilities.newBlob(b64, 'text/plain', n + '.json.gz.b64'));
+      if (f) f.setTrashed(true);
+      f = nf;
+    }
+    var nx = { v: cur + 1, f: f.getId(), s: b64.length, n: Number(t.n) || 0, at: now };
+    props.setProperty('T_' + n, JSON.stringify(nx)); p['T_' + n] = JSON.stringify(nx);
+    vers[n] = nx.v;
+  });
+  return { ok: true, vers: vers, conflicts: conflicts };
+}
+function dataFolder_() {
+  var it = DriveApp.getFoldersByName(DATA_FOLDER);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(DATA_FOLDER);
 }
 
 // ---------------------------------------------------------------- 4판: 휴대폰 보기
