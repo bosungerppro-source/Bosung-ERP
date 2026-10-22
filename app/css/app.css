@@ -161,6 +161,22 @@ select.partsel{max-width:150px;min-width:96px;font-size:12px;font-weight:600;pad
 .tbl.dt .sun{background:#FBF6F6}
 .tbl.dt tr.tot td{background:#F4F6F9;font-weight:700}
 .tbl.dt tr.tot td:first-child,.tbl.dt tr.tot td:nth-child(2){background:#EEF1F6}
+/* 1.12.0: 현장 재고 피벗 표 (pivot.js) */
+.fpiv{display:flex;flex-direction:column;gap:12px;margin:2px 0 6px}
+.fpiv .fpiv-card{margin:0}
+.fpiv-edit{display:flex;flex-direction:column;gap:8px;background:#FAFBFC;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.fpiv-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.fpiv-row>b{min-width:52px;font-size:12.5px}
+.fpiv-row label{display:inline-flex;align-items:center;gap:4px;font-size:12.5px}
+.fpiv-chk{border:1px solid var(--line);border-radius:999px;padding:2px 10px 2px 6px;background:#fff;cursor:pointer}
+.fpiv-chk.on{border-color:var(--accent);background:#F5F9FF}
+.fpiv-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tbl.dt td.pc{cursor:pointer}.tbl.dt td.pc:hover{background:#F5F9FF}
+.tbl.dt.nostick2 th:nth-child(2),.tbl.dt.nostick2 td:nth-child(2){position:static;left:auto;box-shadow:none;z-index:auto}
+.tbl.dt.nostick2 thead th:nth-child(2){background:#F7F8FA}
+.tbl.dt.nostick2 tr.tot td:nth-child(2){background:#F4F6F9}
+.tbl.dt.wide1 th:first-child,.tbl.dt.wide1 td:first-child{width:190px;min-width:190px;max-width:190px}
+.tbl.dt.wide1 th:nth-child(2),.tbl.dt.wide1 td:nth-child(2){left:190px}
 .kchips{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 8px}
 .kc{border:1px solid #C9CFD6;background:#fff;color:#5B6470;border-radius:999px;padding:3px 11px;font:600 12px var(--font);cursor:pointer}
 .kc.on{background:#E4EDFB;border-color:#1F5FBF;color:#174A94}

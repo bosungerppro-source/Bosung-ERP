@@ -1,6 +1,6 @@
 /* 품목 · 현장 재고 · 원부자재 재고 (12차: 메뉴 3개로 나눔, 6차 '품목·재고' 를 대체) — Mặt hàng · Tồn hiện trường · Tồn NVL
    품목: 품목 마스터 · 코드 사전 · 자료 점검 · 예시 자료
-   현장 재고: 재고(공정 흐름 카드 · 필터) · 생산 반영 · 수불 입력 · 수불 내역 (현장 품목만)
+   현장 재고: 재고(피벗 표 — pivot.js, 1.12.0 · 필터) · 생산 반영 · 수불 입력 · 수불 내역 (현장 품목만)
    원부자재 재고(페이지 id 'materials' — 예전 주소 · AI 비서 버튼과 맞춤): 재고 · 수불 입력 · 수불 내역 · 발주/안전재고 · 외주 (원부자재만)
    예전 코드의 `ERP.state.matTab = '탭'; ERP.goto('materials')` 는 그 탭이 있는 메뉴로 보낸다 (ERP.goStock). ECOUNT 비교는 12차에서 없앰 (ECOUNT 를 그만 씀). */
 (function () {
@@ -110,21 +110,6 @@
   };
   const other = (s, group) => (group === 'floor' ? r4(s.in - s.out + s.adj) : r4(s.prod - s.out + s.adj));
   const r4 = (x) => Math.round((+x || 0) * 10000) / 10000;
-  /** 1.11.4 (사용자): 현장 재고 위 = 공정별로, 색깔 구분 없이 대분류(제품군)만으로 나눈 현재 재고 — 예) 조립: Mini / Dial / Pencil / Click pencil.
-      공정 = 단계의 공정 (INV.procOfStage), 대분류 = ERP CODE 제품군을 생산 일보의 품목군 이름으로 (INV.lineDivName). 단위가 다르면 나눠서 (포장: SET · CT). 칸을 누르면 표를 그 공정 · 대분류로 */
-  function floorCards(flow, all, st) {
-    const procs = new Map();
-    all.forEach(s => { const pid = INV.procOfStage(s.stage) || 'ETC'; let m = procs.get(pid); if (!m) procs.set(pid, m = new Map()); const ln = s.line || ''; let o = m.get(ln); if (!o) m.set(ln, o = { ln, by: new Map() }); o.by.set(s.prim, (o.by.get(s.prim) || 0) + s.bal); });
-    const order = ERP.PROC.map(p => p.id).concat(['ETC']); const lo = (ln) => { const i = INV.LINE_ORDER.indexOf(ln); return i < 0 ? (ln ? 50 : 99) : i; };
-    order.filter(pid => procs.has(pid)).forEach(pid => {
-      const lines = Array.from(procs.get(pid).values()).sort((a, b) => lo(a.ln) - lo(b.ln) || a.ln.localeCompare(b.ln));
-      flow.appendChild(h('div', { class: 'grp' }, h('small', pid === 'ETC' ? L('기타', 'Khác') : ERP.procName(pid)), h('div', lines.map(o => {
-        const qty = Array.from(o.by.entries()).filter(([, v]) => Math.abs(v) > EPS); const on = st.proc === pid && st.line === o.ln;
-        return h('button', { type: 'button', class: 'st pl' + (on ? ' on' : ''), 'data-proc': pid, 'data-line': o.ln, onclick: () => { if (on) { st.proc = ''; st.line = ''; } else { st.proc = pid; st.line = o.ln; } st.stage = ''; st.sub = st.cat = ''; st.page = 0; ERP.render(); } },
-          h('b', INV.lineDivName(o.ln)), h('div', { class: 'n' }, qty.length ? qty.map(([u, v], i) => h('span', { style: { display: 'block' } }, fq(v, u), h('small', ' ' + u))) : '0'));
-      }))));
-    });
-  }
   function stockTab(host, group) {
     const G = GROUPS()[group];
     const key = 'stk_' + group;
@@ -141,9 +126,9 @@
         h('div', { class: 'n' }, F.n(o.withStock), h('small', ' / ' + F.n(o.items))),
         h('div', { class: 'fl' }, o.negative ? h('span', { style: { background: '#FBE6E4', color: '#9F1F18' } }, '−' + F.n(o.negative)) : null, o.low ? h('span', { style: { background: '#FCEFD9', color: '#7A4600' } }, L('미달 ', 'thiếu ') + o.low) : null, o.susp ? h('span', { style: { background: '#EEF0F3', color: '#3C4551' }, title: L('이동 누락 의심 (창고 +, 공장 − 또는 반대)', 'Nghi thiếu phiếu chuyển (Kho +, Xưởng − hoặc ngược lại)') }, L('이동 누락 ', 'thiếu chuyển ') + o.susp) : null));
     };
-    const flow = h('div', { class: 'flow' });
-    if (group === 'floor') floorCards(flow, all, st);   // 1.11.4: 현장 재고는 공정별 · 대분류별 현재 재고 (단계 카드 대신)
-    else {
+    // 1.12.0: 현장 재고 위 = 피벗 표 (기본 조립 · 품목군 × 월, 표마다 공정 · 행 · 열 설정 — pivot.js). 1.11.4 의 공정별 · 대분류 칸 · 그 전의 단계 카드 대신
+    const flow = group === 'floor' ? ERP.floorPivot(all) : h('div', { class: 'flow' });
+    if (group !== 'floor') {
       G.flow.forEach((g, gi) => { if (gi) flow.appendChild(h('span', { class: 'arrow' }, '›')); flow.appendChild(h('div', { class: 'grp' }, h('small', L(g.ko, g.vi)), h('div', g.st.filter(x => INV.MAT_STAGES.includes(x)).map(card)))); });
       const etc = byStage.get('ETC'); if (etc && etc.items) flow.append(h('span', { class: 'arrow' }, '·'), h('div', { class: 'grp' }, h('small', L('기타', 'Khác')), h('div', card('ETC'))));
     }
@@ -166,7 +151,7 @@
       ? (odAll.FLOOR ? h('p', { class: 'help', style: { marginTop: 0 } }, ERP.chip('info', L('현장 실사 기준일 ', 'Ngày kiểm kê ') + odAll.FLOOR), ' ', L('공정 중 품목은 현장 실사 수량에서 시작해 다음 날부터의 생산 · 소모를 더합니다. 원부자재 재고(ECOUNT 기준일 ', 'Mã đang SX bắt đầu từ số kiểm kê, cộng SX · tiêu hao từ ngày hôm sau. Tồn NVL (ngày ECOUNT ') + (odAll.FAC || odAll.WH || '–') + L(')와 따로 관리합니다. 외주에서 받아 창고에 있는 반제품(창고 입출고장에 있는 것)은 창고 칸에 창고 입출고장 수량이 들어가고, 현장으로 분출하면 수불 입력의 이동(창고 → 공장)으로 옮깁니다.', ') quản lý riêng. BTP nhận từ gia công đang ở kho (có trong bảng kê kho) nằm ở cột Kho; khi xuất ra xưởng, nhập phiếu chuyển (Kho → Xưởng).'))
         : h('p', { class: 'help', style: { marginTop: 0 } }, ERP.chip('warn', L('현장 실사 없음', 'Chưa kiểm kê')), ' ', L('엑셀 업로드에 현장 재고 실사 파일(TỒN KHO)을 올리면 공정 중 재고의 기초가 됩니다 (그 전에는 ECOUNT 공장 재고를 씁니다).', 'Tải file kiểm kê hiện trường (TỒN KHO) ở Tải Excel để làm tồn đầu cho hàng đang SX (trước đó dùng tồn Xưởng ECOUNT).')))
       : null;
-    put(host, h('p', { class: 'help', style: { marginTop: 0 } }, G.help, ' ', group === 'floor' ? L('위 칸은 공정별 · 대분류별 현재 재고입니다 (색깔 구분 없이 합계). 칸을 누르면 아래 표가 그 공정 · 대분류 품목으로 바뀝니다.', 'Các ô = tồn hiện tại theo công đoạn · nhóm lớn (cộng mọi màu). Bấm ô để lọc bảng.') : L('칸을 누르면 아래 표가 그 단계로 바뀝니다. 숫자 = 재고 있는 품목 / 전체 품목.', 'Bấm vào ô để lọc bảng. Số = mã có tồn / tổng mã.')), ...[basis].filter(Boolean), flow,
+    put(host, h('p', { class: 'help', style: { marginTop: 0 } }, G.help, ' ', group === 'floor' ? L('위 표는 현장 재고를 엑셀 피벗 표처럼 모은 것입니다 (색깔 구분 없이 합계). 기본은 조립 · 품목군 × 월이고, [+ 표 추가] · [설정]으로 다른 공정 표를 만듭니다.', 'Bảng trên = tồn hiện trường gộp như PivotTable Excel (cộng mọi màu). Mặc định lắp ráp · nhóm × tháng; [+ Thêm bảng] · [Cài đặt] cho công đoạn khác.') : L('칸을 누르면 아래 표가 그 단계로 바뀝니다. 숫자 = 재고 있는 품목 / 전체 품목.', 'Bấm vào ô để lọc bảng. Số = mã có tồn / tổng mã.')), ...[basis].filter(Boolean), flow,
       h('section', { class: 'kpis', style: { margin: '12px 0' } }, kpis));
     // ---- filters
     let rows = all.slice();
@@ -191,7 +176,7 @@
     const useLabel = group === 'floor' ? L('부품 소모 −', 'Tiêu hao −') : L('생산 소모 −', 'Dùng cho SX −');
     const othLabel = group === 'floor' ? L('기타 수불 ±', 'Phiếu khác ±') : L('출고·조정 ±', 'Xuất · ĐC ±');
     const statusOpts = [['neg', L('마이너스', 'Âm')], ['low', L('안전재고 미달·임박', 'Dưới / sắp dưới tồn AT')], ['susp', L('이동 누락 의심', 'Nghi thiếu phiếu chuyển')], ['moved', L('기초 이후 수불 있음', 'Có phát sinh sau tồn đầu')], ['prod', L('생산 반영 있음', 'Có cập nhật SX')], ['safety', L('안전재고 설정됨', 'Đã cài tồn AT')], ['zero', L('재고 0', 'Tồn = 0')]];
-    const tb = h('div', { class: 'toolbar' },
+    const tb = h('div', { class: 'toolbar', 'data-anchor': group + '-table' },
       h('label', { class: 'search' }, ERP.svg('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z', 17), q),
       st.stage ? h('button', { class: 'btn sm', onclick: () => { st.stage = ''; st.line = st.sub = st.cat = ''; ERP.render(); } }, INV.stageTitle(st.stage) + ' ×') : null,
       st.proc ? h('button', { class: 'btn sm', onclick: () => { st.proc = ''; st.line = ''; st.page = 0; ERP.render(); } }, (st.proc === 'ETC' ? L('기타', 'Khác') : ERP.procName(st.proc)) + (st.line ? ' · ' + INV.lineDivName(st.line) : '') + ' ×') : null,
