@@ -183,6 +183,10 @@ select.partsel{max-width:150px;min-width:96px;font-size:12px;font-weight:600;pad
 .tbl-wrap.one{display:inline-block;max-width:100%;vertical-align:top}
 .tbl.dt.one{width:auto;min-width:300px}
 .tbl.dt.one th.num,.tbl.dt.one td.num{min-width:150px}
+/* 1.12.2: 종합 현황 위젯 (현장 재고) — 가로 1칸에 맞게 */
+.wgrid .tbl-wrap.one{display:block}
+.wgrid .tbl.dt.one{width:100%;min-width:0}
+.wgrid .tbl.dt.one th.num,.wgrid .tbl.dt.one td.num{min-width:0}
 .kchips{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 8px}
 .kc{border:1px solid #C9CFD6;background:#fff;color:#5B6470;border-radius:999px;padding:3px 11px;font:600 12px var(--font);cursor:pointer}
 .kc.on{background:#E4EDFB;border-color:#1F5FBF;color:#174A94}

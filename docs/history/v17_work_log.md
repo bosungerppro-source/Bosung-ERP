@@ -79,3 +79,23 @@
   - `test:v7` 148 / 148 (`ERP_PREV` = 1.11.5 소스, 데모 포함).
   - `test:v9` 86 / 87: 실패 1개는 Windows 환경 차이로, 예전과 같다.
 - 설치 파일 `ColorPencil-ERP-Setup-1.12.1.exe`: 114,061,072 bytes, SHA-256 `524781ac101761749529c3e7f18d6db0e82fbe94fe08a3dd49f63679c6a1038e` (electron-builder `--win dir` + NSIS 3.12). 데모 `dist/ERP_Demo.html` 7.4 MB.
+
+## 1.12.2 (2026-10-22) — 종합 현황에 현장 재고 위젯
+- 사용자 (1.12.1 의 "조립 재고" 표 캡처와 함께): "종합 현황에 이거 추가할수있게 해줘"
+- `p_dashboard.js`: 위젯 `floor_stock` "현장 재고 (공정별 현재 재고)" 를 넣었다.
+  - 재고 칸에 있고, 가로 1칸이 기본이며, 여러 개를 넣을 수 있다.
+  - 기본 설정은 `{ proc: 'ASM', rows: 'div', cols: 'none' }` 이다. ⚙ 에서 공정(모든 공정 · 공정 · 기타) · 행 · 열을 고른다.
+  - **기본 배치에는 넣지 않았다**. 사용자 위젯 배치는 바꾸지 않는 규칙이라, 사용자가 "+ 위젯 추가" 에서 넣는다.
+- `pivot.js`:
+  - `ERP.pivot.fromWidget` · `tableEl` · `pick` · `ROW_OPTS` · `COL_OPTS` 를 내보낸다.
+  - `pick` 은 현장 재고 화면이 아니면 `ERP.goStock('floor')` 로 가서 거른다. 현장 재고 상태가 없으면 기본값으로 만든다.
+- `app.css`: 위젯 안의 한 칸 표는 가로 1칸 폭에 맞춘다 (`.wgrid .tbl.dt.one`).
+- 이 PC 자료 복사본 (실제 ERP 아님):
+  - 사용자 배치 (7개) 끝에 조립 · 사출 · 리필 성형 위젯을 넣어 보았다. 숫자는 현장 재고 위 표와 같고, 칸은 287px 이다.
+  - 조립 Mini 칸을 누르면 현장 재고 · 조립 · Mini 품목 7줄이 나온다.
+- 시험: `test:v17` 55 (7장 위젯 — 위젯 추가 목록 · 추가 · ⚙ 공정 · 여러 개 · 칸 → 현장 재고 · 기본 배치에 없음; 편집 모드 흔들림은 v7 처럼 `reducedMotion`). v7 의 "모든 위젯 한/베로 그림" 에도 새 위젯이 들어간다.
+- 전체 시험 (1.12.2):
+  - `test:v17` 55 / 55 · `test:v16` 86 / 86 · `test:v15` 155 / 155 · `test:v14` 51 / 51 · `test:v13` 28 / 28 · `test:v12` 126 / 126 · `test:v11` 50 / 50 · `test:v8` 72 / 72 · `test:assistant` 290 / 290.
+  - `test:v7` 148 / 148 (`ERP_PREV` = 1.11.5 소스, 데모 · 모든 위젯 한/베 포함).
+  - `test:v9` 86 / 87: 실패 1개는 Windows 환경 차이로, 예전과 같다.
+- 설치 파일 `ColorPencil-ERP-Setup-1.12.2.exe`: 114,096,742 bytes, SHA-256 `df60c5808f058ee08e45f0a56ce032c3b5c1e29b97002bd8c3f7342ba5b312c1` (electron-builder `--win dir` + NSIS 3.12). 데모 `dist/ERP_Demo.html` 7.4 MB.

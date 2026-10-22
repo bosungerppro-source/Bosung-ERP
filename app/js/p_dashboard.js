@@ -260,6 +260,18 @@
       return box(L('현장 재고 반영 (최근 7일)', 'Cập nhật tồn hiện trường (7 ngày)'), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('post'); } }, L('생산 반영 →', 'Cập nhật SX →')),
         ERP.simpleTable([{ label: L('공정', 'Công đoạn'), render: p => h('b', { style: { color: p.color } }, L(p.ko, p.vi)) }].concat(days7.map(dd => ({ label: F.md(dd), num: 1, render: p => { const o = cell[p.id + '|' + dd]; return o ? h('span', { title: L('입고 ', 'Nhập ') + o.in + L(' · 차감 ', ' · trừ ') + o.use }, ERP.chip('ok', '+' + o.in), o.use ? ' ' : '', o.use ? ERP.chip('warn', '−' + o.use) : '') : h('span', { class: 'muted' }, '–'); } }))), ERP.PROC, {}),
         h('p', { class: 'help' }, L('+ = 생산 입고 건수, − = 현장 부품 차감 건수 (원부자재 제외) · 기준일 ', '+ = số dòng nhập, − = số dòng trừ linh kiện (không trừ NVL) · ngày chốt ') + (d.open || '–') + (issues ? L(' · 해결할 항목 ' + issues + '종', ' · cần xử lý ' + issues) : ''))); } });
+  // 1.12.2 (사용자 2026-10-22, 현장 재고 위 '조립 재고' 표 캡처와 함께): "종합 현황에 이거 추가할수있게 해줘"
+  // — 현장 재고 피벗 표와 같은 계산 · 모양 (ERP.pivot). 기본 배치에는 넣지 않고 "+ 위젯 추가" 에서 고른다 (여러 개, ⚙ 공정 · 행 · 열)
+  reg('floor_stock', { ko: '현장 재고 (공정별 현재 재고)', vi: 'Tồn hiện trường (theo công đoạn)', dko: '현장 재고 위의 표와 같은 품목군별 현재 재고 (기본 조립). ⚙ 에서 공정 · 행 · 열을 고르고, 공정마다 하나씩 넣을 수 있습니다', dvi: 'Tồn hiện tại theo nhóm như bảng ở trang Tồn hiện trường (mặc định lắp ráp). ⚙ chọn công đoạn · hàng · cột', cat: 'stock', w: 1, sizes: [1, 2, 3, 4], multi: true,
+    defaults: { proc: 'ASM', rows: 'div', cols: 'none' },
+    opts: [{ k: 'proc', ko: '공정 (기본 조립)', vi: 'Công đoạn (mặc định lắp ráp)', options: () => [['', L('모든 공정', 'Mọi công đoạn')]].concat(procOpts(), [['ETC', L('기타', 'Khác')]]) },
+      { k: 'rows', ko: '행', vi: 'Hàng', options: () => ERP.pivot.ROW_OPTS() }, { k: 'cols', ko: '열', vi: 'Cột', options: () => ERP.pivot.COL_OPTS() }],
+    render(ctx, inst) {
+      const P = ERP.pivot; const c = P.fromWidget(inst.o || {}); const d = P.build(c);
+      return box(P.autoTitle(c), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('floor'); } }, L('현장 재고 →', 'Tồn hiện trường →')),
+        d.rows.length ? P.tableEl(c, d) : h('div', { class: 'empty' }, L('재고가 없습니다.', 'Không có tồn.')),
+        h('p', { class: 'help', style: { margin: '6px 0 0' } }, [d.units.length === 1 ? L('단위 ', 'Đơn vị ') + d.units[0] : null, L('현재 재고', 'Tồn hiện tại')].filter(Boolean).join(' · ')));
+    } });
   reg('fresh', { ko: '자료 최신 여부', vi: 'Độ mới của dữ liệu', dko: '수불 · 생산일보 · ECOUNT · 수주 자료의 마지막 날짜', dvi: 'Ngày gần nhất của từng loại dữ liệu', cat: 'etc', w: 2, sizes: [2, 3, 4],
     render(ctx) { const meta = ERP.inv.meta();
       const fresh = [[L('수불 (입고·출고·이동)', 'Nhập xuất tồn'), meta.lastTx, 1], [L('생산일보', 'Báo cáo SX'), C.latestProdDate(), 1], [L('ECOUNT 품목등록', 'Danh mục ECOUNT'), (ERP.lastUpload ? ERP.lastUpload(['ecount_items']) : '').slice(0, 10), 0], [L('기초재고 (ECOUNT)', 'Tồn đầu (ECOUNT)'), meta.open.any, 0], [L('수주 (PO)', 'Đơn hàng'), DB.rows('po').reduce((a, p) => (/^\d{4}-\d\d-\d\d/.test(String(p.date || '')) && p.date > a ? p.date : a), ''), 0]];

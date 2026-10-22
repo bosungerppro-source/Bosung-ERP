@@ -4,7 +4,8 @@
    사용자 1.12.1: "현재 재고잖아 월별은 필요없어 현재재고만 보여주면된다" — 월 열 없음, 값은 언제나 현재 재고
    1 기본 표 = 조립 · 품목군 | 현재 재고 · 단계 카드 없음 · 2 월 열 없음 (예전 설정의 월 → 현재 재고)
    3 설정 (공정 · 품목군 · 행 · 열 · 범위 · 제목 · 재고 0 줄) → 저장 (다시 열어도 그대로) · 4 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히
-   5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀 · 7 베트남어 · 휴대폰 폭 · 오류 없음
+   5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
+   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 8 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -194,7 +195,37 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('기본 표 엑셀 = 품목군 · 현재 재고', y && [y.hdr, y.rows], [['품목군', '현재 재고'], [['Mini', 120], ['Dial', 40], ['Pencil', 40], ['기타', 5], ['합계', 205]]]);
   });
 
-  await sec('7. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
+  await sec('7. 종합 현황 위젯 (1.12.2): 위젯 추가 → 현장 재고 (공정별 현재 재고) · ⚙ 공정 · 여러 개 · 칸 → 현장 재고', async () => {
+    await setPivots(null);
+    await A.emulateMedia({ reducedMotion: 'reduce' });   // 편집 모드의 흔들림 애니메이션 끄기 (클릭 시험용, v7 과 같음)
+    await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    await A.click('main button:has-text("위젯 추가")'); await A.waitForSelector('.modal .wgal');
+    const item = await ev(() => { const it = Array.from(document.querySelectorAll('.modal .wgal-item')).find(x => x.querySelector('b').textContent === '현장 재고 (공정별 현재 재고)'); return it ? { cat: it.parentElement.parentElement.querySelector('h4').textContent, text: it.innerText.replace(/\s+/g, ' ') } : null; });
+    ok('위젯 목록의 재고 칸에 "현장 재고 (공정별 현재 재고)" · 가로 1칸 · 여러 개 가능', item && item.cat === '재고' && /가로 1칸/.test(item.text) && /여러 개 가능/.test(item.text), item);
+    await A.click('.modal .wgal-item:has(b:text-is("현장 재고 (공정별 현재 재고)")) button'); await settle();
+    const wOf = () => ev(() => Array.from(document.querySelectorAll('.wgrid .w[data-id=floor_stock]')).map(el => ({ title: el.querySelector('h2').textContent, head: Array.from(el.querySelectorAll('thead th')).map(t => t.innerText.trim()), rows: Array.from(el.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())), w: el.dataset.w, help: (el.querySelector('p.help') || {}).textContent })));
+    let w = await wOf();
+    eq('추가한 위젯 = 조립 재고 · 품목군 | 현재 재고 (현장 재고 위 표와 같은 숫자) · 가로 1칸 · 단위 PCS', w, [{ title: '조립 재고', head: ['품목군', '현재 재고'], rows: [['Mini', '120'], ['Dial', '40'], ['Pencil', '40'], ['기타', '5'], ['합계', '205']], w: '1', help: '단위 PCS · 현재 재고' }]);
+    await A.click('.wgrid .w[data-id=floor_stock] .wbar button[title="위젯 설정"]'); await A.waitForSelector('.modal select');
+    const opts = await ev(() => Array.from(document.querySelectorAll('.modal select')).map(s => Array.from(s.options).map(o => o.textContent)));
+    eq('⚙: 공정 (모든 공정 + 공정 + 기타) · 행 · 열', opts, [['모든 공정', '사출', '리필 성형', '핫포일 스탬핑', '조립', '종이 권취', '포장', '기타'], ['품목군', '공정', '단계', '품목'], ['없음 (현재 재고 한 칸)', '공정', '품목군', '단계']]);
+    await ev(() => { const s = document.querySelectorAll('.modal select')[0]; s.value = 'INJ'; s.dispatchEvent(new Event('change')); });
+    await A.click('.modal .modal-foot button.primary'); await settle();
+    w = await wOf();
+    eq('⚙ 공정 = 사출 → 사출 재고 · Mini 525', [w[0].title, w[0].rows], ['사출 재고', [['Mini', '525'], ['합계', '525']]]);
+    await A.click('main button:has-text("위젯 추가")'); await A.waitForSelector('.modal .wgal');
+    await A.click('.modal .wgal-item:has(b:text-is("현장 재고 (공정별 현재 재고)")) button'); await settle();
+    eq('하나 더 (여러 개) → 사출 · 조립 두 개 저장', await ev(() => ERP.dashLayout().filter(x => x.id === 'floor_stock').map(x => x.o)), [{ proc: 'INJ', rows: 'div', cols: 'none' }, { proc: 'ASM', rows: 'div', cols: 'none' }]);
+    eq('기본 배치에는 없음 (사용자가 넣을 때만)', await ev(() => ERP.dashDefault().some(x => x.id === 'floor_stock')), false);
+    await ev(() => { ERP.state.dashEdit = false; ERP.render(); }); await settle();
+    await ev(() => { const el = Array.from(document.querySelectorAll('.wgrid .w[data-id=floor_stock]')).pop(); el.querySelector('tbody tr[data-k="MINI"] td.pc:last-child').click(); });
+    await A.waitForFunction(() => location.hash === '#/floor', null, { timeout: 15000 }); await settle();
+    const f = await ev(() => ({ hash: location.hash, proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort() }));
+    eq('조립 위젯의 Mini 칸 → 현장 재고 · 조립 · Mini 품목', f, { hash: '#/floor', proc: 'ASM', line: 'MINI', codes: ['A-M1', 'A-M2'] });
+    await ev(() => { ERP.db.setSetting('dash', null); ERP.state.stk_floor = null; }); await settle();
+  });
+
+  await sec('8. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => ERP.setLang('vi')); await floor();
     const c = (await cards())[0];
     eq('베트남어: 제목 · 머리 · 합계', [c.title, c.head, c.rows.slice(-1)[0][0]], ['Lắp ráp — tồn', ['Nhóm', 'Tồn hiện tại'], 'Tổng']);

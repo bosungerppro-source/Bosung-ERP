@@ -31,6 +31,9 @@
   const colName = (c) => (c === 'none' ? L('없음 (현재 재고 한 칸)', 'Không (một cột tồn hiện tại)') : L(DIMS[c].ko, DIMS[c].vi));
   const dimName = (d) => (d === 'none' ? '' : L(DIMS[d].ko, DIMS[d].vi));
   const SCOPES = () => [['all', L('창고+공장', 'Kho+Xưởng')], ['WH', L('창고', 'Kho')], ['FAC', L('공장', 'Xưởng')]];
+  /** 1.12.2 종합 현황 위젯 설정 (⚙) 고르기 */
+  P.ROW_OPTS = () => ROWS.map(k => [k, L(DIMS[k].ko, DIMS[k].vi)]);
+  P.COL_OPTS = () => COLS.map(k => [k, colName(k)]);
 
   // ---------------------------------------------------------------- 설정 (표 목록)
   // 1.12.0 에 저장한 열 '월' (cols: 'month') 은 현재 재고 한 칸으로 읽는다
@@ -40,6 +43,8 @@
     scope: ['all', 'WH', 'FAC'].includes(c.scope) ? c.scope : 'all', zero: !!c.zero });
   /** 저장된 표 목록 (없으면 기본: 조립 · 품목군 | 현재 재고). 모두 지우면 빈 목록 */
   P.list = () => { const v = DB.setting(KEY, null); return Array.isArray(v) ? v.map(clean) : P.DEFAULT(); };
+  /** 1.12.2: 종합 현황 위젯 설정 { proc ('' = 모든 공정), rows, cols } → 표 하나 */
+  P.fromWidget = (o) => clean({ id: 'w', procs: o.proc ? [String(o.proc)] : [], divs: [], rows: o.rows || 'div', cols: o.cols || 'none', scope: 'all' });
   const save = (list) => { DB.setSetting(KEY, list.map(c => { const o = clean(c); if (!o.title) delete o.title; if (!o.zero) delete o.zero; return o; })); ERP.render(); };
   const patch = (id, p) => { const l = P.list(); const c = l.find(x => x.id === id); if (!c) return; Object.assign(c, p); if (c.cols === c.rows) c.cols = 'none'; save(l); };
   P.autoTitle = (c) => (c.procs.length ? c.procs.map(P.procLabel).join(' · ') : L('모든 공정', 'Mọi công đoạn')) + L(' 재고', ' — tồn') + (c.divs.length ? ' (' + c.divs.map(k => INV.lineDivName(k)).join(' · ') + ')' : '');
@@ -80,27 +85,31 @@
   const isInt = (v) => Math.abs(v - Math.round(v)) < 1e-9;
   const fv = (v, u) => F.n(v, u === 'kg' || !isInt(+v) ? 2 : 0);
   const neg = (v) => (v < -EPS ? { color: '#B3261E', fontWeight: 700 } : null);
-  /** 칸을 누르면 아래 품목 표를 그 공정 · 품목군 · 단계로 (품목 줄은 수불부) */
+  /** 칸을 누르면 현장 재고의 품목 표를 그 공정 · 품목군 · 단계로 (품목 줄은 수불부). 종합 현황 위젯에서 누르면 현장 재고로 간다 */
   function pick(c, rk, ck) {
     if (c.rows === 'item') { ERP.itemDetail(rk); return; }
-    const st = ERP.state.stk_floor; if (!st) return;
+    const st = ERP.state.stk_floor = ERP.state.stk_floor || { stage: '', line: '', sub: '', cat: '', scope: 'all', status: '', q: '', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 };
     st.proc = c.procs.length === 1 ? c.procs[0] : ''; st.line = c.divs.length === 1 ? c.divs[0] : ''; st.stage = ''; st.sub = st.cat = ''; st.page = 0;
     const set = (dim, k) => { if (dim === 'proc') st.proc = k; else if (dim === 'div') st.line = k; else if (dim === 'stage') st.stage = k; };
     set(c.rows, rk); if (ck !== null && ck !== undefined && c.cols !== 'none') set(c.cols, ck);
-    ERP.render();
-    setTimeout(() => { const t = document.querySelector('main [data-anchor="floor-table"]'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 0);
+    ERP.goStock('floor');   // 현장 재고 화면이면 다시 그리기만
+    setTimeout(() => { const t = document.querySelector('main [data-anchor="floor-table"]'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 150);
   }
-  function table(c, d) {
+  P.pick = pick;
+  /** 표 그리기 (현장 재고 위 · 종합 현황 위젯이 같이 씀). onPick(c, 줄 열쇠, 열 열쇠) — 기본은 pick */
+  P.tableEl = (c, d, onPick) => table(c, d, onPick);
+  function table(c, d, onPick) {
+    const go = onPick || pick;
     const unitHead = d.multi ? null : (d.units[0] || '');
     const head = h('tr', h('th', { title: unitHead ? L('단위 ', 'Đơn vị ') + unitHead : null }, dimName(c.rows) + (c.cols === 'none' ? '' : ' \\ ' + dimName(c.cols))),
       d.hasTot ? h('th', { class: 'num' }, L('합계', 'Tổng')) : null,
       d.cols.map(x => h('th', { class: 'num' }, x.label)));
     const cell = (r, x) => {
-      const v = r.cells.get(x.k); if (v === undefined || Math.abs(v) <= EPS) return h('td', { class: 'num pc', onclick: () => pick(c, r.k, x.k) }, h('span', { class: 'muted' }, '·'));
-      return h('td', { class: 'num pc', style: neg(v), onclick: () => pick(c, r.k, x.k), title: r.title + ' · ' + x.label }, fv(v, r.unit));
+      const v = r.cells.get(x.k); if (v === undefined || Math.abs(v) <= EPS) return h('td', { class: 'num pc', onclick: () => go(c, r.k, x.k) }, h('span', { class: 'muted' }, '·'));
+      return h('td', { class: 'num pc', style: neg(v), onclick: () => go(c, r.k, x.k), title: r.title + ' · ' + x.label }, fv(v, r.unit));
     };
     const body = d.rows.map(r => h('tr', { 'data-k': r.k, 'data-unit': r.unit },
-      h('td', { class: 'pc', title: r.title, onclick: () => pick(c, r.k, null) }, h('b', r.label)),
+      h('td', { class: 'pc', title: r.title, onclick: () => go(c, r.k, null) }, h('b', r.label)),
       d.hasTot ? h('td', { class: 'num', style: neg(r.tot) || { fontWeight: 700 } }, fv(r.tot, r.unit)) : null,
       d.cols.map(x => cell(r, x))));
     const foot = d.tots.map(t => h('tr', { class: 'tot', 'data-unit': t.unit }, h('td', L('합계', 'Tổng') + (d.multi ? ' · ' + t.unit : '')),
