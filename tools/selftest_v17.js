@@ -6,7 +6,7 @@
    3 설정 (공정 · 품목군 · 행 · 열 · 범위 · 제목 · 재고 0 줄) → 저장 (다시 열어도 그대로) · 4 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히
    5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
    7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 8 이번 달 포장 누계 = pcs (1.12.3)
-   9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 베트남어 · 휴대폰 폭 · 오류 없음
+   9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -199,7 +199,8 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
   await sec('7. 종합 현황 위젯 (1.12.2): 위젯 추가 → 현장 재고 (공정별 현재 재고) · ⚙ 공정 · 여러 개 · 칸 → 현장 재고', async () => {
     await setPivots(null);
     await A.emulateMedia({ reducedMotion: 'reduce' });   // 편집 모드의 흔들림 애니메이션 끄기 (클릭 시험용, v7 과 같음)
-    await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    // 1.12.5 부터 기본 배치에 조립 재고 위젯이 있어, 없는 배치에서 위젯 추가를 본다
+    await ev(() => { ERP.db.setSetting('dash', [{ k: 'v17-pm', id: 'kpi_pck_month', w: 1 }]); ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); }); await settle();
     await A.click('main button:has-text("위젯 추가")'); await A.waitForSelector('.modal .wgal');
     const item = await ev(() => { const it = Array.from(document.querySelectorAll('.modal .wgal-item')).find(x => x.querySelector('b').textContent === '현장 재고 (공정별 현재 재고)'); return it ? { cat: it.parentElement.parentElement.querySelector('h4').textContent, text: it.innerText.replace(/\s+/g, ' ') } : null; });
     ok('위젯 목록의 재고 칸에 "현장 재고 (공정별 현재 재고)" · 가로 1칸 · 여러 개 가능', item && item.cat === '재고' && /가로 1칸/.test(item.text) && /여러 개 가능/.test(item.text), item);
@@ -217,7 +218,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await A.click('main button:has-text("위젯 추가")'); await A.waitForSelector('.modal .wgal');
     await A.click('.modal .wgal-item:has(b:text-is("현장 재고 (공정별 현재 재고)")) button'); await settle();
     eq('하나 더 (여러 개) → 사출 · 조립 두 개 저장', await ev(() => ERP.dashLayout().filter(x => x.id === 'floor_stock').map(x => x.o)), [{ proc: 'INJ', rows: 'div', cols: 'none' }, { proc: 'ASM', rows: 'div', cols: 'none' }]);
-    eq('기본 배치에는 없음 (사용자가 넣을 때만)', await ev(() => ERP.dashDefault().some(x => x.id === 'floor_stock')), false);
+    eq('1.12.5 기본 배치에는 조립 재고 위젯이 하나 (사용자 배치)', await ev(() => ERP.dashDefault().filter(x => x.id === 'floor_stock').map(x => x.o.proc)), ['ASM']);
     await ev(() => { ERP.state.dashEdit = false; ERP.render(); }); await settle();
     await ev(() => { const el = Array.from(document.querySelectorAll('.wgrid .w[data-id=floor_stock]')).pop(); el.querySelector('tbody tr[data-k="MINI"] td.pc:last-child').click(); });
     await A.waitForFunction(() => location.hash === '#/floor', null, { timeout: 15000 }); await settle();
@@ -229,7 +230,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {
     await ev(async () => { const DB = ERP.db; const pk = (date, set, ea) => ({ date, process: 'PCK', shift: 'D', ok_qty: set, ok_ea: ea, unit: 'set', source: 'test' });
       DB.replace('prod_log', [pk('2026-10-05', 100, 1200), pk('2026-10-10', 50, 600), pk('2026-10-12', 30, 0), pk('2026-09-05', 200, 2400), pk('2026-09-11', 10, 120), pk('2026-09-20', 999, 9999)]);
-      await DB.flush(); ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); });
+      await DB.flush(); ERP.db.setSetting('dash', [{ k: 'v17-pm', id: 'kpi_pck_month', w: 1 }, { k: 'v17-pd', id: 'kpi_pck_day', w: 1 }]); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); });
     await settle();
     const k = await ev(() => { const e = document.querySelector('.wgrid .w[data-id=kpi_pck_month]'); return e ? { label: e.querySelector('.kpi-label').textContent, v: e.querySelector('.kpi-val .v').textContent, u: e.querySelector('.kpi-val .u').textContent, chip: e.querySelector('.kpi-note .chip').textContent, note: e.querySelector('.kpi-note span:last-child').textContent } : null; });
     // 기준일 10-12 → 이번 달 10-01 ~ 10-12: pcs 1,200 + 600 (10-12 의 30 세트는 pcs 0 이라 빠짐), 전월 동기 09-01 ~ 09-12: 2,400 + 120 = 2,520 → ▼ 29%
@@ -263,7 +264,18 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await ev(async () => { ERP.db.replace('prod_log', []); ERP.db.replace('po', []); ERP.db.setSetting('dash', null); await ERP.db.flush(); });
   });
 
-  await sec('10. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
+  await sec('10. 기본 배치 = 사용자 배치 (1.12.5): 포장 누계 · 신규 수주 · 수주량 · 조립 재고 한 줄 → 월별 수주량 · 공정별 실적 · 월별 조립', async () => {
+    await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    const d = await ev(() => Array.from(document.querySelectorAll('.wgrid > .w')).map(w => [w.dataset.id + ':' + w.dataset.w, Math.round(w.getBoundingClientRect().top)]));
+    eq('기본 배치 순서 · 가로 (사용자가 보낸 화면 순서)', d.map(x => x[0]), ['kpi_pck_month:1', 'kpi_new_po:1', 'kpi_orders_month:1', 'floor_stock:1', 'po_monthly:4', 'procs:4', 'asm_monthly:4']);
+    ok('첫 줄에 포장 누계 · 신규 수주 · 수주량 · 조립 재고 (1480px), 그 아래 큰 위젯', d.slice(0, 4).every(x => x[1] === d[0][1]) && d[4][1] > d[0][1], d);
+    eq('안전재고 미달 · 기준일 포장 · 납기 · 일별 조립 위젯은 기본 배치에 없음', await ev(() => ERP.dashDefault().filter(x => ['kpi_low', 'kpi_pck_day', 'kpi_due', 'asm_daily'].includes(x.id)).length), 0);
+    eq('위젯 설정: 조립 재고 = 조립 · 월별 수주량 · 월별 조립 = 차트 (사용자 설정 그대로)', await ev(() => ERP.dashDefault().filter(x => x.o).map(x => [x.id, x.o])),
+      [['floor_stock', { proc: 'ASM', rows: 'div', cols: 'none' }], ['po_monthly', { view: 'chart' }], ['asm_monthly', { proc: 'ASM', view: 'chart' }]]);
+    ok('지난달 값 (1.12.4) 은 그대로: 포장 누계 · 신규 수주 · 수주량 카드 아래', await ev(() => ['kpi_pck_month', 'kpi_new_po', 'kpi_orders_month'].every(id => !!document.querySelector('.wgrid .w[data-id=' + id + '] .kpi-prev'))));
+  });
+
+  await sec('11. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => ERP.setLang('vi')); await floor();
     const c = (await cards())[0];
     eq('베트남어: 제목 · 머리 · 합계', [c.title, c.head, c.rows.slice(-1)[0][0]], ['Lắp ráp — tồn', ['Nhóm', 'Tồn hiện tại'], 'Tổng']);

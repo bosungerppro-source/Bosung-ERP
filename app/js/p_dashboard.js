@@ -307,8 +307,12 @@
       return h('section', { class: 'card wcard memo' }, h('div', { class: 'card-head' }, h('h2', '🗒 ' + L('메모', 'Ghi chú'))), ta); } });
 
   // ---------------------------------------------------------------- layout (saved in settings)
-  const DEFAULT = () => [['kpi_pck_day', 1], ['kpi_pck_month', 1], ['kpi_due', 1], ['kpi_low', 1], ['procs', 4], ['asm_daily', 4], ['asm_monthly', 4], ['po_monthly', 2], ['due_list', 2], ['low_list', 2], ['flow', 2], ['fresh', 2], ['input7', 2]]
-    .map(([id, w], i) => ({ k: id + '-' + i, id, w, o: W[id].defaults ? JSON.parse(JSON.stringify(W[id].defaults)) : undefined }));
+  // 1.12.5 (사용자 2026-10-22, 종합 현황 캡처와 함께): "안전재고미달 빼고 조립재고 넣어줘 이순서대로 하고 이게 기본세팅이야"
+  // — 사용자가 꾸민 배치 그대로: 포장 누계 · 신규 수주 · 수주량 · 조립 재고 (한 줄) → 월별 수주량(차트) · 공정별 실적 · 월별 조립 생산량(차트).
+  //   예전 기본(13개: 기준일 포장 · 납기 · 안전재고 미달 · 일별 조립 · 목록 …)은 "+ 위젯 추가" 에서 넣는다
+  const DEFAULT = () => [['kpi_pck_month', 1], ['kpi_new_po', 1], ['kpi_orders_month', 1], ['floor_stock', 1, { proc: 'ASM', rows: 'div', cols: 'none' }],
+    ['po_monthly', 4, { view: 'chart' }], ['procs', 4], ['asm_monthly', 4, { proc: 'ASM', view: 'chart' }]]
+    .map(([id, w, o], i) => ({ k: id + '-' + i, id, w, o: o ? JSON.parse(JSON.stringify(o)) : (W[id].defaults ? JSON.parse(JSON.stringify(W[id].defaults)) : undefined) }));
   ERP.dashDefault = DEFAULT;
   ERP.dashCtx = makeCtx; ERP.dashPrevMonth = prevMonthWindow;   // 15차: 휴대폰 요약(mobile.js)이 같은 숫자를 쓰게
   const clampW = (w, def) => { const s = def.sizes; if (s.includes(w)) return w; return s.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a), s[0]); };

@@ -206,7 +206,9 @@ const TABLE = [
   section('2. 숫자: 비서 도구 = 대시보드');
   {
     const r = await ev(() => {
-      ERP.goto('dashboard'); const txt = document.querySelector('.wgrid').innerText;
+      // 1.12.5: 기본 배치에 납기 · 안전재고 미달 위젯이 없어, 비교할 위젯을 배치에 넣고 읽는다
+      ERP.dashSave([{ k: 'ai-due', id: 'kpi_due', w: 1 }, { k: 'ai-low', id: 'kpi_low', w: 1 }]);
+      ERP.goto('dashboard'); ERP.render(); const txt = document.querySelector('.wgrid').innerText; ERP.db.setSetting('dash', null);
       const ov = ERP.ai.tools.overview(), T = ERP.ai.tools, C = ERP.calc, o = { txt, ov };
       o.late = T.find_orders({ status: 'late', limit: 500 }); o.stale = T.find_orders({ status: 'stale', limit: 500 }); o.soon = T.find_orders({ status: 'due_soon', limit: 500 }); o.open = T.find_orders({ status: 'open', limit: 1 });
       o.low = T.material_stock({ only_low: true, limit: 500 }); o.re = T.reorder({ limit: 500 });

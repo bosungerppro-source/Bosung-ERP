@@ -430,10 +430,14 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     const S3 = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir: tmp('erp-v15-g-'), host: '127.0.0.1', port: port0 + 600, backupDelay: 3600000, googleHosts: /^127\.0\.0\.1$/ });
     const ctx = await browser.newContext({ viewport: { width: 1480, height: 920 } }); const A = await newPage(ctx);
     await A.goto(S3.url + '/#/dashboard'); await ready(A); await A.waitForTimeout(500);
+    // 1.12.5: 기본 배치에 납기 · 기준일 포장 위젯이 없어, 비교할 위젯을 배치에 넣고 본다 (+ 이번 달 포장 누계 pcs)
+    await A.evaluate(() => { ERP.dashSave([{ k: 'v15-d', id: 'kpi_due', w: 1 }, { k: 'v15-p', id: 'kpi_pck_day', w: 1 }, { k: 'v15-m', id: 'kpi_pck_month', w: 1 }]); ERP.render(); }); await A.waitForTimeout(300);
     // 요약 = 종합 현황 화면과 같은 숫자
-    const sm = await A.evaluate(() => { const s = ERP.mobileSummary(); const w = (id) => { const e = document.querySelector('.w[data-id="' + id + '"] .kpi-val .v'); return e ? e.textContent : null; }; return { s, due: w('kpi_due'), pck: w('kpi_pck_day'), procs: ERP.dashProcs().map(p => p.id), ref: ERP.calc.latestProdDate() }; });
+    const sm = await A.evaluate(() => { const s = ERP.mobileSummary(); const w = (id) => { const e = document.querySelector('.w[data-id="' + id + '"] .kpi-val .v'); return e ? e.textContent : null; }; return { s, due: w('kpi_due'), pck: w('kpi_pck_day'), pckM: w('kpi_pck_month'), procs: ERP.dashProcs().map(p => p.id), ref: ERP.calc.latestProdDate() }; });
     const S1 = sm.s;
     ok('요약: 기준일 = 최신 생산일보 · 공정 = 종합 현황 공정 · 14일 · 목록 8개까지', S1.ref === sm.ref && S1.procs.map(p => p.id).join() === sm.procs.join() && S1.daily.days.length === 14 && S1.daily.days[0] === sm.ref && S1.due.length <= 8 && S1.low.length <= 8 && S1.month.length === sm.procs.length, { ref: S1.ref, procs: S1.procs.map(p => p.id), days: S1.daily.days.length });
+    ok('요약 숫자 = 종합 현황 위젯 (이번 달 포장 누계 pcs, 1.12.3)', sm.pckM !== null && Number(sm.pckM.replace(/[^\d]/g, '')) === S1.kpi.pckMonth.ea, { widget: sm.pckM, sum: S1.kpi.pckMonth });
+    await A.evaluate(() => { ERP.db.setSetting('dash', null); ERP.render(); });
     ok('요약 숫자 = 종합 현황 위젯 (납기 임박/경과 · 기준일 포장)', sm.due !== null && Number(sm.due.replace(/[^\d]/g, '')) === S1.kpi.due.soon + S1.kpi.due.late && Number(sm.pck.replace(/[^\d]/g, '')) === S1.kpi.pckDay.ok, { widget: [sm.due, sm.pck], sum: [S1.kpi.due, S1.kpi.pckDay.ok] });
     ok('납기 임박 목록은 납기 순', S1.due.every((o, i) => !i || S1.due[i - 1].due <= o.due), S1.due.map(o => o.due));
     // 설정 카드 (이 PC)
@@ -501,13 +505,16 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     const S5 = await serverMod.start({ appDir: path.join(ROOT, 'app'), dataDir: tmp('erp-v15-m-'), host: '127.0.0.1', port: port0 + 900, backupDelay: 3600000 });
     const ctx = await browser.newContext({ viewport: { width: 1480, height: 1000 } }); const A = await newPage(ctx);
     await A.goto(S5.url + '/#/dashboard'); await ready(A); await A.waitForTimeout(800);
+    // 1.12.5: 기본 배치 = 사용자 배치 — 월별 조립 생산량은 있고 (차트로), 일별 조립 생산량은 없음
+    const d0 = await A.evaluate(() => ({ ids: Array.from(document.querySelectorAll('.wgrid .w')).map(e => e.getAttribute('data-id')), chart: !!document.querySelector('.w[data-id=asm_monthly] canvas') }));
+    ok('종합 현황 기본 배치 (1.12.5)에 월별 조립 생산량 — 차트로 보임', d0.ids.includes('asm_monthly') && d0.chart && !d0.ids.includes('asm_daily'), d0);
+    await A.click('.w[data-id=asm_monthly] .seg button:first-child'); await A.waitForTimeout(400);   // 표로
     const d = await A.evaluate(() => {
       const ids = Array.from(document.querySelectorAll('.wgrid .w')).map(e => e.getAttribute('data-id'));
       const w = document.querySelector('.w[data-id=asm_monthly]'); const C = ERP.calc; const ref = C.latestProdDate(); const y = ref.slice(0, 4), mo = ref.slice(0, 7);
       const asm = C.rowsBetween(y + '-01-01', y + '-12-31', 'ASM'); const sum = asm.reduce((a, r) => a + C.qty(r), 0), sumM = asm.filter(r => r.date.slice(0, 7) === mo).reduce((a, r) => a + C.qty(r), 0);
       return { ids, title: w && w.querySelector('h2').textContent, y, sum, sumM, mi: +mo.slice(5, 7), tot: w ? Array.from(w.querySelectorAll('tbody tr.tot td')).map(td => td.textContent) : null };
     });
-    ok('종합 현황 기본 배치: 일별 조립 생산량 바로 다음에 월별 조립 생산량', d.ids.indexOf('asm_monthly') === d.ids.indexOf('asm_daily') + 1 && d.ids.indexOf('asm_daily') >= 0, d.ids);
     eq('위젯 제목', d.title, '월별 조립 생산량 · ' + d.y);
     const num = (s) => Number(String(s || '').replace(/[^\d]/g, ''));
     ok('연 합계 = 그해 조립 양품 합 · 이 달 칸 = 그 달 합 (예시 자료 ' + d.y + ')', d.sum > 0 && d.tot && num(d.tot[1]) === d.sum && num(d.tot[1 + d.mi]) === d.sumM, { tot: d.tot, sum: d.sum, sumM: d.sumM });

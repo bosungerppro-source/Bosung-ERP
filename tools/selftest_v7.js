@@ -56,12 +56,14 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
   section('3. 대시보드 · 비서 숫자 일치');
   {
-    await ev(() => ERP.goto('dashboard')); await page.waitForTimeout(400);
+    // 1.12.5: 기본 배치에 안전재고 미달 · 공정 흐름 위젯이 없어, 비교할 위젯을 배치에 넣고 본다
+    await ev(() => { ERP.dashSave([{ k: 'v7-low', id: 'kpi_low', w: 1 }, { k: 'v7-flow', id: 'flow', w: 2 }]); ERP.goto('dashboard'); ERP.render(); }); await page.waitForTimeout(400);
     const r = await ev(() => ({ txt: document.querySelector('.wgrid').innerText, ov: ERP.ai.tools.overview(), low: ERP.ai.tools.material_stock({ only_low: true, limit: 500 }).total, r001: ERP.ai.tools.material_stock({ query: 'R-001', limit: 3 }).rows[0], ans: ERP.ai.localAnswer('R-001 재고').text, flow: !!document.querySelector('.flow') }));
     const m = r.txt.match(/안전재고 미달 자재\s*([\d,]+)\s*품목/); eq('대시보드 안전재고 미달 = overview', m ? +m[1].replace(/,/g, '') : null, r.ov.materials_below_safety);
     eq('material_stock(only_low) = overview', r.low, r.ov.materials_below_safety); eq('R-001 비서 도구 창고/공장', [r.r001.warehouse, r.r001.factory, r.r001.balance], [1695, -790.5, 904.5]);
     ok('내장 비서 답변에 창고/공장·기준일', /창고 1,695/.test(r.ans) && /공장 -790|공장 −790/.test(r.ans) && /2026-10-16/.test(r.ans), r.ans); ok('대시보드 공정 흐름 카드', r.flow);
     ok('overview 에 stock_basis', r.ov.stock_basis && r.ov.stock_basis.opening_date_warehouse === '2026-10-16', r.ov.stock_basis);
+    await ev(() => { ERP.db.setSetting('dash', null); });
   }
 
   section('4. 모든 화면 · 탭 (한국어 / Tiếng Việt)');
@@ -250,7 +252,11 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
   {
     await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); }); await page.waitForTimeout(500);
     const d0 = await ev(() => ({ ids: Array.from(document.querySelectorAll('.wgrid > .w')).map(w => w.dataset.id + ':' + w.dataset.w), txt: document.querySelector('.wgrid').innerText }));
-    eq('기본 배치 13개 (1.10.1: 월별 조립 생산량)', d0.ids, ['kpi_pck_day:1', 'kpi_pck_month:1', 'kpi_due:1', 'kpi_low:1', 'procs:4', 'asm_daily:4', 'asm_monthly:4', 'po_monthly:2', 'due_list:2', 'low_list:2', 'flow:2', 'fresh:2', 'input7:2']);
+    // 1.12.5 (사용자 2026-10-22 "이 순서대로 하고 이게 기본세팅이야"): 기본 배치 = 포장 누계 · 신규 수주 · 수주량 · 조립 재고 · 월별 수주량 · 공정별 실적 · 월별 조립
+    eq('기본 배치 7개 (1.12.5 사용자 배치)', d0.ids, ['kpi_pck_month:1', 'kpi_new_po:1', 'kpi_orders_month:1', 'floor_stock:1', 'po_monthly:4', 'procs:4', 'asm_monthly:4']);
+    // 아래 추가 · 이동 · 끌기 · 빼기 시험은 예전 기본 배치(13개)를 사용자 배치로 저장해 놓고 한다
+    await ev(() => { const OLD13 = [['kpi_pck_day', 1], ['kpi_pck_month', 1], ['kpi_due', 1], ['kpi_low', 1], ['procs', 4], ['asm_daily', 4], ['asm_monthly', 4], ['po_monthly', 2], ['due_list', 2], ['low_list', 2], ['flow', 2], ['fresh', 2], ['input7', 2]];
+      ERP.dashSave(OLD13.map(([id, w], i) => ({ k: id + '-' + i, id, w, o: ERP.widgets[id].defaults ? JSON.parse(JSON.stringify(ERP.widgets[id].defaults)) : undefined }))); ERP.render(); }); await page.waitForTimeout(400);
     ok('공정별 실적: "설비 (가동 / 전체)"', /설비 \(가동 \/ 전체\)/.test(d0.txt) && !/전체 \/ 가동/.test(d0.txt));
     const asmCard = await ev(() => { const c = Array.from(document.querySelectorAll('.w[data-id=procs] .stage')).find(x => /조립/.test(x.querySelector('.t b').textContent)); return c.querySelectorAll('dd')[1].innerText.replace(/\s+/g, ' ').trim(); });
     const exp = await ev(() => { const ref = ERP.calc.latestProdDate(); const a = ERP.calc.agg(ERP.calc.rowsBetween(ref, ref, 'ASM')); const run = Array.from(a.machines).filter(k => k.indexOf('ASM:') === 0).length; const reg = ERP.db.rows('machines').filter(x => x.process === 'ASM' && x.active !== false).length; return run + ' 대 / ' + Math.max(reg, run) + ' 대'; });
@@ -285,14 +291,17 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('숫자 위젯을 누르면 해당 화면 (안전재고 → 원부자재 재고 · 발주 · 안전재고)', await ev(() => [location.hash, ERP.state.mtab]), ['#/materials', 'reorder']);
     await ev(() => { ERP.goto('dashboard'); ERP.state.dashEdit = true; ERP.render(); }); await page.waitForTimeout(300);
     await page.click('main button:has-text("기본 배치로")'); await page.waitForSelector('.modal'); await page.click('.modal .modal-foot button.primary'); await page.waitForTimeout(400);
-    eq('기본 배치로 되돌리기 → 13개', await ev(() => document.querySelectorAll('.wgrid > .w:not(.wadd)').length), 13);
+    eq('기본 배치로 되돌리기 → 7개 (1.12.5 사용자 배치)', await ev(() => Array.from(document.querySelectorAll('.wgrid > .w:not(.wadd)')).map(w => w.dataset.id)), ['kpi_pck_month', 'kpi_new_po', 'kpi_orders_month', 'floor_stock', 'po_monthly', 'procs', 'asm_monthly']);
     const all = await ev(() => { const ids = Object.keys(ERP.widgets); const res = []; for (const lang of ['ko', 'vi']) { ERP.lang = lang; ERP.state.dashEdit = false; ERP.dashSave(ids.map((id, i) => ({ k: id + '-t' + i, id, w: ERP.widgets[id].w, o: ERP.widgets[id].defaults }))); ERP.render(); res.push(document.querySelectorAll('.wgrid > .w').length); res.push(Array.from(document.querySelectorAll('.wgrid > .w')).filter(w => /^Error:/.test(w.innerText.split('\n').pop() || '') || /Error: /.test(w.innerText)).length); } ERP.lang = 'ko'; ERP.db.setSetting('dash', null); ERP.render(); return { n: ids.length, res }; });
     ok('위젯 ' + all.n + '종 모두 한/베로 그림 (오류 0)', all.res[0] === all.n && all.res[2] === all.n && all.res[1] === 0 && all.res[3] === 0, all);
   }
 
   section('14. 일별 조립 생산량 · 월별 수주량(Checking 기준) · 수주 품목군 표 · 생산 관리 기본 보기');
   {
-    await ev(() => { ERP.db.setSetting('dash', null); ERP.db.setSetting('poKindsOff', []); ERP.state.dashW = {}; ERP.goto('dashboard'); ERP.render(); }); await page.waitForTimeout(500);
+    // 1.12.5: 기본 배치에 일별 조립 생산량이 없어 예전 배치를 사용자 배치로 저장해 놓고 본다
+    await ev(() => { const OLD13 = [['kpi_pck_day', 1], ['kpi_pck_month', 1], ['kpi_due', 1], ['kpi_low', 1], ['procs', 4], ['asm_daily', 4], ['asm_monthly', 4], ['po_monthly', 2], ['due_list', 2], ['low_list', 2], ['flow', 2], ['fresh', 2], ['input7', 2]];
+      ERP.dashSave(OLD13.map(([id, w], i) => ({ k: id + '-' + i, id, w, o: ERP.widgets[id].defaults ? JSON.parse(JSON.stringify(ERP.widgets[id].defaults)) : undefined })));
+      ERP.db.setSetting('poKindsOff', []); ERP.state.dashW = {}; ERP.goto('dashboard'); ERP.render(); }); await page.waitForTimeout(500);
     const t = await ev(() => { const w = document.querySelector('.w[data-id=asm_daily]'); const C = ERP.calc; const ref = C.latestProdDate(); const mm = ref.slice(0, 7);
       const sum = C.rowsBetween(mm + '-01', ref, 'ASM').reduce((a, r) => a + C.qty(r), 0); const all = C.rowsBetween(mm + '-01', ref).reduce((a, r) => a + C.qty(r), 0);
       return { sum, all, tot: +w.querySelector('tr.tot td:nth-child(2)').textContent.replace(/[^\d]/g, ''), title: w.querySelector('h2').textContent, mm, divs: Array.from(w.querySelectorAll('tbody tr:not(.tot) td:first-child')).map(x => x.textContent) }; });
@@ -382,7 +391,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     console.log('  이전 ' + before.v + ' → 이번 ' + after.v);
     eq('이전 버전 자료 그대로 (품목 · 기초재고 · PO)', [after.items, after.open, after.po], [before.items, before.open, before.po]);
     eq('직접 만든 BOM 줄 · 수불 · 설정 유지', [after.manual, after.tx, after.keep], [1, 1, 9]);
-    ok('새 기능 바로 사용: 위젯 기본 배치 13 · 코드 연결 0 · 조립 BOM 제안 · 생산 반영/조립 BOM 화면', after.widgets === 13 && after.maps === 0 && after.plan > 100 && after.postOk && after.asmOk && after.mode === 'in_bom', after);
+    ok('새 기능 바로 사용: 위젯 기본 배치 7 (1.12.5) · 코드 연결 0 · 조립 BOM 제안 · 생산 반영/조립 BOM 화면', after.widgets === 7 && after.maps === 0 && after.plan > 100 && after.postOk && after.asmOk && after.mode === 'in_bom', after);
     ok('업그레이드 화면 오류 0 (이전 · 이번)', eP.length === 0 && eN.length === 0, eP.concat(eN).slice(0, 5)); await q2.close(); SN.close();
   }
 
@@ -392,7 +401,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const p2 = await browser.newPage(); const e2 = []; p2.on('pageerror', e => e2.push(e.message));
     await p2.goto('file://' + path.join(ROOT, 'dist/ERP_Demo.html') + '#/materials'); await p2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 }); await p2.waitForTimeout(800);
     const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.goStock('floor'); ERP.render(); const b = document.querySelectorAll('main .fpiv-card table.fpiv-t tbody tr').length, bs = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b > 0 && bs === 0], widgets: document.querySelectorAll('.wgrid .w').length }; });
-    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고는 피벗 표) · 위젯 13', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, true], 13]); ok('데모 오류 0', e2.length === 0, e2);
+    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고는 피벗 표) · 위젯 7 (1.12.5 기본 배치)', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, true], 7]); ok('데모 오류 0', e2.length === 0, e2);
   }
 
   section('18. 저장 표시 · 닫기 전 저장 · 베트남어 빈 글자');
