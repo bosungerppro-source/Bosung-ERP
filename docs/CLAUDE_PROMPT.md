@@ -281,7 +281,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **종합 현황 기본 배치 = 사용자 배치 (1.12.5, 사용자 "이순서대로 하고 이게 기본세팅이야")**: 이번 달 포장 누계 · 신규 수주 · 수주량 · 조립 재고 (한 줄) → 월별 수주량 (차트 · 4칸) · 공정별 실적 (4칸) · 월별 조립 생산량 (조립 · 차트 · 4칸). 안전재고 미달 · 일별 조립 등 예전 기본 위젯은 "+ 위젯 추가" 에서. 15차의 "기본 배치에서 asm_daily 다음" 은 예전 기본 배치 이야기다. 기본 배치를 다시 바꾸려면 사용자에게 묻는다.
 - 시험: `npm run test:v17` 67개 + v16 · v15 · v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.
 
-### 2-17. 18차: 여러 PC 자료 공유 — 구글 드라이브 (v1.13.0, 2026-10-22)
+### 2-17. 18차: 여러 PC 자료 공유 — 구글 드라이브 (v1.13.0 ~ 1.13.1, 2026-10-22)
 자세한 요청 · 결정은 `docs/PROMPT_v18_CLOUD.md`, 작업 기록은 `docs/history/v18_work_log.md`.
 
 **규칙 (이후 버전에서도 지킬 것)**
@@ -289,10 +289,11 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
   - ERP 서버 `cloudsync.js` 가 표마다 구글 쪽 저장 번호를 보고 바뀐 표만 주고받는다 (30초마다 · 저장 뒤 3초 · 끄기 전). 화면이 아니라 서버가 한다.
   - 구글 쪽 = `google/Code.gs` 5판: 표마다 드라이브 파일 하나 (`ColorPencil ERP Data/<표>.json.gz.b64`) · 스크립트 속성 `T_<표>` · 저장소 이름표 `CLOUD_ID` · `cloud_info / cloud_get / cloud_put` (번호가 같을 때만 씀).
   - 합치기는 화면 db.js 와 같은 3-way merge (행 `_id` · 지문). 둘 다 고친 행은 나중에 맞춘 PC 내용.
+  - 직원 여러 명이 각자 설치해 입력 · 업로드한다 (사용자 1.13.1 "지원여러명이서 입력하고 사용하는거다"). PC 대수 제한 없음 — 그래서 `cloud_info` 의 답은 스크립트 캐시 (10분, 잠금 안에서만 채움 · 바꿈) 에서 준다. 스크립트 속성 (하루 5만 번) 을 30초 물음에 쓰지 않는다.
 - **이 PC 에만 두는 설정 = `cloudsync.js` `LOCAL_META`**: `gUrl` · `gToken` · `mobileOn` · `ai*` · `dash` · `dashAsmMonthly` · `numFmt` · `mrpLines` · `cloud*`. 새 설정 항목을 만들 때 PC 마다 달라야 하면 여기에 더한다 (아니면 모든 PC 같음).
 - **처음 연결**: 사장님 PC 올리기 (`upload`), 직원 PC 구글 자료로 (`replace`, 이 PC 자료는 `cloud_backup` 에 먼저), 이 PC 에만 있는 행 더하기 (`merge`, 미리 보기), 덮어쓰기 (`overwrite`), 다시 켜기 (`resume`). 연결 · 끄기 · 코드는 ERP 가 실행 중인 PC 에서만.
 - **Apps Script 주소는 사용자가 만든다** (구글 로그인 · 권한 승인). ERP 는 키를 넣은 코드 ([Apps Script 코드 복사]) 와 순서를 준다. 키 · 연결 코드 (`ERPC1.…`) 는 저장소에 올리지 않는다.
 - 다른 PC 가 많이 지워 표가 절반 아래로 줄면 쓰기 전에 `cloud_backup` 에 복사한다. 깨진 표 파일은 빈 표로 보지 않는다. 자료를 통째로 바꾸는 버튼은 공유 중이면 경고한다.
 - 휴대폰 보기는 같은 웹 앱 주소 (5판에 4판 기능 그대로). 요약은 휴대폰 보기를 켠 PC 가 보낸다.
 - 설치형: `cloudsync.js` · `google/**` 가 app.asar 에 들어간다 (`build.files`).
-- 시험: `npm run test:v18` 109개 + v17 · v16 · v15 · v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.
+- 시험: `npm run test:v18` 115개 + v17 · v16 · v15 · v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.

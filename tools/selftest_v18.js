@@ -48,8 +48,9 @@ const iter = (arr) => { let i = 0; return { hasNext: () => i < arr.length, next:
 function gasCtx(code, opt) {
   opt = opt || {};
   const props = new Map(), cache = new Map(), files = new Map(), folders = new Map(); let seq = 0;
-  const stats = { setContent: 0, created: 0, locks: 0 };
+  const stats = { setContent: 0, created: 0, locks: 0, propReads: 0, cacheFail: false, failName: null };
   const mkFile = (name, content, folder) => {
+    if (stats.failName && String(name).indexOf(stats.failName + '.') === 0) throw new Error('Exception: Drive 오류 (시험)');
     const id = 'f' + (++seq) + crypto.randomBytes(3).toString('hex');
     const f = { id, name, content: String(content), trashed: false, folder, getId: () => id, getName: () => f.name, isTrashed: () => f.trashed, setTrashed(t) { f.trashed = !!t; return f; },
       setContent(c) { c = String(c); if (c.length > 10 * 1024 * 1024) throw new Error('Exception: setContent 10MB'); f.content = c; stats.setContent++; return f; },
@@ -67,10 +68,10 @@ function gasCtx(code, opt) {
     SpreadsheetApp: { getActiveSpreadsheet: () => (opt.noSheet ? null : { getName: () => 'ERP 공유', getUrl: () => 'https://sheet.example' }) },
     DriveApp: { getFoldersByName: (n) => iter(folders.has(n) ? [folders.get(n)] : []), createFolder: (n) => mkFolder(n),
       getFileById: (id) => { const f = files.get(id); if (!f) throw new Error('Exception: No item with the given ID could be found'); return f; } },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (props.has(k) ? props.get(k) : null), getProperties: () => Object.fromEntries(props),
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (props.has(k) ? props.get(k) : null), getProperties: () => { stats.propReads++; return Object.fromEntries(props); },
       setProperty: (k, v) => { props.set(k, String(v)); }, setProperties: (o) => Object.keys(o).forEach(k => props.set(k, String(o[k]))), deleteProperty: (k) => props.delete(k) }) },
     LockService: { getScriptLock: () => ({ waitLock: () => { stats.locks++; }, releaseLock: () => {} }) },
-    CacheService: { getScriptCache: () => ({ get: (k) => (cache.has(k) ? cache.get(k) : null), put: (k, v) => cache.set(k, String(v)), remove: (k) => cache.delete(k) }) },
+    CacheService: { getScriptCache: () => ({ get: (k) => (cache.has(k) ? cache.get(k) : null), put: (k, v) => { if (stats.cacheFail) throw new Error('Exception: cache (시험)'); cache.set(k, String(v)); }, remove: (k) => cache.delete(k) }) },
     Utilities: { DigestAlgorithm: { SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' }, getUuid: () => crypto.randomUUID(),
       computeDigest: (alg, s) => Array.from(crypto.createHash('sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
       newBlob: (data, mime, name) => (typeof data === 'string' ? { name, text: data, getBytes: () => Array.from(Buffer.from(data, 'utf8')) } : { name, bytes: data, getBytes: () => data }),
@@ -78,7 +79,7 @@ function gasCtx(code, opt) {
   };
   vm.createContext(c); vm.runInContext(code, c);
   const post = (o) => JSON.parse(c.doPost({ postData: { contents: JSON.stringify(o) } }).getContent());
-  return { c, props, files, folders, stats, post };
+  return { c, props, cache, files, folders, stats, post };
 }
 /** 웹 서버: POST /macros/s/<id>/exec → doPost → 302 → GET 결과 (Apps Script 와 같음). down · login · old · beforePut 으로 상황을 만든다 */
 async function fakeGoogle(code, opt) {
@@ -150,7 +151,7 @@ async function ownerData(S) {
   // ------------------------------------------------------------------------------------------
   await sec('1. Code.gs 5판 (구글 쪽) — 표마다 파일 · 저장 번호 · 충돌 · 이름표', async () => {
     const src = fs.readFileSync(CODE_FILE, 'utf8');
-    ok('5판 머리글 · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /5판 \(v1\.13\.0\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
+    ok('5판 머리글 · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /5판 \(v1\.13\.\d\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
     const raw = gasCtx(src);
     eq("'CHANGE-ME' 그대로 배포하면 아무 요청도 받지 않음", raw.post({ token: 'CHANGE-ME', action: 'ping' }).error, 'bad token');
     const G = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"));
@@ -186,6 +187,21 @@ async function ownerData(S) {
       && G.c.mobileData('secret12').ok && G.post({ token: TK, action: 'backup', name: 'ERP_backup_2026-10-22.json.gz', b64: Buffer.from('x').toString('base64') }).ok);
     const doc = G.c.doGet({ parameter: {} });
     ok('브라우저로 열면 휴대폰 화면 (5판에서도 그대로)', doc.title === 'ColorPencil ERP' && /google\.script\.run/.test(doc.getContent()));
+    // 1.13.1: 번호 목록(cloud_info)은 캐시 — 직원 PC 여러 대가 30초마다 물어도 스크립트 속성 하루 한도(5만 번)를 쓰지 않음
+    const K = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"));
+    K.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'A1' } } });
+    const r0 = K.stats.propReads; const infos = []; for (let i = 0; i < 20; i++) infos.push(K.post({ token: TK, action: 'cloud_info' }));
+    ok('cloud_info 20번 → 스크립트 속성은 한 번도 읽지 않음 (쓸 때 맞춘 캐시) · 같은 이름표', K.stats.propReads === r0 && infos.every(x => x.ok && x.tables.po.v === 1 && x.cid === infos[0].cid), { reads: K.stats.propReads - r0 });
+    K.post({ token: TK, action: 'cloud_put', tables: { po: { base: 1, b64: 'A2' } } });
+    eq('쓰면 캐시도 바로 새 번호 (다른 PC 가 30초 안에 앎)', K.post({ token: TK, action: 'cloud_info' }).tables.po.v, 2);
+    K.cache.clear(); const r1 = K.stats.propReads; const i2 = K.post({ token: TK, action: 'cloud_info' }); const i3 = K.post({ token: TK, action: 'cloud_info' });
+    ok('캐시가 비면 (10분 지남) 잠금 안에서 속성을 한 번 읽고 다시 채움', i2.tables.po.v === 2 && i3.tables.po.v === 2 && K.stats.propReads === r1 + 1 && K.cache.has('CLOUD_IDX'), { reads: K.stats.propReads - r1 });
+    K.stats.cacheFail = true; const q3 = K.post({ token: TK, action: 'cloud_put', tables: { po: { base: 2, b64: 'A3' } } }); K.stats.cacheFail = false;
+    ok('캐시에 못 쓰면 지움 → 다음 물음은 속성에서 (새 번호)', q3.vers.po === 3 && !K.cache.has('CLOUD_IDX') && K.post({ token: TK, action: 'cloud_info' }).tables.po.v === 3);
+    K.stats.failName = 'zz'; const q4 = K.post({ token: TK, action: 'cloud_put', tables: { aa: { base: 0, b64: 'X' }, zz: { base: 0, b64: 'Y' } } }); K.stats.failName = null;
+    const i4 = K.post({ token: TK, action: 'cloud_info' });
+    ok('여러 표를 쓰다 드라이브 오류로 멈춰도 캐시 = 속성 (쓴 표는 보이고, 못 쓴 표는 없음)', q4.ok === false && i4.tables.aa && i4.tables.aa.v === 1 && !i4.tables.zz && K.props.has('T_aa') && !K.props.has('T_zz'), { q4, t: i4.tables });
+    eq('cloud_get 은 언제나 속성 (파일 id)', K.post({ token: TK, action: 'cloud_get', names: ['po'] }).tables.po, { v: 3, b64: 'A3' });
   });
 
   // ------------------------------------------------------------------------------------------
@@ -539,7 +555,7 @@ async function ownerData(S) {
     ok('ERP 창을 닫기 · 업데이트 설치 · 사내망 재시작 전에 구글로 보냄 (flushAll → cloud.flush)', /async function flushAll\(\)/.test(main) && /info\.cloud\.flush\(15000\)/.test(main) && /beforeInstall: \(\) => flushAll\(\)/.test(main) && /flushAll\(\)\.then\(/.test(main) && /await flushAll\(\); app\.relaunch\(\)/.test(main));
     ok('Windows 자동 업데이트 시험이 cloudsync.js 바뀜에도 돎', /- 'cloudsync\.js'/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'update-test.yml'), 'utf8')));
     const core = fs.readFileSync(path.join(ROOT, 'app', 'js', 'core.js'), 'utf8'), nsi = fs.readFileSync(path.join(ROOT, 'build', 'installer.nsi'), 'utf8');
-    eq('버전 1.13.0 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.0 /.test(pkg.scripts.dist)], ['1.13.0', '1.13.0', '1.13.0', true]);
+    eq('버전 1.13.1 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.1 /.test(pkg.scripts.dist)], ['1.13.1', '1.13.1', '1.13.1', true]);
     ok('index.html 에 cloud.js', /<script src="js\/cloud\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8')));
   });
 

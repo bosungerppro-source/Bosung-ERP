@@ -1,5 +1,5 @@
 /**
- * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 5판 (v1.13.0)
+ * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 5판 (v1.13.1)
  * 설치 (ERP → 엑셀 · 구글 연동 → 구글 시트 · 드라이브 → "여러 PC 자료 공유" 카드의 순서와 같다):
  *   1) ERP 의 [Apps Script 코드 복사] — 이 코드에 비밀 키(TOKEN)를 넣어서 복사해 준다
  *   2) 새 구글 시트 (sheets.new) > 확장 프로그램 > Apps Script > 원래 코드를 모두 지우고 붙여넣기 > 저장
@@ -129,21 +129,33 @@ function backup_(req) {
 // cloud_put {tables: {표: {base, b64, n}}} → {vers: {표: 새 번호}, conflicts: {표: 지금 번호}}
 //   ERP 가 마지막으로 본 번호(base)가 지금 번호와 같을 때만 쓴다. 다르면 다른 PC 가 먼저 쓴 것 → ERP 가 받아서 합친 뒤 다시 보낸다.
 //   쓰기는 잠금(LockService) 안에서 파일을 먼저 쓰고 번호를 올린다 → 읽기는 잠금 없이 해도 번호보다 옛 내용을 받지 않는다.
+// 번호 목록(cloud_info 의 답)은 스크립트 캐시에 10분 둔다 (1.13.1) — PC 여러 대가 30초마다 물어도 스크립트 속성의 하루 한도(읽기 · 쓰기 5만 번)를 쓰지 않게.
+//   캐시를 채우고 바꾸는 것은 언제나 잠금 안에서 속성을 읽은 뒤 (쓰기 사이에 옛 목록이 끼지 않게). 캐시에 못 쓰면 지워서 다음 물음은 속성에서 읽는다.
 var NAME_RE_ = /^[A-Za-z0-9_]{1,40}$/;
+var IDX_KEY_ = 'CLOUD_IDX', IDX_TTL_ = 600;
 function cloud_(req) {
-  var props = PropertiesService.getScriptProperties(), p = props.getProperties();
-  if (!p.CLOUD_ID || req.action === 'cloud_put') {
-    var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
-    try {
-      p = props.getProperties();
-      if (!p.CLOUD_ID) { p.CLOUD_ID = Utilities.getUuid(); props.setProperty('CLOUD_ID', p.CLOUD_ID); }
-      if (req.action === 'cloud_put') return cloudPut_(props, p, req.tables || {});
-    } finally { lock.releaseLock(); }
+  if (req.action === 'cloud_info') {
+    var hit = null; try { hit = JSON.parse(CacheService.getScriptCache().get(IDX_KEY_) || 'null'); } catch (e) { hit = null; }
+    if (hit && hit.cid) return { ok: true, ver: 5, cid: hit.cid, tables: hit.tables || {}, at: new Date().toISOString() };
   }
-  if (req.action === 'cloud_info') return { ok: true, ver: 5, cid: p.CLOUD_ID, tables: cloudTables_(p), at: new Date().toISOString() };
-  if (req.action === 'cloud_get') return { ok: true, cid: p.CLOUD_ID, tables: cloudGet_(p, req.names || []) };
-  return { ok: false, error: 'unknown action' };
+  var props = PropertiesService.getScriptProperties(), p;
+  if (req.action === 'cloud_get') { p = props.getProperties(); return { ok: true, cid: p.CLOUD_ID || '', tables: cloudGet_(p, req.names || []) }; }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    p = props.getProperties();
+    if (!p.CLOUD_ID) { p.CLOUD_ID = Utilities.getUuid(); props.setProperty('CLOUD_ID', p.CLOUD_ID); }
+    if (req.action === 'cloud_put') {
+      try { return cloudPut_(props, p, req.tables || {}); } finally { cacheIdx_(p); }   // 몇 표만 쓰고 멈춰도 캐시 = 속성
+    }
+    cacheIdx_(p);
+    if (req.action === 'cloud_info') return { ok: true, ver: 5, cid: p.CLOUD_ID, tables: cloudTables_(p), at: new Date().toISOString() };
+    return { ok: false, error: 'unknown action' };
+  } finally { lock.releaseLock(); }
+}
+function cacheIdx_(p) {
+  var c = CacheService.getScriptCache();
+  try { c.put(IDX_KEY_, JSON.stringify({ cid: p.CLOUD_ID, tables: cloudTables_(p) }), IDX_TTL_); } catch (e) { try { c.remove(IDX_KEY_); } catch (e2) { /* 없음 */ } }
 }
 function cloudMeta_(p, n) { try { return JSON.parse(p['T_' + n] || 'null'); } catch (e) { return null; } }
 function cloudTables_(p) {
