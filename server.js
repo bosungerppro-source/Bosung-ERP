@@ -9,6 +9,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const vm = require('vm');
 const cloudsync = require('./cloudsync.js');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -108,6 +109,17 @@ function mkdirp(dir) {
   const parts = []; let d = path.resolve(dir);
   for (let i = 0; i < 64 && !fs.existsSync(d); i++) { parts.unshift(d); const up = path.dirname(d); if (up === d) break; d = up; }
   for (const p of parts) { try { fs.mkdirSync(p); } catch (e) { if (e.code !== 'EEXIST') throw e; } }
+}
+
+/** 18차(1.13.2): 구글 시트에 쓸 표 이름 · 머리글 = 화면과 같은 한국어 (app/js/schema.js 의 ERP.TABLES 를 읽음). {표: {title, ord, cols: [{k, h, t}]}} */
+function loadLayouts(appDir) {
+  try {
+    const win = { ERP: {} }; const ctx = { window: win, L: (ko) => ko, console };
+    vm.createContext(ctx); vm.runInContext(fs.readFileSync(path.join(appDir, 'js', 'schema.js'), 'utf8'), ctx, { filename: 'schema.js' });
+    const T = win.ERP.TABLES || {}; const out = {};
+    Object.keys(T).forEach((n, i) => { out[n] = { title: String(T[n].ko || n), ord: i, cols: (T[n].cols || []).map(c => ({ k: c.k, h: String(c.ko || c.k), t: c.t || '' })) }; });
+    return out;
+  } catch (e) { console.error('layouts', e.message); return {}; }
 }
 
 /** Apps Script 웹 앱 주소만 (구글 중계 · 드라이브 백업). 시험은 opts.googleHosts 로 바꾼다 */
@@ -235,8 +247,10 @@ function start(opts) {
   const backup = createBackup(dataDir, store, opts.googleHosts, doFetch);
   const up = opts.update || null;   // 15차: electron/updater.js (설치형에서만)
   // 18차: 여러 PC 자료 공유 (구글 드라이브). 켜져 있으면 30초마다 · 이 PC 에서 저장한 뒤 3초에 구글과 맞춘다
+  const layouts = loadLayouts(appDir);   // 구글 시트 탭 이름 · 머리글 (1.13.2)
   const cloud = cloudsync.create({ dataDir, store, fetch: doFetch, urlOk: (u) => googleUrlOk(u, opts.googleHosts), codeFile: path.join(__dirname, 'google', 'Code.gs'),
-    every: opts.cloudEvery, poke: opts.cloudPoke, log: opts.cloudLog });
+    every: opts.cloudEvery, poke: opts.cloudPoke, log: opts.cloudLog, layout: (n) => layouts[n] || null, pc: opts.pcName || os.hostname(),
+    sheet: opts.cloudSheet, sheetLag: opts.cloudSheetLag });
 
   /** 다른 웹사이트(DNS rebinding · 다른 출처의 요청)는 막는다: Host 는 이 PC 이름, Origin 이 있으면 같은 곳, 쓰기 요청은 JSON 만 */
   function guard(req, isApi) {
@@ -319,6 +333,9 @@ function start(opts) {
     // ---- 18차: 여러 PC 자료 공유 (구글 드라이브). 상태 · 지금 맞추기는 누구나, 연결 확인 · 연결 · 끄기 · 코드는 ERP 가 실행 중인 PC 에서만 ----
     if (p === '/api/cloud' && req.method === 'GET') return send(200, Object.assign(cloud.status(), { local: loop }));
     if (p === '/api/cloud/sync' && req.method === 'POST') return send(200, Object.assign(await cloud.syncNow(), { local: loop }));
+    if (p === '/api/cloud/sheet' && req.method === 'POST') {   // 1.13.2: 구글 시트 다시 쓰기 (모든 표)
+      try { await cloud.sheetNow(true); return send(200, Object.assign(cloud.status(), { local: loop })); } catch (e) { return send(e.code ? 400 : 500, { code: e.code || 'ERR', error: e.detail || e.message }); }
+    }
     if (p.startsWith('/api/cloud/')) {
       if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
       if (req.method !== 'POST') return send(404, { error: 'unknown api' });

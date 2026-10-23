@@ -7,6 +7,8 @@
    1 Code.gs 5판 · 2 합치기 규칙 · 3 연결 (코드 · 올리기 · 직원 PC 는 구글 자료로) · 4 주고받기 (더하기 · 고치기 · 지우기 · 같은 행 · 설정 · 새 표)
    5 다른 PC 가 먼저 올림 · 저장 뒤 저절로 · 30초마다 · 끄기 전 보내기 · 끄고 다시 켜기 · 6 오류 (인터넷 · 키 · 옛 코드 · 다른 저장소 · 로그인 화면 · 깨진 파일)
    7 안전 (많이 지우면 백업 · 이 PC 만 연결 · 처음 합치기 · 덮어쓰기) · 8 화면 (사장님 PC → 직원 PC, 입력이 서로 보임, 베트남어, 휴대폰 폭)
+   10 (1.13.2, Code.gs 6판) 구글 시트 = 공유 자료 보기: 가짜 구글 시트 (탭 · 칸 · 서식 · 보호 — General 칸의 글자는 숫자 · 날짜로, '=' 는 수식으로 바뀌는 것까지)
+      표마다 탭 · 화면과 같은 이름 · 머리글 · 저장은 시트를 기다리지 않음 · 모아서 갱신 · 다른 PC 대신 · 오류 표 · 모두 다시 쓰기 · 시간 예산 · 5판 · 시트 없는 스크립트 · 화면
    사용:  npm run test:v18   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os'), http = require('http'), crypto = require('crypto'), zlib = require('zlib'), vm = require('vm');
 const ROOT = path.join(__dirname, '..');
@@ -44,11 +46,75 @@ function req(port, method, p, body, o) {
 
 // ---------------------------------------------------------------- 가짜 구글 (Apps Script 웹 앱)
 const iter = (arr) => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
-/** Code.gs 를 vm 에서 — 드라이브 · 속성 · 잠금 · 캐시 · 유틸은 메모리 */
+/** 6판: 가짜 구글 시트 (스프레드시트 · 탭 · 칸 · 서식 · 보호). 서식 'General' 칸에 글자를 쓰면 구글처럼 숫자 · 날짜로 바뀌고, '=' 로 시작하면 수식, "'" 로 시작하면 글자 */
+function fakeBook(opt) {
+  let sid = 100;
+  const book = { name: opt.sheetName || 'ERP 공유', url: 'https://sheet.example', sheets: [], active: null, writes: 0, failTab: null, onWrite: null };
+  const conv = (v, f) => {
+    if (typeof v !== 'string') return v;
+    if (v.charAt(0) === "'") return v.slice(1);
+    if (v.charAt(0) === '=') return { formula: v };
+    if (f === '@') return v;
+    if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return { date: v };
+    return v;
+  };
+  function mkSheet(name) {
+    const s = { id: ++sid, name, rows: 1000, cols: 26, vals: new Map(), fmt: new Map(), frozen: 0, prot: [], head: null };
+    const K = (r, c) => r + ',' + c;
+    const range = (r, c, nr, nc) => {
+      nr = nr || 1; nc = nc || 1;
+      const R = {
+        setNumberFormat(f) { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) s.fmt.set(K(r + i, c + j), f); return R; },
+        setValues(v) {
+          if (!Array.isArray(v) || v.length !== nr || v.some(x => !Array.isArray(x) || x.length !== nc)) throw new Error('Exception: The number of rows or columns in the data does not match the range');
+          if (r + nr - 1 > s.rows || c + nc - 1 > s.cols) throw new Error('Exception: Range out of bounds');
+          if (book.failTab === s.name) throw new Error('Exception: This action would increase the number of cells in the workbook above the limit of 10000000 cells');
+          for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) { const x = conv(v[i][j], s.fmt.get(K(r + i, c + j))); if (x === '' || x === null || x === undefined) s.vals.delete(K(r + i, c + j)); else s.vals.set(K(r + i, c + j), x); }
+          book.writes++; if (book.onWrite) book.onWrite(s);
+          return R;
+        },
+        setFontWeight() { return R; }, setBackground() { return R; }, setFontSize() { return R; },
+      };
+      return R;
+    };
+    const last = (ax) => { let m = 0; s.vals.forEach((v, k) => { m = Math.max(m, Number(k.split(',')[ax])); }); return m; };
+    Object.assign(s, {
+      getName: () => s.name, setName(n) { s.name = n; return s; }, getSheetId: () => s.id, getIndex: () => book.sheets.indexOf(s) + 1,
+      clear() { s.vals.clear(); s.fmt.clear(); return s; }, getMaxRows: () => s.rows, getMaxColumns: () => s.cols,
+      insertRowsAfter(a, n) { s.rows += n; return s; }, insertColumnsAfter(a, n) { s.cols += n; return s; },
+      deleteRows(st, n) { if (s.rows - n < s.frozen + 1) throw new Error("Exception: You can't delete all the rows on the sheet."); s.rows -= n; return s; },
+      deleteColumns(st, n) { if (s.cols - n < 1) throw new Error("Exception: You can't delete all the columns on the sheet."); s.cols -= n; return s; },
+      getRange: (r, c, nr, nc) => range(r, c, nr, nc), setFrozenRows(n) { s.frozen = n; return s; },
+      getProtections: () => s.prot.slice(),
+      protect() { const p = { desc: '', warn: false, setDescription(d) { p.desc = d; return p; }, setWarningOnly(w) { p.warn = !!w; return p; } }; s.prot.push(p); return p; },
+      getLastRow: () => last(0), getLastColumn: () => last(1),
+    });
+    /** 시험용: 탭의 값 (1행부터, 빈칸 '') */
+    s.table = () => { const out = []; for (let i = 1; i <= s.getLastRow(); i++) { const row = []; for (let j = 1; j <= s.getLastColumn(); j++) { const v = s.vals.get(K(i, j)); row.push(v === undefined ? '' : v); } out.push(row); } return out; };
+    s.fmtOf = (r, c) => s.fmt.get(K(r, c));
+    return s;
+  }
+  const ss = {
+    getName: () => book.name, rename(n) { book.name = n; }, getUrl: () => book.url, getSpreadsheetTimeZone: () => 'Asia/Ho_Chi_Minh',
+    getSheets: () => book.sheets.slice(), getSheetByName: (n) => book.sheets.find(x => x.name === n) || null, getNumSheets: () => book.sheets.length,
+    insertSheet(name, idx) { if (book.sheets.some(x => x.name === name)) throw new Error('Exception: A sheet with the name "' + name + '" already exists.'); const s = mkSheet(name); book.sheets.splice(idx === undefined ? book.sheets.length : idx, 0, s); return s; },
+    deleteSheet(s) { const i = book.sheets.indexOf(s); if (book.sheets.length < 2) throw new Error("Exception: You can't remove all the sheets in a document."); if (i >= 0) book.sheets.splice(i, 1); },
+    setActiveSheet(s) { book.active = s; return s; },
+    moveActiveSheet(pos) { const s = book.active; book.sheets.splice(book.sheets.indexOf(s), 1); book.sheets.splice(pos - 1, 0, s); },
+  };
+  book.sheets.push(mkSheet(opt.firstTab || '시트1'));
+  book.tab = (name) => book.sheets.find(x => x.name === name) || null;
+  book.names = () => book.sheets.map(x => x.name);
+  return { ss, book };
+}
+/** Code.gs 를 vm 에서 — 드라이브 · 속성 · 잠금 · 캐시 · 유틸 · 시트는 메모리 */
 function gasCtx(code, opt) {
   opt = opt || {};
   const props = new Map(), cache = new Map(), files = new Map(), folders = new Map(); let seq = 0;
-  const stats = { setContent: 0, created: 0, locks: 0, propReads: 0, cacheFail: false, failName: null };
+  const stats = { setContent: 0, created: 0, locks: 0, propReads: 0, cacheFail: false, failName: null, docBusy: false, docLocks: 0 };
+  const sheet = fakeBook(opt); const clock = { off: 0 };
+  class GDate extends Date { static now() { return Date.now() + clock.off; } }   // 시험: 시트 쓰기 시간 예산 (Date.now 만 앞당김)
   const mkFile = (name, content, folder) => {
     if (stats.failName && String(name).indexOf(stats.failName + '.') === 0) throw new Error('Exception: Drive 오류 (시험)');
     const id = 'f' + (++seq) + crypto.randomBytes(3).toString('hex');
@@ -65,21 +131,25 @@ function gasCtx(code, opt) {
   const c = {
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput(s) { const o = { setMimeType: () => o, getContent: () => s }; return o; } },
     HtmlService: { XFrameOptionsMode: { DEFAULT: 'DEFAULT' }, createHtmlOutput(html) { const o = { meta: {}, setTitle(t) { o.title = t; return o; }, addMetaTag(k, v) { o.meta[k] = v; return o; }, setXFrameOptionsMode() { return o; }, getContent: () => html }; return o; } },
-    SpreadsheetApp: { getActiveSpreadsheet: () => (opt.noSheet ? null : { getName: () => 'ERP 공유', getUrl: () => 'https://sheet.example' }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => (opt.noSheet ? null : sheet.ss), ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' } },
     DriveApp: { getFoldersByName: (n) => iter(folders.has(n) ? [folders.get(n)] : []), createFolder: (n) => mkFolder(n),
       getFileById: (id) => { const f = files.get(id); if (!f) throw new Error('Exception: No item with the given ID could be found'); return f; } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (props.has(k) ? props.get(k) : null), getProperties: () => { stats.propReads++; return Object.fromEntries(props); },
       setProperty: (k, v) => { props.set(k, String(v)); }, setProperties: (o) => Object.keys(o).forEach(k => props.set(k, String(o[k]))), deleteProperty: (k) => props.delete(k) }) },
-    LockService: { getScriptLock: () => ({ waitLock: () => { stats.locks++; }, releaseLock: () => {} }) },
+    LockService: { getScriptLock: () => ({ waitLock: () => { stats.locks++; }, releaseLock: () => {} }),
+      getDocumentLock: () => (opt.noSheet ? null : { tryLock: () => { stats.docLocks++; return !stats.docBusy; }, releaseLock: () => {} }),
+      getUserLock: () => ({ tryLock: () => !stats.docBusy, releaseLock: () => {} }) },
     CacheService: { getScriptCache: () => ({ get: (k) => (cache.has(k) ? cache.get(k) : null), put: (k, v) => { if (stats.cacheFail) throw new Error('Exception: cache (시험)'); cache.set(k, String(v)); }, remove: (k) => cache.delete(k) }) },
     Utilities: { DigestAlgorithm: { SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' }, getUuid: () => crypto.randomUUID(),
       computeDigest: (alg, s) => Array.from(crypto.createHash('sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
       newBlob: (data, mime, name) => (typeof data === 'string' ? { name, text: data, getBytes: () => Array.from(Buffer.from(data, 'utf8')) } : { name, bytes: data, getBytes: () => data }),
-      base64Decode: (b) => Array.from(Buffer.from(b, 'base64')), formatDate: () => '20261022_0000' },
+      base64Decode: (b) => Array.from(Buffer.from(b, 'base64')), formatDate: () => '20261022_0000',
+      ungzip: (blob) => { const buf = zlib.gunzipSync(Buffer.from(blob.getBytes())); return { getBytes: () => Array.from(buf), getDataAsString: () => buf.toString('utf8') }; } },
+    Date: GDate,
   };
   vm.createContext(c); vm.runInContext(code, c);
   const post = (o) => JSON.parse(c.doPost({ postData: { contents: JSON.stringify(o) } }).getContent());
-  return { c, props, cache, files, folders, stats, post };
+  return { c, props, cache, files, folders, stats, post, book: sheet.book, clock };
 }
 /** 웹 서버: POST /macros/s/<id>/exec → doPost → 302 → GET 결과 (Apps Script 와 같음). down · login · old · beforePut 으로 상황을 만든다 */
 async function fakeGoogle(code, opt) {
@@ -96,7 +166,16 @@ async function fakeGoogle(code, opt) {
       let out;
       if (G.old && /^cloud_/.test(j.action)) out = JSON.stringify({ ok: false, error: 'unknown action' });
       else if (G.old && j.action === 'ping') out = JSON.stringify({ ok: true, ver: 4, sheet: 'S', url: 'u' });
-      else { if (j.action === 'cloud_put' && G.beforePut) { const f = G.beforePut; G.beforePut = null; f(j); } out = G.gas.c.doPost({ postData: { contents: body } }).getContent(); }
+      else if (G.v5 && j.action === 'cloud_sheet') out = JSON.stringify({ ok: false, error: 'unknown action' });   // 5판으로 배포한 채
+      else {
+        if (j.action === 'cloud_put' && G.beforePut) { const f = G.beforePut; G.beforePut = null; f(j); }
+        out = G.gas.c.doPost({ postData: { contents: body } }).getContent();
+        if (G.v5 && (j.action === 'ping' || j.action === 'cloud_info')) {   // 5판의 답 모양 (번호 · 크기 · 행 수 · 시각만)
+          const o = JSON.parse(out); o.ver = 5;
+          if (j.action === 'cloud_info') { delete o.sheet; Object.keys(o.tables || {}).forEach(n => { const x = o.tables[n]; o.tables[n] = { v: x.v, s: x.s, n: x.n, at: x.at }; }); }
+          out = JSON.stringify(o);
+        }
+      }
       const k = 'k' + (++n); outs.set(k, out);
       res.writeHead(302, { Location: '/macros/echo?user_content_key=' + k }); return res.end();
     }
@@ -119,8 +198,9 @@ async function fakeGoogle(code, opt) {
 }
 
 // ---------------------------------------------------------------- ERP 서버 (PC)
+// cloudSheet: 저장 뒤 구글 시트 갱신까지 (ms, -1 = 끔 — 1 ~ 9장은 1.13.0 의 주고받기만 보므로 끔), cloudSheetLag: 다른 PC 대신 갱신하기 전 기다림
 const startPc = (dataDir, o) => serverMod.start(Object.assign({ appDir: path.join(ROOT, 'app'), dataDir, host: '127.0.0.1', port: nextPort(), backupDelay: 3600000,
-  googleHosts: /^127\.0\.0\.1$/, cloudEvery: 3600000, cloudPoke: -1, cloudFirst: 3600000 }, o || {}));
+  googleHosts: /^127\.0\.0\.1$/, cloudEvery: 3600000, cloudPoke: -1, cloudFirst: 3600000, cloudSheet: -1 }, o || {}));
 const putT = (S, n, rows) => req(S.port, 'PUT', '/api/t/' + n, rows);
 const getT = async (S, n) => (await req(S.port, 'GET', '/api/t/' + n)).json.rows;
 const metaOf = async (S) => (await req(S.port, 'GET', '/api/meta')).json.meta;
@@ -149,16 +229,16 @@ async function ownerData(S) {
   const keep = (x, list) => { list.push(x); return x; };
 
   // ------------------------------------------------------------------------------------------
-  await sec('1. Code.gs 5판 (구글 쪽) — 표마다 파일 · 저장 번호 · 충돌 · 이름표', async () => {
+  await sec('1. Code.gs 6판 (구글 쪽) — 5판 공유: 표마다 파일 · 저장 번호 · 충돌 · 이름표', async () => {
     const src = fs.readFileSync(CODE_FILE, 'utf8');
-    ok('5판 머리글 · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /5판 \(v1\.13\.\d\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
+    ok('6판 머리글 · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /6판 \(v1\.13\.\d\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
     const raw = gasCtx(src);
     eq("'CHANGE-ME' 그대로 배포하면 아무 요청도 받지 않음", raw.post({ token: 'CHANGE-ME', action: 'ping' }).error, 'bad token');
     const G = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"));
-    eq('?ping=1 · ping → 5판', [JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, G.post({ token: TK, action: 'ping' }).ver], [5, 5]);
+    eq('?ping=1 · ping → 6판', [JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, G.post({ token: TK, action: 'ping' }).ver], [6, 6]);
     eq('틀린 키 → bad token', G.post({ token: TK + 'x', action: 'cloud_info' }).error, 'bad token');
     const i0 = G.post({ token: TK, action: 'cloud_info' }), i1 = G.post({ token: TK, action: 'cloud_info' });
-    ok('빈 저장소: 표 없음 · 이름표(cid) 한 번 만들고 그대로', i0.ok && Object.keys(i0.tables).length === 0 && /^[0-9a-f-]{36}$/.test(i0.cid) && i1.cid === i0.cid && i0.ver === 5, { i0, i1 });
+    ok('빈 저장소: 표 없음 · 이름표(cid) 한 번 만들고 그대로', i0.ok && Object.keys(i0.tables).length === 0 && /^[0-9a-f-]{36}$/.test(i0.cid) && i1.cid === i0.cid && i0.ver === 6, { i0, i1 });
     const p1 = G.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'AAA', n: 2 } } });
     const x1 = JSON.parse(G.props.get('T_po')); const f1 = G.files.get(x1.f);
     ok('올리기 → 번호 1 · 드라이브 "ColorPencil ERP Data/po.json.gz.b64" · 크기 · 행 수 · 시각', p1.ok && p1.vers.po === 1 && x1.v === 1 && x1.s === 3 && x1.n === 2 && x1.at && f1 && f1.name === 'po.json.gz.b64' && f1.content === 'AAA' && f1.folder === G.folders.get('ColorPencil ERP Data'), { p1, x1 });
@@ -181,7 +261,7 @@ async function ownerData(S) {
     // 시트 없이 만든 스크립트 (script.google.com 에서 바로)
     const SA = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"), { noSheet: true });
     const sp = SA.post({ token: TK, action: 'ping' }), sl = SA.post({ token: TK, action: 'list' }), sc = SA.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'A' } } });
-    ok('시트 없는(독립형) 스크립트: ping · 공유는 됨, 시트 기능만 안내', sp.ok && sp.ver === 5 && sp.sheet === '' && sl.ok === false && /no spreadsheet/.test(sl.error) && sc.vers.po === 1, { sp, sl, sc });
+    ok('시트 없는(독립형) 스크립트: ping · 공유는 됨, 시트 기능만 안내', sp.ok && sp.ver === 6 && sp.sheet === '' && sl.ok === false && /no spreadsheet/.test(sl.error) && sc.vers.po === 1, { sp, sl, sc });
     // 4판까지의 기능 그대로
     ok('휴대폰 보기 · 드라이브 백업 그대로 (4판 기능)', G.post({ token: TK, action: 'mobile_pw', pw: 'secret12' }).on === true && G.post({ token: TK, action: 'mobile', summary: JSON.stringify({ v: 1, kpi: {} }) }).ok
       && G.c.mobileData('secret12').ok && G.post({ token: TK, action: 'backup', name: 'ERP_backup_2026-10-22.json.gz', b64: Buffer.from('x').toString('base64') }).ok);
@@ -244,7 +324,7 @@ async function ownerData(S) {
     const wrong = await capi(A, 'check', { url: G.url, token: TK.replace('T18', 'X18') });
     eq('키가 다르면 BAD_TOKEN', wrong.json.code, 'BAD_TOKEN');
     const ck = await capi(A, 'check', { url: G.url, token: TK });
-    ok('연결 확인: 5판 · 비어 있음 · 이 PC 자료 (표 · 행) · 다시 켤 것 없음', ck.status === 200 && ck.json.ver === 5 && ck.json.empty === true && ck.json.resume === false && ck.json.local.tables === 3 && ck.json.local.rows === 125 && ck.json.sheet === 'ERP 공유', ck.json);
+    ok('연결 확인: 6판 · 비어 있음 · 이 PC 자료 (표 · 행) · 다시 켤 것 없음', ck.status === 200 && ck.json.ver === 6 && ck.json.empty === true && ck.json.resume === false && ck.json.local.tables === 3 && ck.json.local.rows === 125 && ck.json.sheet === 'ERP 공유', ck.json);
     const nb = await capi(A, 'connect', { url: G.url, token: TK, mode: 'replace' });
     eq('빈 저장소에 "구글 자료로" 는 안 됨 (EMPTY)', nb.json.code, 'EMPTY');
     const up = await capi(A, 'connect', { url: G.url, token: TK, mode: 'upload' });
@@ -472,13 +552,13 @@ async function ownerData(S) {
       await P.click('#cloudCard button:has-text("Apps Script 코드 복사")');
       await P.waitForFunction(() => window.__copied.length > 0, null, { timeout: 10000 }).catch(() => {});
       const cp = await P.evaluate(() => ({ c: window.__copied[0] || '', tk: ERP.db.setting('gToken'), toast: (document.querySelector('#toasts') || {}).innerText || '' }));
-      ok('코드 복사 → 새 비밀 키를 만들어 이 PC 설정에 두고, 키를 넣은 Code.gs 를 복사 · 알림', /^[A-Za-z0-9_-]{32}$/.test(cp.tk) && cp.c.includes("var TOKEN = '" + cp.tk + "';") && /5판/.test(cp.c) && /복사했습니다/.test(cp.toast), { tk: cp.tk, toast: cp.toast });
+      ok('코드 복사 → 새 비밀 키를 만들어 이 PC 설정에 두고, 키를 넣은 Code.gs 를 복사 · 알림', /^[A-Za-z0-9_-]{32}$/.test(cp.tk) && cp.c.includes("var TOKEN = '" + cp.tk + "';") && /6판/.test(cp.c) && /복사했습니다/.test(cp.toast), { tk: cp.tk, toast: cp.toast });
       const GU = keep(await fakeGoogle(cp.c), googles);                 // 사용자가 붙여넣고 웹 앱으로 배포
       await P.fill('#cloudCard input[name=cloudUrl]', GU.url);
       await P.click('#cloudCard .cloud-setup .toolbar button:has-text("연결 확인") >> nth=0');
       await P.waitForSelector('#cloudCard .cloud-res button:has-text("이 PC 자료를 올리고 공유 시작")', { timeout: 15000 });
       const r0 = await P.evaluate(() => document.querySelector('#cloudCard .cloud-res').innerText);
-      ok('연결 확인 → 연결됨 · 5판 · 아직 자료 없음 · 이 PC 자료 수', /연결됨/.test(r0) && /Apps Script 5판/.test(r0) && /아직 자료가 없습니다/.test(r0) && /표 \d+개/.test(r0), r0);
+      ok('연결 확인 → 연결됨 · 6판 · 아직 자료 없음 · 이 PC 자료 수', /연결됨/.test(r0) && /Apps Script 6판/.test(r0) && /아직 자료가 없습니다/.test(r0) && /표 \d+개/.test(r0), r0);
       await P.click('#cloudCard .cloud-res button:has-text("이 PC 자료를 올리고 공유 시작")');
       await P.waitForSelector('.modal .cloud-done', { timeout: 30000 });
       const done = await P.evaluate(() => document.querySelector('.modal').innerText);
@@ -555,8 +635,163 @@ async function ownerData(S) {
     ok('ERP 창을 닫기 · 업데이트 설치 · 사내망 재시작 전에 구글로 보냄 (flushAll → cloud.flush)', /async function flushAll\(\)/.test(main) && /info\.cloud\.flush\(15000\)/.test(main) && /beforeInstall: \(\) => flushAll\(\)/.test(main) && /flushAll\(\)\.then\(/.test(main) && /await flushAll\(\); app\.relaunch\(\)/.test(main));
     ok('Windows 자동 업데이트 시험이 cloudsync.js 바뀜에도 돎', /- 'cloudsync\.js'/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'update-test.yml'), 'utf8')));
     const core = fs.readFileSync(path.join(ROOT, 'app', 'js', 'core.js'), 'utf8'), nsi = fs.readFileSync(path.join(ROOT, 'build', 'installer.nsi'), 'utf8');
-    eq('버전 1.13.1 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.1 /.test(pkg.scripts.dist)], ['1.13.1', '1.13.1', '1.13.1', true]);
+    eq('버전 1.13.2 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.2 /.test(pkg.scripts.dist)], ['1.13.2', '1.13.2', '1.13.2', true]);
     ok('index.html 에 cloud.js', /<script src="js\/cloud\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8')));
+  });
+
+  // ------------------------------------------------------------------------------------------
+  await sec('10. 구글 시트 = 공유 자료 보기 (6판 · 1.13.2) — 표마다 탭 · 화면과 같은 이름 · 저장 뒤 저절로 · 오류 표 · 다시 쓰기', async () => {
+    const src = fs.readFileSync(CODE_FILE, 'utf8').replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';");
+    const gz = (v) => zlib.gzipSync(JSON.stringify(v)).toString('base64');
+    const LAY = { po: { title: '수주 (PO)', ord: 0, cols: [{ k: 'date', h: '수주일', t: 'd' }, { k: 'po_no', h: 'PO 번호', t: 't' }, { k: 'item_no', h: '품번 (Item)', t: 't' }, { k: 'sets', h: '세트', t: 'n' }] },
+      items: { title: '품목 마스터', ord: 14, cols: [{ k: 'code', h: '품목코드', t: 't' }, { k: 'name', h: '품명', t: 't' }] },
+      returns: { title: '반품', ord: 6, cols: [{ k: 'code', h: '품목코드', t: 't' }, { k: 'qty', h: '수량', t: 'n' }] } };
+    // ---- (가) 구글 쪽 (Code.gs 6판)
+    const S = gasCtx(src, { sheetName: '제목 없는 스프레드시트' }); const ssx = S.c.SpreadsheetApp.getActiveSpreadsheet();
+    const put = (name, rows, base, lay, pc) => S.post({ token: TK, action: 'cloud_put', pc, tables: { [name]: { base, b64: gz(rows), n: rows.length, sheet: lay } } });
+    const sheetGo = (all) => S.post({ token: TK, action: 'cloud_sheet', all: !!all });
+    const info = () => S.post({ token: TK, action: 'cloud_info' });
+    const poRows = [{ _id: 'p1', date: '2026-10-01', po_no: 'P-1', item_no: '0414210300', sets: 100, note: '=IMPORTDATA("http://x")', _ex: 1 }, { _id: 'p2', date: '2026-10-02', po_no: 'P-2', item_no: '523034E200', sets: 50 }];
+    const w1 = put('po', poRows, 0, LAY.po, 'PC-A');
+    ok('저장(cloud_put)은 시트를 기다리지 않음 — 저장 번호만 주고, 시트는 아직 그대로', w1.ok && w1.vers.po === 1 && !('sheet' in w1) && S.book.names().join() === '시트1' && S.book.writes === 0, { w1, tabs: S.book.names() });
+    const i1 = info();
+    ok('cloud_info: 6판 · 보낸 PC · 시트에 쓴 번호 (sv 0 = 아직)', i1.ver === 6 && i1.tables.po.pc === 'PC-A' && i1.tables.po.sv === 0 && i1.tables.po.v === 1, i1.tables.po);
+    const s1 = sheetGo(); const tab = S.book.tab('수주 (PO)');
+    ok('cloud_sheet → 표마다 탭 (ERP 화면과 같은 한국어 이름) · 쓴 표 · 시트 주소 · 이름', s1.ok && s1.sheet === true && JSON.stringify(s1.written) === '["po"]' && !s1.more && !!tab && s1.url === 'https://sheet.example' && s1.name === 'ColorPencil ERP 공유 자료', s1);
+    const t1 = tab ? tab.table() : [];
+    eq('머리글 = 한국어 · ERP 열 순서 → 화면에 없는 칸 (note) → 맨 끝 ID (ERP), "_" 로 시작하는 칸 (_ex) 은 뺌', t1[0], ['수주일', 'PO 번호', '품번 (Item)', '세트', 'note', 'ID (ERP)']);
+    eq('값: 코드 · 날짜는 글자 그대로 (0414210300 · 2026-10-01), 숫자는 숫자, "=" 로 시작하는 글자는 수식이 되지 않음', t1.slice(1), [['2026-10-01', 'P-1', '0414210300', 100, '=IMPORTDATA("http://x")', 'p1'], ['2026-10-02', 'P-2', '523034E200', 50, '', 'p2']]);
+    ok('서식: 글자 열 @ · 숫자 열 General · 첫 줄 고정 · 경고만 보호 · 빈 1000행 · 26열 없음', tab && tab.fmtOf(2, 1) === '@' && tab.fmtOf(2, 3) === '@' && tab.fmtOf(2, 4) === 'General' && tab.frozen === 1 && tab.prot.length === 1 && tab.prot[0].warn === true && tab.rows <= 4 && tab.cols === 6,
+      tab && { f: [tab.fmtOf(2, 1), tab.fmtOf(2, 3), tab.fmtOf(2, 4)], frozen: tab.frozen, rows: tab.rows, cols: tab.cols });
+    const ovRow = (n) => (S.book.sheets[0].table().find(r => r[5] === n) || []);
+    ok('맨 앞 "ERP 자료 안내" 탭: 표 · 행 수 · 보낸 PC · 최신 / "제목 없는 스프레드시트" → 이름 · 빈 시트1 지움',
+      S.book.sheets[0].name === 'ERP 자료 안내' && /ColorPencil ERP/.test(String(S.book.sheets[0].table()[0][0])) && ovRow('po')[0] === '수주 (PO)' && ovRow('po')[1] === 2 && ovRow('po')[3] === 'PC-A' && ovRow('po')[4] === '최신'
+      && !S.book.tab('시트1') && S.book.name === 'ColorPencil ERP 공유 자료', { names: S.book.names(), ov: S.book.sheets[0].table() });
+    eq('cloud_info: 시트에 쓴 번호 = 저장 번호 · 시트 주소', [info().tables.po.sv, info().sheet], [1, 'https://sheet.example']);
+    put('items', [{ _id: 'i1', code: 'A-1', name: '빨강' }], 0, LAY.items, 'PC-B');
+    eq('바뀐 표만 다시 씀 (수주는 그대로)', sheetGo().written, ['items']);
+    eq('탭 순서: 안내 → ERP 표 순서', S.book.names(), ['ERP 자료 안내', '수주 (PO)', '품목 마스터']);
+    const poRows2 = poRows.concat([{ _id: 'p3', date: '2026-10-03', po_no: 'P-3', item_no: 'X', sets: 7 }]);
+    put('po', poRows2, 1, LAY.po, 'PC-B'); sheetGo();
+    ok('표를 고쳐 저장 → 그 탭 다시 (3행) · 안내 탭의 보낸 PC', S.book.tab('수주 (PO)').table().length === 4 && ovRow('po')[1] === 3 && ovRow('po')[3] === 'PC-B', ovRow('po'));
+    ssx.insertSheet('반품').getRange(1, 1, 1, 1).setValues([['내 메모']]);
+    put('returns', [{ _id: 'r1', code: 'A-1', qty: 2 }], 0, LAY.returns, 'PC-A');
+    put('ecount_snap', [{ _id: 'e1', a: 1 }], 0, undefined, 'PC-A');            // 레이아웃 없음 (5판 ERP · 화면에 없는 표)
+    sheetGo();
+    ok('같은 이름의 탭이 이미 있으면 그 탭은 그대로 두고 "(ERP)" 를 붙인 새 탭', S.book.tab('반품').table()[0][0] === '내 메모' && !!S.book.tab('반품 (ERP)') && S.book.tab('반품 (ERP)').table()[0][0] === '품목코드', S.book.names());
+    ok('레이아웃이 없는 표 → 표 이름 그대로의 탭 · 칸 이름 머리글', !!S.book.tab('ecount_snap') && S.book.tab('ecount_snap').table()[0].join() === 'a,ID (ERP)', S.book.names());
+    ssx.deleteSheet(S.book.tab('품목 마스터'));
+    const s3 = sheetGo();
+    ok('ERP 탭을 지우면 다음 갱신 때 되살림', s3.written.includes('items') && !!S.book.tab('품목 마스터') && S.book.tab('품목 마스터').table().length === 2, s3);
+    const nW = S.book.writes; const s4 = sheetGo();
+    ok('바뀐 것이 없으면 표는 쓰지 않음 (안내 탭만)', s4.written.length === 0 && S.book.writes - nW <= 2, { s4, w: S.book.writes - nW });
+    // 한 표에서 오류 → 그 표만, 같은 번호로는 다시 시도하지 않음
+    S.book.failTab = '수주 (PO)';
+    put('po', poRows2.concat([{ _id: 'p4', po_no: 'P-4', sets: 1 }]), 2, LAY.po, 'PC-A'); put('items', [{ _id: 'i1', code: 'A-1', name: '빨강' }, { _id: 'i2', code: 'A-2', name: '파랑' }], 1, LAY.items, 'PC-A');
+    const s5 = sheetGo();
+    ok('한 표에서 오류 (칸 한도 등) → 그 표만 errs · 다른 표는 씀', s5.ok && s5.written.includes('items') && !s5.written.includes('po') && /10000000 cells/.test((s5.errs || {}).po || ''), s5);
+    const i5 = info().tables.po;
+    ok('cloud_info: 오류 표 (se = 그 번호 · 메시지)', i5.se === i5.v && i5.sv < i5.v && /cells/.test(i5.sm || ''), i5);
+    const w5 = S.book.writes; const s6 = sheetGo();
+    ok('같은 번호의 오류 표는 다시 시도하지 않음 · 안내 탭에 "오류"', s6.written.length === 0 && S.book.writes - w5 <= 2 && /오류/.test(ovRow('po')[4]), { s6, row: ovRow('po') });
+    S.book.failTab = null;
+    put('po', poRows2, 3, LAY.po, 'PC-A'); const s7 = sheetGo();
+    ok('새로 저장되면 다시 시도 → 되면 오류 지움', s7.written.includes('po') && !info().tables.po.se && ovRow('po')[4] === '최신', { s7, po: info().tables.po });
+    // 모두 다시 쓰기 · 시간 예산 (6분 한도 전에 멈추고, 남은 표는 다음 부름에)
+    S.book.tab('수주 (PO)').getRange(2, 2, 1, 1).setValues([['손으로 고침']]);
+    S.book.onWrite = () => { S.clock.off += 130000; };                          // 쓰는 데 오래 걸리는 척
+    const a1 = sheetGo(true); S.book.onWrite = null; S.clock.off = 0;
+    ok('모두 다시 쓰기 → 시간이 모자라면 more (남은 표는 다음에)', a1.ok && a1.more === true && a1.written.length >= 1 && a1.written.length < 4, a1);
+    const a2 = sheetGo();
+    ok('이어서 부르면 남은 표를 마저 씀 (모두 다시 쓰기가 도중에 끊겨도) · 손으로 고친 칸은 ERP 값으로', !a2.more && a1.written.length + a2.written.length === 4 && S.book.tab('수주 (PO)').table()[1][1] === 'P-1', { a1: a1.written, a2: a2.written });
+    S.stats.docBusy = true; const b1 = sheetGo(); S.stats.docBusy = false;
+    ok('다른 실행이 시트를 쓰는 중 → busy (오래 기다리지 않음)', b1.ok && b1.busy === true && b1.sheet === true, b1);
+    const NS = gasCtx(src, { noSheet: true }); NS.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: gz(poRows), n: 2, sheet: LAY.po } } });
+    eq('시트 없이 만든 스크립트 → sheet false (공유는 그대로)', NS.post({ token: TK, action: 'cloud_sheet' }), { ok: true, sheet: false });
+
+    // ---- (나) ERP 와 함께: 저장하면 시트도 · 여러 번 저장은 모아서 · 다른 PC 가 못 한 갱신은 대신 · 모두 다시 쓰기 · 5판 · 시트 없는 스크립트
+    const waitFor = async (fn, ms) => { for (let i = 0; i < (ms || 10000) / 100; i++) { if (await fn()) return true; await sleep(100); } return false; };
+    const GS = keep(await fakeGoogle(src, { sheetName: '제목 없는 스프레드시트' }), googles); const bk = GS.gas.book;
+    const P1 = keep(await startPc(tmp('erp-v18-s-'), { pcName: 'PC-사장', cloudSheet: 1000, cloudSheetLag: 0 }), servers);
+    await ownerData(P1);
+    const up = await capi(P1, 'connect', { url: GS.url, token: TK, mode: 'upload' });
+    const idle = () => waitFor(async () => { const s = (await stat(P1)).sheet || {}; return !s.busy && !s.queued; });
+    const okTabs = await waitFor(() => !!(bk.tab('수주 (PO)') && bk.tab('생산 일보') && bk.tab('품목 마스터'))); await idle();
+    ok('올리면 몇 초 안에 구글 시트에 표마다 탭 (화면과 같은 이름: 수주 (PO) · 생산 일보 · 품목 마스터)', up.status === 200 && okTabs, bk.names());
+    const plTab = bk.tab('생산 일보');
+    ok('생산 일보 탭: 머리글 = 화면 (생산일 …) · 맨 끝 ID (ERP) · 120행', !!plTab && plTab.table()[0][0] === '생산일' && plTab.table()[0].slice(-1)[0] === 'ID (ERP)' && plTab.table().length === 121, plTab && plTab.table()[0]);
+    const st1 = await stat(P1);
+    ok('상태: 구글 시트 있음 · 주소 · 이름 · 6판 · 최신 (갱신 대기 · 오류 없음)', !!st1.sheet && st1.sheet.has === true && st1.sheet.url === 'https://sheet.example' && st1.sheet.name === 'ColorPencil ERP 공유 자료' && st1.sheet.ver === 6 && !st1.sheet.code && st1.sheet.lag.length === 0 && !Object.keys(st1.sheet.errs).length && !!st1.sheet.at, st1.sheet);
+    const pl = await getT(P1, 'prod_log'); byId(pl, 'pl7').ok_ea = 7777; await putT(P1, 'prod_log', pl); await sync(P1);
+    const rowOf = (tn, id) => ((bk.tab(tn) && bk.tab(tn).table().find(r => r[r.length - 1] === id)) || []);
+    ok('ERP 에서 고쳐 저장 → 구글 시트 탭도 (몇 초 안에) · 안내 탭에 보낸 PC', await waitFor(() => rowOf('생산 일보', 'pl7').includes(7777)) && (bk.sheets[0].table().find(r => r[5] === 'prod_log') || [])[3] === 'PC-사장', bk.sheets[0].table());
+    await idle(); const h0 = GS.hits.length;
+    for (let i = 0; i < 4; i++) { const r = await getT(P1, 'po'); byId(r, 'po1').sets = 1000 + i; await putT(P1, 'po', r); await sync(P1); }
+    await waitFor(() => rowOf('수주 (PO)', 'po1').includes(1003)); await idle();
+    const nSheet = GS.hits.slice(h0).filter(x => x === 'cloud_sheet').length, nPut = GS.hits.slice(h0).filter(x => x === 'cloud_put').length;
+    ok('잇따라 4번 저장 → 시트는 모아서 갱신 (시트 갱신 < 저장) · 마지막 값', nPut === 4 && nSheet >= 1 && nSheet < 4 && rowOf('수주 (PO)', 'po1').includes(1003), { nPut, nSheet });
+    GS.putRaw('items', (GS.rows('items') || []).concat([{ _id: 'itX', code: 'Z-9', name: '다른 PC' }]));   // 다른 PC: 저장만 하고 바로 꺼짐 (시트 갱신 못 함)
+    await sync(P1);
+    ok('다른 PC 가 올렸는데 시트가 뒤처져 있으면 이 PC 가 대신 갱신', await waitFor(() => rowOf('품목 마스터', 'itX').length > 0)); await idle();
+    bk.tab('수주 (PO)').getRange(2, 1, 1, 1).setValues([['손으로 고침']]);
+    const rw = await req(P1.port, 'POST', '/api/cloud/sheet', {});
+    ok('[구글 시트 다시 쓰기] → 모든 탭을 ERP 자료로 다시 (손으로 고친 칸도)', rw.status === 200 && rw.json.on === true && await waitFor(() => bk.tab('수주 (PO)').table()[1][0] !== '손으로 고침'), rw.json && rw.json.sheet);
+    await idle();
+    // 5판으로 배포한 채 (아직 6판 코드를 붙여넣지 않음) → 시트 갱신은 부르지 않고 안내
+    GS.v5 = true; const h5 = GS.hits.length;
+    const r5 = await getT(P1, 'po'); byId(r5, 'po2').sets = 55; await putT(P1, 'po', r5); await sync(P1); await sleep(1600);
+    const s5b = await stat(P1); const rw5 = await req(P1.port, 'POST', '/api/cloud/sheet', {});
+    ok('5판이면 cloud_sheet 를 부르지 않음 · 상태 ver 5 · 다시 쓰기는 OLD_SCRIPT (공유는 그대로)', !GS.hits.slice(h5).includes('cloud_sheet') && s5b.sheet.ver === 5 && s5b.ok === true && rw5.status === 400 && rw5.json.code === 'OLD_SCRIPT', { hits: GS.hits.slice(h5), sheet: s5b.sheet, rw5: rw5.json });
+    GS.v5 = false; await sync(P1);
+    ok('6판으로 바꾸면 밀린 표를 갱신', await waitFor(() => rowOf('수주 (PO)', 'po2').includes(55))); await idle();
+    // 시트 없이 만든 스크립트 (script.google.com 에서 바로)
+    const GN = keep(await fakeGoogle(src, { noSheet: true }), googles);
+    const P2 = keep(await startPc(tmp('erp-v18-n-'), { cloudSheet: 100, cloudSheetLag: 0 }), servers); await ownerData(P2);
+    const upn = await capi(P2, 'connect', { url: GN.url, token: TK, mode: 'upload' }); await sleep(600);
+    const sn = await stat(P2); const rwn = await req(P2.port, 'POST', '/api/cloud/sheet', {});
+    ok('시트 없는 스크립트: 공유는 되고 · 상태 시트 없음 · cloud_sheet 를 부르지 않음 · 다시 쓰기는 NO_SHEET', upn.status === 200 && sn.on && sn.sheet.has === false && !GN.hits.includes('cloud_sheet') && rwn.status === 400 && rwn.json.code === 'NO_SHEET', { sheet: sn.sheet, hits: GN.hits, rwn: rwn.json });
+    await capi(P2, 'off');
+
+    // ---- (다) 화면: 공유 카드의 구글 시트 줄 · 다시 쓰기 · 오류 표 · 5판 안내 · 베트남어
+    const browser = await pw.chromium.launch(exe ? { executablePath: exe } : {});
+    try {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+      const p = await ctx.newPage(); p.on('pageerror', e => errors.push('pageerror: ' + e.message));
+      p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|Failed to fetch|ERR_/.test(m.text())) errors.push('console: ' + m.text()); });
+      await p.goto(P1.url + '/#/data'); await p.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.querySelector('.side'), null, { timeout: 180000 });
+      const card = async (re) => { await p.evaluate(() => { ERP.state.dataTab = 'google'; ERP.goto('data'); ERP.render(); });
+        await p.waitForFunction((s) => new RegExp(s).test((document.querySelector('#cloudCard') || {}).innerText || ''), re.source, { timeout: 15000 }).catch(() => {});
+        return p.evaluate(() => { const a = document.querySelector('#cloudCard .cloud-sheet a[href^="http"]'); return { t: document.querySelector('#cloudCard').innerText, a: a ? a.href : '', tg: a ? a.target : '' }; }); };
+      const c1 = await card(/구글 시트/);
+      ok('공유 카드: 구글 시트 (표 보기) · 시트 이름 링크 (바깥 브라우저) · 최신 · [구글 시트 다시 쓰기] · 고치는 것은 ERP 에서',
+        /구글 시트/.test(c1.t) && /ColorPencil ERP 공유 자료/.test(c1.t) && c1.a === 'https://sheet.example/' && c1.tg === '_blank' && /최신/.test(c1.t) && /구글 시트 다시 쓰기/.test(c1.t) && /고치는 것은 ERP 에서/.test(c1.t), c1);
+      await p.click('#cloudCard button:has-text("구글 시트 다시 쓰기")'); await p.waitForTimeout(300);
+      ok('[구글 시트 다시 쓰기] → 알림', /구글 시트/.test(await p.evaluate(() => document.querySelector('#toasts').innerText)));
+      await idle();
+      bk.failTab = '생산 일보';
+      const pl2 = await getT(P1, 'prod_log'); byId(pl2, 'pl8').ok_ea = 8888; await putT(P1, 'prod_log', pl2); await sync(P1);
+      await waitFor(async () => !!((await stat(P1)).sheet.errs || {}).prod_log); await idle();
+      const c2 = await card(/쓰지 못한 표/);
+      ok('오류 표: 카드에 "시트에 쓰지 못한 표: 생산 일보" · 오류 글', /쓰지 못한 표/.test(c2.t) && /생산 일보/.test(c2.t) && /cells/.test(c2.t), c2.t);
+      bk.failTab = null; const pl3 = await getT(P1, 'prod_log'); byId(pl3, 'pl8').ok_ea = 8889; await putT(P1, 'prod_log', pl3); await sync(P1);
+      ok('다시 저장하면 오류가 풀림', await waitFor(() => rowOf('생산 일보', 'pl8').includes(8889))); await idle();
+      GS.v5 = true; await sync(P1);
+      const c3 = await card(/6판/);
+      ok('5판으로 배포한 채면: 카드에 "6판" 안내 (Apps Script 코드 복사 → 새 버전으로 배포)', /6판/.test(c3.t) && /새 버전/.test(c3.t), c3.t);
+      GS.v5 = false; await sync(P1); await idle();
+      await p.evaluate(() => ERP.setLang('vi'));
+      const c4 = await card(/Google Sheet/);
+      ok('베트남어: 구글 시트 줄 · null/undefined/NaN 없음', /Google Sheet/.test(c4.t) && /Ghi lại Google Sheet/.test(c4.t) && !/\bnull\b|undefined|NaN/.test(c4.t), c4.t);
+      await p.evaluate(() => ERP.setLang('ko'));
+      await ctx.close();
+    } finally { await browser.close(); }
+
+    // ---- (라) 1.13.1 까지 연결한 PC (cloud.json 에 시트 정보 없음) → 1.13.2 로 업데이트하면 한 판 뒤 시트 주소 (링크)
+    await idle(); P1.close();
+    const cj = path.join(P1.dataDir, 'cloud.json'), cjo = JSON.parse(fs.readFileSync(cj, 'utf8')); delete cjo.sheet; delete cjo.sheetAt; fs.writeFileSync(cj, JSON.stringify(cjo));
+    const P1b = keep(await startPc(P1.dataDir, { pcName: 'PC-사장', cloudSheet: 1000, cloudSheetLag: 0 }), servers);
+    const sb0 = (await stat(P1b)).sheet; await sync(P1b); const sb1 = (await stat(P1b)).sheet;
+    ok('1.13.1 까지 연결한 PC: 처음엔 시트를 모름 (확인 중) → 한 판 뒤 6판 · 시트 주소', sb0.has === null && sb0.ver === null && sb1.has === true && sb1.url === 'https://sheet.example' && sb1.ver === 6 && !sb1.lag.length, { sb0, sb1 });
   });
 
   ok('화면 오류 없음', !errors.length, errors.slice(0, 6));

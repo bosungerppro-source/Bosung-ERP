@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '버전 (예: 1.13.1) — main 버전으로 만들면 모든 PC 가 자동 업데이트'
+        description: '버전 (예: 1.13.2) — main 버전으로 만들면 모든 PC 가 자동 업데이트'
         required: true
-        default: '1.13.1'
+        default: '1.13.2'
       commit:
         description: '빌드할 커밋 (비우면: 1.2.0~1.5.0 은 그 버전의 커밋, 그 밖은 main 최신)'
         required: false

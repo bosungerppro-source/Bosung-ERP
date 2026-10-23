@@ -385,13 +385,13 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     const post = (o) => JSON.parse(c.doPost({ postData: { contents: JSON.stringify(o) } }).getContent());
     return { c, props, cache, files, post };
   }
-  await sec('9. 구글 웹 앱 (Code.gs 4판 기능 — 1.13.0 부터 5판)', async () => {
+  await sec('9. 구글 웹 앱 (Code.gs 4판 기능 — 1.13.0 부터 5판 · 1.13.2 부터 6판)', async () => {
     const G = gas();
     const g = G.c.doGet({ parameter: {} });
     ok('브라우저로 열면 휴대폰 화면 (제목 · 휴대폰 폭 · 화면 글자는 textContent)', g.title === 'ColorPencil ERP' && g.meta.viewport === 'width=device-width, initial-scale=1' && /google\.script\.run/.test(g.getContent()) && !/innerHTML/.test(g.getContent()), { title: g.title, meta: g.meta });
-    eq('?ping=1 → 상태 JSON (5판, 1.13.0)', JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, 5);
+    eq('?ping=1 → 상태 JSON (6판, 1.13.2)', JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, 6);
     eq('TOKEN 이 틀리면 거절', G.post({ token: 'x', action: 'ping' }).error, 'bad token');
-    eq('ping → 5판 (1.13.0)', G.post({ token: 'T15', action: 'ping' }).ver, 5);
+    eq('ping → 6판 (1.13.2)', G.post({ token: 'T15', action: 'ping' }).ver, 6);
     eq('비밀번호 없음 → NO_PW', G.c.mobileData('secret12').error, 'NO_PW');
     eq('비밀번호 6자 미만 → 거절', G.post({ token: 'T15', action: 'mobile_pw', pw: '12345' }).ok, false);
     ok('비밀번호 정하기 → 소금 + SHA-256 해시만 저장 (원문 없음)', G.post({ token: 'T15', action: 'mobile_pw', pw: 'secret12' }).on === true && /^[0-9a-f]{64}$/.test(G.props.get('MOBILE_HASH')) && G.props.get('MOBILE_SALT') && !Array.from(G.props.values()).some(v => v.includes('secret12')), Array.from(G.props.entries()));
@@ -485,7 +485,7 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     await P.close();
     // 옛 Code.gs · 끄기
     oldScript = true; await A.click('#phoneCard >> text=지금 보내기'); await A.waitForTimeout(800);
-    ok('옛 Code.gs → "새 코드(5판)를 붙여넣고 배포" 알림 · 카드에 실패 표시 (1.13.0)', /5판/.test(await A.evaluate(() => document.querySelector('#toasts').innerText)) && /실패/.test(await A.evaluate(() => document.querySelector('#phoneCard').innerText)));
+    ok('옛 Code.gs → "새 코드(6판)를 붙여넣고 배포" 알림 · 카드에 실패 표시 (1.13.2)', /6판/.test(await A.evaluate(() => document.querySelector('#toasts').innerText)) && /실패/.test(await A.evaluate(() => document.querySelector('#phoneCard').innerText)));
     oldScript = false;
     await A.click('#phoneCard >> text=끄기'); await A.waitForSelector('.modal'); await A.click('.modal .modal-foot button.primary');
     await A.waitForFunction(() => /꺼짐/.test(document.querySelector('#phoneCard').innerText), null, { timeout: 10000 }).catch(() => {});

@@ -8,7 +8,11 @@
    - 언제: 30초마다 · 이 PC 에서 저장한 뒤 3초 · ERP 를 끄기 전 (electron/main.js). 그 사이 다른 PC 가 먼저 올렸으면(conflicts) 받아서 다시 합친다.
    - 이 PC 의 표를 읽고 · 합치고 · 쓰는 동안은 await 가 없다 → 화면 저장이 끼어들지 않는다 (화면은 409 로 다시 합침).
    - 처음 연결: upload (구글이 비었을 때) · replace (구글 자료로, 이 PC 자료는 백업) · merge (이 PC 에만 있는 행을 더함) · overwrite (구글을 이 PC 자료로) · resume (꺼 둔 뒤 다시).
-   - 다른 PC 에서 많이 지워 이 PC 의 표가 절반 아래로 줄면, 쓰기 전에 그 표를 <data>/cloud_backup 에 복사해 둔다. */
+   - 다른 PC 에서 많이 지워 이 PC 의 표가 절반 아래로 줄면, 쓰기 전에 그 표를 <data>/cloud_backup 에 복사해 둔다.
+   1.13.2 (Code.gs 6판): 그 Apps Script 의 구글 시트 = 공유 자료 보기 (표마다 탭, 화면과 같은 한국어 이름 · 머리글).
+   - 보낼 때 표마다 탭 이름 · 열 (o.layout, schema.js) 과 이 PC 이름 (o.pc) 을 같이 보낸다.
+   - 시트 갱신(cloud_sheet)은 주고받기와 따로 돈다: 이 PC 가 보낸 뒤 20초 (그 사이 저장은 모아서 한 번), 다른 PC 가 못 한 갱신 (뒤처진 지 1분) 은 대신, [구글 시트 다시 쓰기] 는 바로.
+     저장 응답 · 30초 판 · 끄기 전 보내기는 시트 쓰기를 기다리지 않는다. 5판 · 시트 없이 만든 스크립트는 부르지 않는다. */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), util = require('util');
 const gzip = util.promisify(zlib.gzip), gunzip = util.promisify(zlib.gunzip);
 
@@ -106,21 +110,27 @@ const pad = (x) => String(x).padStart(2, '0');
 const stamp = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()); };
 
 /**
- * o: { dataDir, store (server.js createStore), fetch, urlOk(url), codeFile, every (ms, 30000), poke (ms, 3000), log(msg) }
+ * o: { dataDir, store (server.js createStore), fetch, urlOk(url), codeFile, every (ms, 30000), poke (ms, 3000), log(msg),
+ *      layout(표) → 시트 탭 이름 · 열 {title, ord, cols} (6판), pc (보낸 PC 이름), sheet (보낸 뒤 시트 갱신까지 ms, 20000 · -1 = 끔), sheetLag (다른 PC 대신 갱신하기 전 기다림 ms, 60000) }
  */
 function create(o) {
   const dir = o.dataDir, store = o.store, doFetch = o.fetch || global.fetch, urlOk = o.urlOk || (() => true);
   const tdir = path.join(dir, 'tables'), bdir = path.join(dir, 'cloud'), stFile = path.join(dir, 'cloud.json');
   const EVERY = o.every || 30000, POKE = o.poke === undefined ? 3000 : o.poke;
+  const layout = o.layout || (() => null), PC = String(o.pc || '').slice(0, 60);
+  const SHEET = o.sheet === undefined ? 20000 : o.sheet, SHEET_LAG = o.sheetLag === undefined ? 60000 : o.sheetLag;
   const atomic = (file, data) => { const tmp = file + '.tmp'; fs.writeFileSync(tmp, data); fs.renameSync(tmp, file); };
   // st (cloud.json): on · cid (구글 저장소 이름표) · mode · since · lastOk/Got/Sent · t[표] = {cv 구글 번호, lv 이 PC 번호} · m = 설정의 {cv, lv}
-  const blank = () => ({ on: false, cid: null, mode: null, since: null, lastOk: null, lastGot: null, lastSent: null, t: {}, m: null });
+  //   sheet = 그 Apps Script 의 구글 시트 {url, name} (false = 시트 없이 만든 스크립트, null = 아직 모름) · sheetAt = 이 PC 가 마지막으로 시트를 갱신한 시각
+  const blank = () => ({ on: false, cid: null, mode: null, since: null, lastOk: null, lastGot: null, lastSent: null, t: {}, m: null, sheet: null, sheetAt: null });
   let st = blank();
   try { st = Object.assign(blank(), JSON.parse(fs.readFileSync(stFile, 'utf8'))); st.t = st.t || {}; } catch (e) { /* 처음 */ }
   const saveState = () => atomic(stFile, JSON.stringify(st));
   const run = { busy: false, at: null, ok: null, code: null, error: null, conflicts: 0, shrink: [], log: [] };
+  // 구글 시트 갱신 (6판): ver = 구글 Apps Script 판 (cloud_info), lag = 시트가 뒤처진 표, errs = 시트에 쓰지 못한 표 {표: 오류}
+  const sh = { ver: null, busy: false, timer: null, due: 0, all: false, again: false, next: 0, fails: 0, code: null, error: null, lag: [], errs: {}, wrote: [] };
   let timer = null, pokeT = null, failN = 0, nextAt = 0, queued = null, chain = Promise.resolve(), stopped = false;
-  /** 기록 (화면이 글자로 바꿈): k = on · off · got · sent · conf · err · shrink */
+  /** 기록 (화면이 글자로 바꿈): k = on · off · got · sent · conf · err · shrink · lost · sheeterr */
   const note = (k, x) => { run.log.push({ at: new Date().toISOString(), k, x: x === undefined ? null : x }); if (run.log.length > 40) run.log.splice(0, run.log.length - 40); if (o.log) o.log(k + ' ' + JSON.stringify(x)); };
   const exclusive = (fn) => { const p = chain.then(fn); chain = p.catch(() => {}); return p; };
 
@@ -198,7 +208,7 @@ function create(o) {
     let batch = { tables: {}, items: [], size: 0 };
     const send = async () => {
       if (!batch.items.length) return;
-      const j = await call(cfg, { action: 'cloud_put', tables: batch.tables }, 300000);
+      const j = await call(cfg, { action: 'cloud_put', tables: batch.tables, pc: PC }, 300000);
       for (const x of batch.items) {
         const nv = j.vers && j.vers[x.n];
         if (nv === undefined) { res.retry = true; continue; }
@@ -211,7 +221,8 @@ function create(o) {
     for (const x of items) {
       const b64 = (await gzip(Buffer.from(JSON.stringify(x.n === META ? x.obj : x.rows), 'utf8'))).toString('base64');
       if (batch.items.length && batch.size + b64.length > BATCH) await send();
-      batch.tables[x.n] = { base: x.base, b64, n: x.n === META ? Object.keys(x.obj).length : x.rows.length };
+      const lay = x.n === META ? null : layout(x.n);   // 6판: 구글 시트 탭 이름 · 열 (화면과 같은 한국어)
+      batch.tables[x.n] = { base: x.base, b64, n: x.n === META ? Object.keys(x.obj).length : x.rows.length, sheet: lay || undefined };
       batch.items.push(x); batch.size += b64.length;
     }
     await send();
@@ -269,10 +280,11 @@ function create(o) {
     return { retry: r.retry };
   }
   async function cycle() {
-    const cfg = cfgNow(); const out = { got: new Set(), sent: new Set(), conflicts: 0 };
+    const cfg = cfgNow(); const out = { got: new Set(), sent: new Set(), conflicts: 0, info: null };
     let info = await call(cfg, { action: 'cloud_info' }, 60000);
     for (let round = 0; ; round++) {
       if (info.cid !== st.cid) throw fail('CID');
+      out.info = info;
       const r = await round1(cfg, info, out);
       if (!r.retry) break;
       if (round >= 3) throw fail('BUSY', 'conflicts');
@@ -290,6 +302,7 @@ function create(o) {
       if (r.sent.size) { st.lastSent = at; note('sent', Array.from(r.sent)); }
       if (r.conflicts) { run.conflicts += r.conflicts; note('conf', r.conflicts); }
       saveState();
+      try { sheetAfter(r.info, Array.from(r.sent)); } catch (e) { /* 시트 갱신은 자료 공유와 따로 — 공유 오류로 보이지 않게 */ }
     } catch (e) {
       const code = e.code || 'ERR', last = run.log[run.log.length - 1];
       run.ok = false; run.code = code; run.error = e.detail || String((e && e.message) || e); failN++;
@@ -314,6 +327,83 @@ function create(o) {
     if (!st.on || stopped || POKE < 0) return;
     clearTimeout(pokeT); pokeT = setTimeout(() => { pokeT = null; syncNow().catch(() => {}); }, POKE); if (pokeT.unref) pokeT.unref();
   }
+  // ---- 6판: 구글 시트 갱신 (cloud_sheet) — 주고받기와 따로 (exclusive 밖)
+  const sheetOk = () => st.on && !stopped && SHEET >= 0 && st.sheet !== false && Number(sh.ver) >= 6;
+  /** 판이 끝난 뒤: 구글의 판 · 시트가 뒤처진 표 (cloud_info) 를 보고, 이 PC 가 보낸 표가 있으면 모아서 갱신 · 오래 뒤처진 표가 있으면 (다른 PC 가 못 함) 대신 갱신 */
+  function sheetAfter(info, sent) {
+    sh.ver = Number(info && info.ver) || 0;
+    const t = (info && info.tables) || {}, now = Date.now(); let old = false;
+    if (info && info.sheet && st.sheet !== false && (!st.sheet || st.sheet.url !== info.sheet)) {   // 시트 주소 (1.13.1 까지 연결한 PC 는 이름 없이)
+      st.sheet = { url: String(info.sheet), name: (st.sheet && st.sheet.name) || '' }; saveState();
+    }
+    if (sh.ver < 6) { sh.lag = []; sh.errs = {}; }
+    else if (!sh.busy) {                                    // 갱신 중이면 그 결과가 더 새롭다
+      const lag = [], errs = {};
+      Object.keys(t).forEach(n => {
+        const x = t[n] || {}; if (n === META || x.sv === undefined) return;
+        const v = Number(x.v) || 0; if (Number(x.sv) >= v) return;
+        if (Number(x.se) === v) errs[n] = String(x.sm || ''); else { lag.push(n); if (now - (Date.parse(x.at) || 0) >= SHEET_LAG) old = true; }
+      });
+      sh.lag = lag; sh.errs = errs;
+    }
+    const mine = sent.filter(n => n !== META);
+    if (mine.length && sh.ver >= 6) sh.lag = Array.from(new Set(sh.lag.concat(mine)));
+    if (!sheetOk()) return;
+    if (mine.length) sheetLater(SHEET); else if (old) sheetLater(0);
+  }
+  /** ms 뒤 갱신 (이미 그보다 먼저 예약돼 있으면 그때 한꺼번에 — 잇따라 저장해도 ms 마다 한 번). 실패한 뒤에는 기다림 (모두 다시 쓰기는 바로) */
+  function sheetLater(ms, all) {
+    if (all) sh.all = true;
+    if (sh.busy) { sh.again = true; return; }
+    let wait = Math.max(0, ms); if (!all && sh.next > Date.now()) wait = Math.max(wait, sh.next - Date.now());
+    const due = Date.now() + wait;
+    if (sh.timer && sh.due <= due) return;
+    clearTimeout(sh.timer); sh.due = due;
+    sh.timer = setTimeout(() => { sh.timer = null; sheetRun().catch(() => {}); }, wait); if (sh.timer.unref) sh.timer.unref();
+  }
+  async function sheetRun() {
+    if (sh.busy) return;
+    if (!sheetOk()) { sh.all = false; return; }
+    sh.busy = true; let later = 0;
+    try {
+      for (let i = 0; i < 8; i++) {                        // more = Apps Script 한 번 실행 시간 (6분) 안에 다 못 씀 → 이어서
+        const all = sh.all; sh.all = false;
+        const j = await call(cfgNow(), { action: 'cloud_sheet', all }, 330000);
+        if (j.sheet === false) { st.sheet = false; sh.lag = []; sh.errs = {}; saveState(); break; }
+        st.sheet = { url: String(j.url || ''), name: String(j.name || '') };
+        if (j.busy) { later = 20000; if (all) sh.all = true; saveState(); break; }   // 다른 PC 의 갱신이 도는 중 → 조금 뒤
+        st.sheetAt = new Date().toISOString(); saveState();
+        sh.lag = Array.isArray(j.lag) ? j.lag.map(String) : []; sh.errs = j.errs && typeof j.errs === 'object' ? j.errs : {}; sh.wrote = (j.written || []).map(String);
+        if (!j.more) break;
+      }
+      sh.code = null; sh.error = null; sh.fails = 0; sh.next = 0;
+    } catch (e) {
+      sh.code = e.code || 'ERR'; sh.error = e.detail || String((e && e.message) || e); sh.fails++;
+      sh.next = Date.now() + Math.min(1800000, 60000 * Math.pow(2, Math.min(sh.fails - 1, 5)));   // 1분 · 2분 … 30분 뒤 (그동안 자료 공유는 그대로)
+      if (sh.code === 'OLD_SCRIPT') { sh.ver = 5; sh.lag = []; sh.errs = {}; }
+      const last = run.log[run.log.length - 1];
+      if (!last || last.k !== 'sheeterr' || last.x.code !== sh.code) note('sheeterr', { code: sh.code, detail: sh.error });
+    } finally {
+      sh.busy = false;
+      if (later) sheetLater(later);
+      else if (sh.again) { sh.again = false; sheetLater(sh.all ? 0 : SHEET, sh.all); }
+    }
+  }
+  /** [구글 시트 다시 쓰기] — 시작만 하고 바로 돌아온다 (화면은 상태를 다시 물어 진행을 본다) */
+  async function sheetNow(all) {
+    if (!st.on) throw fail('OFF');
+    if (st.sheet === false) throw fail('NO_SHEET');
+    if (sh.ver === null) { const info = await call(cfgNow(), { action: 'cloud_info' }, 60000); sh.ver = Number(info.ver) || 0; }   // 아직 한 판도 돌지 않음
+    if (Number(sh.ver) < 6) throw fail('OLD_SCRIPT', 'ver ' + sh.ver);
+    sh.next = 0; sheetLater(0, all !== false);
+    return status();
+  }
+  function sheetStatus() {
+    const g = st.sheet;
+    return { has: g === false ? false : g ? true : null, url: g ? g.url : '', name: g ? g.name : '', ver: sh.ver, on: sheetOk(), busy: sh.busy, queued: !!sh.timer,
+      at: st.sheetAt, code: sh.code, error: sh.error, lag: sh.lag.slice(), errs: Object.assign({}, sh.errs), wrote: sh.wrote.slice() };
+  }
+
   /** 아직 구글에 보내지 않은 이 PC 의 변경이 있는가 */
   function pending() {
     if (!st.on) return false;
@@ -412,7 +502,10 @@ function create(o) {
       clearTimeout(timer); clearTimeout(pokeT);
       saveUrl(cfg);
       const res = { mode, tables: 0, rows: 0, added: 0, backup: null };
-      if (mode !== 'resume') { st = Object.assign(blank(), { cid: info.cid }); clearBases(); saveState(); }
+      if (mode !== 'resume') { st = Object.assign(blank(), { cid: info.cid }); clearBases(); }
+      st.sheet = p.sheet ? { url: String(p.url || ''), name: String(p.sheet) } : false;   // 6판: 그 Apps Script 의 구글 시트 (없으면 시트 없이 만든 스크립트)
+      sh.ver = Number(p.ver) || 0; sh.lag = []; sh.errs = {}; sh.code = null; sh.error = null; sh.fails = 0; sh.next = 0;
+      saveState();
       if (mode === 'upload' || mode === 'overwrite') await doUpload(cfg, ct, res);
       else if (mode === 'replace') await doReplace(cfg, ct, res);
       else if (mode === 'merge') await doMerge(cfg, ct, o2.nat || {}, res);
@@ -421,12 +514,13 @@ function create(o) {
       saveState(); run.code = null; run.error = null; failN = 0; stopped = false;
       note('on', { mode, tables: res.tables, rows: res.rows, added: res.added });
       await runCycle();
+      if (sheetOk() && (mode === 'upload' || mode === 'overwrite')) sheetLater(Math.min(SHEET, 2000));   // 처음 올린 뒤에는 시트도 곧바로
       return Object.assign(res, { status: status() });
     });
   }
   function off() {
     return exclusive(async () => {
-      st.on = false; saveState(); clearTimeout(timer); clearTimeout(pokeT); nextAt = 0; note('off');
+      st.on = false; saveState(); clearTimeout(timer); clearTimeout(pokeT); clearTimeout(sh.timer); sh.timer = null; nextAt = 0; note('off');
       return status();
     });
   }
@@ -441,15 +535,15 @@ function create(o) {
     const m = store.readMeta();
     return { on: st.on, cid: st.cid, mode: st.mode, since: st.since, url: st.cid ? (m.gUrl || null) : null, busy: run.busy, at: run.at, ok: run.ok, code: run.code, error: run.error,
       lastOk: st.lastOk, lastGot: st.lastGot, lastSent: st.lastSent, conflicts: run.conflicts, shrink: run.shrink.slice(), log: run.log.slice(-30),
-      every: EVERY, nextAt: st.on && nextAt ? new Date(nextAt).toISOString() : null, pending: pending(), tables: Object.keys(st.t).length };
+      every: EVERY, nextAt: st.on && nextAt ? new Date(nextAt).toISOString() : null, pending: pending(), tables: Object.keys(st.t).length, sheet: sheetStatus() };
   }
   return {
-    status, check, preview, connect, off, code, syncNow, poke, pending,
+    status, check, preview, connect, off, code, syncNow, poke, pending, sheetNow,
     /** /api/versions 에 붙이는 짧은 상태 (화면 왼쪽 아래) */
     brief: () => ({ on: st.on, ok: run.ok, code: run.code, at: st.lastOk, mode: st.mode, busy: run.busy }),
     /** 서버가 켜질 때: 켜져 있으면 5초 뒤 첫 판 */
     start(first) { stopped = false; if (st.on) schedule(first === undefined ? 5000 : first); },
-    stop() { stopped = true; clearTimeout(timer); clearTimeout(pokeT); },
+    stop() { stopped = true; clearTimeout(timer); clearTimeout(pokeT); clearTimeout(sh.timer); sh.timer = null; },
     /** ERP 를 끄기 전: 보낼 것이 있으면 맞춘다 (최대 ms) */
     async flush(ms) {
       if (!st.on || stopped || !pending()) return false;

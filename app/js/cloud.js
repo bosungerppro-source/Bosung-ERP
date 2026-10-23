@@ -26,7 +26,9 @@
       NOT_JSON: L('웹 앱의 응답이 아닙니다 — 주소가 웹 앱 URL(…/exec)인지, 배포할 때 액세스 권한을 "모든 사용자"로 했는지 확인하세요', 'Không phải phản hồi của ứng dụng web — kiểm tra URL (…/exec) và quyền truy cập "Bất kỳ ai" (Anyone)'),
       NOT_FOUND: L('주소를 찾을 수 없습니다 — 웹 앱 URL 을 다시 복사해 넣으세요', 'Không tìm thấy địa chỉ — hãy sao chép lại URL ứng dụng web'),
       BAD_TOKEN: L('비밀 키(TOKEN)가 맞지 않습니다 — 사장님 PC 에서 [Apps Script 코드 복사] 로 다시 붙여넣고 새 버전으로 배포하세요 (직원 PC 는 연결 코드를 다시 받으세요)', 'TOKEN không khớp — trên máy chủ hãy dán lại mã và triển khai phiên bản mới (máy nhân viên lấy lại mã kết nối)'),
-      OLD_SCRIPT: L('구글 Apps Script 가 옛 판입니다 — [Apps Script 코드 복사] 로 새 코드(5판)를 붙여넣고 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 하세요', 'Apps Script là bản cũ — dán mã mới (bản 5) rồi Triển khai → Quản lý → Sửa → Phiên bản mới'),
+      OLD_SCRIPT: L('구글 Apps Script 가 옛 판입니다 — [Apps Script 코드 복사] 로 새 코드(6판)를 붙여넣고 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 하세요', 'Apps Script là bản cũ — dán mã mới (bản 6) rồi Triển khai → Quản lý → Sửa → Phiên bản mới'),
+      NO_SHEET: L('이 Apps Script 는 구글 시트 없이 만들어져서 시트에 쓸 수 없습니다 (자료 공유는 됩니다)', 'Apps Script này không gắn với Google Sheet nên không ghi lên Sheet được (dùng chung vẫn chạy)'),
+      OFF: L('공유가 꺼져 있습니다', 'Đang tắt dùng chung'),
       CID: L('다른 구글 저장소로 바뀌었습니다 (다른 Apps Script 주소) — 아래에서 다시 연결하세요', 'Đã đổi sang kho Google khác — hãy kết nối lại bên dưới'),
       BAD_URL: L('Apps Script 웹 앱 주소가 아닙니다 (https://script.google.com/macros/s/…/exec)', 'Không phải URL ứng dụng web Apps Script (https://script.google.com/macros/s/…/exec)'),
       NO_TOKEN: L('비밀 키(TOKEN)가 없습니다 — 먼저 [Apps Script 코드 복사] 를 누르세요', 'Chưa có khóa (TOKEN) — bấm [Sao chép mã Apps Script] trước'),
@@ -80,6 +82,7 @@
       case 'shrink': return L('크게 줄어든 표를 백업: ', 'Đã sao lưu bảng bị giảm nhiều: ') + label(x.n) + ' ' + F.n(x.from) + ' → ' + F.n(x.to);
       case 'lost': return L('이 PC 에서 없어진 표 파일을 구글 자료로 되살림: ', 'Đã khôi phục tệp bảng bị mất từ Google: ') + label(x.n);
       case 'err': return L('오류: ', 'Lỗi: ') + ERP.cloudMsg(x.code, x.detail);
+      case 'sheeterr': return L('구글 시트 갱신 오류: ', 'Lỗi cập nhật Google Sheet: ') + ERP.cloudMsg(x.code, x.detail);
       default: return String(e.k);
     }
   }
@@ -134,6 +137,7 @@
         r.backup ? h('p', { class: 'help' }, L('바꾸기 전 이 PC 자료 복사본: ', 'Bản sao dữ liệu máy này trước khi đổi: '), h('code', r.backup)) : null,
         s.code ? h('p', { class: 'warn-text' }, ERP.cloudMsg(s.code, s.error)) : null,
         mode === 'upload' || mode === 'overwrite' ? h('p', { class: 'help' }, L('이제 직원 PC 에서: ERP 를 설치하고, 이 카드의 [직원 PC 연결 코드] 를 직원 PC 의 "② 직원 PC" 칸에 붙여넣으면 됩니다.', 'Tiếp theo trên máy nhân viên: cài ERP, dán [Mã kết nối máy nhân viên] vào ô "② Máy nhân viên".')) : null,
+        s.sheet && s.sheet.has !== false && Number(s.sheet.ver) >= 6 ? h('p', { class: 'help' }, L('그 구글 시트에 표마다 탭이 생깁니다 (자료가 많으면 1~2분) — 시트에서는 보기만 하고, 고치는 것은 ERP 에서 합니다.', 'Google Sheet đó sẽ có mỗi bảng một tab (1–2 phút nếu nhiều dữ liệu) — chỉ xem trên Sheet, sửa trong ERP.')) : null,
         h('p', { class: 'help' }, L('휴대폰으로 보려면: 설정 → 휴대폰으로 보기에서 비밀번호를 정하세요.', 'Xem trên điện thoại: đặt mật khẩu ở Cài đặt → Xem trên điện thoại.'))),
       buttons: [{ label: L('확인 (화면 새로 고침)', 'OK (tải lại)'), kind: 'primary', onClick: () => { location.reload(); } }], onClose: () => location.reload() });
   }
@@ -153,6 +157,8 @@
     try { c = await api('/api/cloud/check', cfg); } catch (e) { res.replaceChildren(h('p', { class: 'warn-text' }, e.message)); e.shown = true; throw e; }
     const lc = c.local || { tables: 0, rows: 0 };
     const items = [h('div', { class: 'toolbar' }, ERP.chip('ok', L('연결됨', 'Đã kết nối')), h('span', { class: 'muted' }, 'Apps Script ' + c.ver + L('판', '') + (c.sheet ? ' · ' + c.sheet : '')))];
+    if (Number(c.ver) < 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 ' + c.ver + '판입니다 — 자료 공유는 되고, 구글 시트에서 표로 보려면 6판 코드로 바꾸세요 ([Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전).',
+      'Apps Script này là bản ' + c.ver + ' — dùng chung vẫn chạy; muốn xem bảng trên Google Sheet hãy đổi sang mã bản 6 ([Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới).')));
     if (c.resume) items.push(h('p', { class: 'help' }, L('이 PC 는 전에 이 구글 저장소와 공유했습니다. 다시 켜면 꺼 둔 동안 양쪽에서 바뀐 것을 합칩니다.', 'Máy này đã từng dùng chung với kho này. Bật lại sẽ gộp các thay đổi của cả hai bên.')),
       h('div', { class: 'toolbar' }, btn('primary', L('다시 켜기', 'Bật lại'), () => connect(cfg, 'resume'))));
     if (c.empty) {
@@ -213,6 +219,29 @@
     if (DB.mode !== 'server') { box.replaceChildren(title(), h('p', { class: 'help' }, L('여러 PC 자료 공유는 PC 설치형 ERP 에서만 됩니다 (지금은 브라우저 테스트 모드).', 'Chỉ có ở bản cài đặt trên PC (đang ở chế độ trình duyệt).'))); return box; }
     let t = null, shown = false;
     const load = () => api('/api/cloud').then(fill).catch(e => { box.replaceChildren(title(), h('p', { class: 'warn-text' }, e.message)); });
+    /** 6판: 구글 시트 (표 보기) — 그 Apps Script 의 시트에 표마다 탭. 링크 · 상태 · 쓰지 못한 표 · 다시 쓰기 */
+    function sheetPart(s) {
+      const g = s.sheet || {}, head = h('h4', L('구글 시트 (표 보기)', 'Google Sheet (xem bảng)'));
+      if (g.has === false) return h('div', { class: 'cloud-sheet' }, head, h('p', { class: 'help' }, L('이 Apps Script 는 구글 시트 없이 만들어져서 표 보기는 없습니다 (자료 공유는 그대로 됩니다). 표로 보려면 새 구글 시트 → 확장 프로그램 → Apps Script 에서 다시 만드세요.',
+        'Apps Script này không gắn với Google Sheet nên không có xem bảng (dùng chung vẫn chạy). Muốn xem bảng, hãy tạo lại từ Google Sheet mới → Tiện ích mở rộng → Apps Script.')));
+      if (g.ver !== null && g.ver !== undefined && Number(g.ver) < 6) return h('div', { class: 'cloud-sheet' }, head, h('p', { class: 'warn-text' }, L('구글 시트에서 표로 보려면 Apps Script 6판이 필요합니다 — [Apps Script 코드 복사] → Apps Script 편집기에 붙여넣기 → 저장 → 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 (주소는 그대로). 자료 공유는 지금도 됩니다.',
+        'Muốn xem bảng trên Google Sheet cần Apps Script bản 6 — [Sao chép mã Apps Script] → dán vào trình soạn thảo → Lưu → Triển khai → Quản lý → Sửa → Phiên bản mới (URL giữ nguyên). Dùng chung vẫn đang chạy.')));
+      const errN = Object.keys(g.errs || {}), lagN = (g.lag || []).length, unknown = g.ver === null || g.ver === undefined;   // 서버를 켜고 아직 한 판도 돌지 않음
+      const tone = g.code || errN.length ? 'bad' : g.busy ? 'info' : lagN ? 'warn' : unknown ? 'neutral' : 'ok';
+      const chip = g.code ? L('오류', 'Lỗi') : g.busy ? L('갱신 중…', 'Đang cập nhật…') : errN.length ? L('일부 표 오류', 'Lỗi một số bảng')
+        : lagN ? L('갱신 대기 ' + lagN + '표', 'Chờ cập nhật ' + lagN + ' bảng') : unknown ? L('확인 중…', 'Đang kiểm tra…') : L('최신', 'Mới nhất');
+      return h('div', { class: 'cloud-sheet' }, head,
+        h('div', { class: 'toolbar' }, ERP.chip(tone, chip),
+          g.url ? h('a', { href: g.url, target: '_blank', rel: 'noopener' }, (g.name || L('구글 시트', 'Google Sheet')) + ' ↗') : null,
+          g.at ? h('span', { class: 'muted' }, L('이 PC 가 마지막으로 갱신 ', 'Máy này cập nhật lần cuối ') + when(g.at)) : null),
+        g.code ? h('p', { class: 'warn-text' }, ERP.cloudMsg(g.code, g.error)) : null,
+        errN.length ? h('p', { class: 'warn-text' }, L('시트에 쓰지 못한 표: ', 'Bảng chưa ghi được lên Sheet: ') + errN.map(n => label(n) + ' (' + g.errs[n] + ')').join(', ')
+          + L(' — 자료는 ERP · 구글 드라이브에 그대로 있습니다. 그 표를 다시 저장하면 다시 씁니다.', ' — dữ liệu vẫn còn trong ERP · Google Drive. Lưu lại bảng đó sẽ ghi lại.')) : null,
+        h('p', { class: 'help' }, L('구글 시트에서는 보기만 하세요 — 표마다 탭 (ERP 화면과 같은 이름 · 머리글) 이 저장하고 30초 안팎에 저절로 바뀝니다 (큰 표는 1분쯤). 고치는 것은 ERP 에서 (시트에서 고친 것은 ERP 에 들어가지 않고 다음 갱신 때 바뀝니다).',
+          'Trên Google Sheet chỉ xem — mỗi bảng một tab (cùng tên · tiêu đề như ERP), tự cập nhật khoảng 30 giây sau khi lưu (bảng lớn khoảng 1 phút). Sửa trong ERP (sửa trên Sheet không vào ERP và sẽ bị ghi đè).')),
+        h('div', { class: 'toolbar' }, btn('sm', L('구글 시트 다시 쓰기', 'Ghi lại Google Sheet'), async () => {
+          const r = await api('/api/cloud/sheet', {}); ERP.toast(L('구글 시트를 ERP 자료로 다시 쓰는 중입니다 (표가 많으면 몇 분)', 'Đang ghi lại Google Sheet bằng dữ liệu ERP (có thể vài phút)'), 'ok'); fill(r); })));
+    }
     function onView(s) {
       const own = !!s.local;
       const tone = s.code ? 'bad' : s.busy ? 'info' : 'ok';
@@ -225,6 +254,7 @@
           h('dt', L('구글로 보냄', 'Gửi lên Google')), h('dd', when(s.lastSent)),
           h('dt', L('시작', 'Bắt đầu')), h('dd', when(s.since) + ' · ' + modeLabel(s.mode)),
           h('dt', L('웹 앱 주소', 'URL ứng dụng web')), h('dd', h('code', s.url || '–'))),
+        sheetPart(s),
         s.conflicts ? h('p', { class: 'help' }, L('두 PC 에서 같은 행을 거의 동시에 고친 것 ' + s.conflicts + '건은 나중에 맞춘 PC 의 내용으로 맞췄습니다.', 'Hai máy cùng sửa một dòng gần như cùng lúc: ' + s.conflicts + ' — giữ theo máy đồng bộ sau.')) : null,
         s.shrink && s.shrink.length ? h('p', { class: 'warn-text' }, L('다른 PC 에서 많이 지운 표가 있습니다: ', 'Có bảng bị xóa nhiều ở máy khác: ') + s.shrink.map(x => label(x.table) + ' ' + F.n(x.from) + ' → ' + F.n(x.to)).join(', ')
           + L(' — 지우기 전 자료는 데이터 폴더의 cloud_backup 에 복사해 두었습니다.', ' — dữ liệu trước khi xóa đã được sao chép vào cloud_backup.')) : null,
@@ -258,8 +288,9 @@
       box.replaceChildren(title());
       if (s.on) onView(s); else setupView(s);
       if (logOpen && box.querySelector('details.cloud-log')) box.querySelector('details.cloud-log').open = true;
-      // 켜져 있으면 상태를 다시 묻는다 (주고받는 중이면 자주) — 다른 화면으로 가면 그만
-      if (s.on) t = setTimeout(() => { if (box.isConnected && !box.querySelector('.cloud-again input:focus')) load(); }, s.busy ? 1500 : 10000);
+      // 켜져 있으면 상태를 다시 묻는다 (주고받는 중 · 시트 갱신 중이면 자주) — 다른 화면으로 가면 그만
+      const quick = s.busy || (s.sheet && (s.sheet.busy || s.sheet.queued));
+      if (s.on) t = setTimeout(() => { if (box.isConnected && !box.querySelector('.cloud-again input:focus')) load(); }, quick ? 1500 : 10000);
     }
     load();
     return box;
