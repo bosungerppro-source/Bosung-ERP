@@ -44,6 +44,12 @@ function fakeGh() {
     hits.push(q.url); const f = files.get(q.url);
     if (!f) { res.writeHead(404); return res.end('not found'); }
     if (f.redirect) { res.writeHead(302, { Location: f.redirect }); return res.end(); }
+    if (f.slow) {   // 1.13.4: 천천히 내보냄 (f.slow ms 동안 10번에 나눠 — 느린 인터넷)
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': f.body.length });
+      const n = 10, step = Math.ceil(f.body.length / n); let i = 0;
+      const tick = () => { if (i >= n) return res.end(); res.write(f.body.subarray(i * step, (i + 1) * step)); i++; setTimeout(tick, f.slow / n); };
+      return tick();
+    }
     res.writeHead(f.status || 200, { 'Content-Type': 'application/octet-stream' }); res.end(f.body);
   });
   return new Promise(r => srv.listen(0, '127.0.0.1', () => r({ base: 'http://127.0.0.1:' + srv.address().port + '/releases', files, hits, close: () => srv.close() })));
@@ -170,6 +176,16 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     const r8 = mk(gh, { ud: tmp('erp-v15-ud-') }); fs.mkdirSync(path.join(r8.ud, 'update'), { recursive: true });
     fs.writeFileSync(path.join(r8.ud, 'update', 'ColorPencil-ERP-Setup-1.9.9.exe'), 'x'); fs.writeFileSync(path.join(r8.ud, 'update', 'ColorPencil-ERP-Setup-1.9.9.exe.part'), 'x');
     ok('남은 설치 파일 · 받다 만 파일 → 켤 때 지움', r8.up.startup() === false && !updFiles(r8.ud).some(f => /\.exe/.test(f)), updFiles(r8.ud));
+    // 1.13.4 (GitHub "자동 업데이트 시험 (Windows)" 에서 드러남): 켠 지 30초에 다시 도는 정리가 받는 중인 .part 를 지워 받기가 실패했다 (받기가 30초를 넘으면 — 느린 인터넷)
+    const r10 = mk(gh, { ud: tmp('erp-v15-ud-') }); const rel10 = publish(gh, '1.10.5'); gh.files.get('/releases/download/v1.10.5/' + rel10.name).slow = 1500;
+    const ST = global.setTimeout; let sweep30 = null;
+    global.setTimeout = (fn, ms, ...a) => { if (ms === 30000 && !sweep30) { sweep30 = fn; return { unref() {} }; } return ST(fn, ms, ...a); };   // 켠 지 30초 정리를 붙잡아 받는 중에 부른다
+    try { r10.up.startup(); } finally { global.setTimeout = ST; }
+    const c10 = r10.up.check(); await sleep(400);
+    const midPart = updFiles(r10.ud).some(f => f.endsWith('.part')); if (sweep30) sweep30();
+    const s10 = await c10;
+    ok('받는 중에 켠 지 30초 정리가 돌아도 받던 파일은 그대로 → 받아 둠 (예전: .part 를 지워 ENOENT)', !!sweep30 && midPart && s10.state === 'ready' && !!s10.ready && s10.ready.version === '1.10.5' && fs.existsSync(path.join(r10.ud, 'update', rel10.name)),
+      { midPart, state: s10.state, error: s10.error, files: updFiles(r10.ud) });
     // 데이터 복사본은 최근 5개만
     let T = Date.parse('2026-10-21T08:00:00'); const r9 = mk(gh, { ud: tmp('erp-v15-ud-'), now: () => (T += 1000) });
     for (let i = 0; i < 7; i++) r9.up.backupData({ version: '1.10.1' });

@@ -160,8 +160,10 @@ function create(o) {
     return true;
   }
 
-  /** 받아 둔 것 말고 남은 설치 파일 지우기 (방금 끝난 설치 프로그램이 아직 열려 있어 못 지웠으면 30초 뒤 다시) */
+  /** 받아 둔 것 말고 남은 설치 파일 지우기 (방금 끝난 설치 프로그램이 아직 열려 있어 못 지웠으면 30초 뒤 다시).
+      1.13.4: 받는 중 (확인 · 받기가 도는 중) 이면 건드리지 않고 30초 뒤 다시 — 예전에는 받기가 켠 지 30초를 넘기면 받던 .part 를 지워 받기가 실패했다 */
   function sweep() {
+    if (busy) { const t = setTimeout(sweep, 30000); if (t.unref) t.unref(); return; }
     const p = readPending();
     try { for (const f of fs.readdirSync(dir)) if (/\.exe(\.part)?$/i.test(f) && !(p && f === p.file)) rm(path.join(dir, f)); } catch (e) { /* 폴더 없음 */ }
   }

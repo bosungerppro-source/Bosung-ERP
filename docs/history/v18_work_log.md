@@ -168,4 +168,15 @@
 - 설치 파일 `ColorPencil-ERP-Setup-1.13.4.exe`: 114,192,990 bytes, SHA-256 `091fab54334a973835035163c3010e59f87060179541451f9734f7f7651af8fb`. app.asar 에 `app/js/merge.js` · index.html 순서 (merge.js → db.js) · cloudsync 가 merge.js 를 씀 · db.js 가 `ERP.merge` · `ONLY_HERE` · 하루 한 번 정리 · 버전 1.13.4 확인, asar 안의 merge.js 를 불러 써 봄.
 - 실행 폴더 (`dist/win-unpacked`) 를 빈 시험 데이터 폴더 (`ERP_USER_DATA_DIR`) 로 켜 봄: 서버 응답 · `/js/merge.js` · `/api/cloud` · 화면이 예시 자료를 저장 (표 27개, 수주 521행) → 창 닫기로 끝남. 시험 폴더는 지움.
 - 데모 `ERP_Demo.html`: 7,883,051 bytes, SHA-256 `6986d459fdd596e410c9f4d26e3e27bf5e62d285c3b1874169b6ed3368416b56`.
-- 사용자가 할 일: GitHub Actions → "Release — 설치 파일" → 1.13.4 (1.13.3 을 아직 안 했으면 1.13.4 만 하면 됨 — 1.13.3 의 고침이 모두 들어 있음). Apps Script 는 7판 그대로 (1.13.3 에서 바꾸지 않았으면 7판으로 다시 배포).
+- 사용자가 할 일: GitHub Actions → "Release — 설치 파일" → 1.13.4 (1.13.3 을 아직 안 했으면 1.13.4 만 하면 됨 — 1.13.3 의 고침이 모두 들어 있음). Apps Script 는 7판 그대로 (1.13.3 에서 바꾸지 않았으면 7판으로 다시 배포). → 올린 뒤 GitHub "자동 업데이트 시험 (Windows)" 이 실패해 1.13.5 에서 고침 — Release 는 1.13.5 로.
+
+## 1.13.5 (2026-10-24) — 자동 업데이트: 받는 중에 남은 설치 파일 정리가 받던 파일을 지움
+- 1.13.4 (`9434387`) 를 올린 뒤 GitHub Actions "자동 업데이트 시험 (Windows)" 실패 (1.13.3 까지는 통과). 공개 check-runs API 의 오류 표시: "A 가 켜져서 B 를 받아 둠 → error `ENOENT: … rename '…\update\ColorPencil-ERP-Setup-1.13.104.exe.part' -> '…exe'`", 그 뒤 단계는 이것 때문에 줄줄이 시간 초과 (B 를 못 받은 채 다음 단계로 — 두 번째 켤 때 받아 둔 B 가 다음 단계의 A 를 B 로 바꿈).
+- 원인: `electron/updater.js` 의 `startup()` 은 켤 때 남은 설치 파일을 지우고 (`sweep`) 30초 뒤 한 번 더 지운다 (끝난 설치 프로그램이 아직 열려 있어 못 지운 것). 이때 받는 중이던 `.part` 도 "남은 파일" 로 보고 지워, 받기 마지막의 이름 바꾸기가 ENOENT. 받기가 켠 지 30초를 넘길 때만 생긴다 — 시험은 첫 확인을 1.5초로 앞당기고 (`ERP_UPDATE_FIRST_CHECK`) 114MB 를 받아 늘 아슬아슬했다 (Windows 의 실행 파일 검사 등으로 느리면 넘김). 보통 PC 는 첫 확인이 켠 지 1분 뒤라 30초 정리와 겹치지 않고, 켜자마자 [업데이트 확인] 을 누르고 받기가 30초를 넘길 때만 생긴다. 15차 (1.10.0) 부터 있던 것 — 1.13.4 의 바뀐 코드 (합치기 · 오류 글 · 폴더) 와는 상관없다.
+- 재현 시험 (v15 4장): 가짜 Release 가 설치 파일을 1.5초 동안 천천히 보내게 하고 (`slow`), 켤 때의 30초 정리를 붙잡아 받는 중에 부름 → 고치기 전 `state: error, ENOENT … rename …1.10.5.exe.part` (CI 와 같은 오류), 1개 실패.
+- 고침: `sweep()` 은 확인 · 받기가 도는 중 (`busy`) 이면 건드리지 않고 30초 뒤 다시. 받기 자체가 시작할 때 다른 옛 설치 파일은 지우므로 정리는 그대로 된다.
+- 시험: v15 159개 (+1). 문서: `PROMPT_v15_UPDATE_MOBILE.md` 2-2 · `CLAUDE_PROMPT.md` 2-14. 버전 1.13.5.
+- 전체 (이 PC, Windows, 2026-10-24): v18 184 · v17 67 · v16 86 · v15 159 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.4 `9434387`) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음), 현장 엑셀 인식.
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.5.exe`: 114,207,769 bytes, SHA-256 `0b6a3519048bb276d1cb2f628dfe0839813c7361cdf6e7e4802b67a2f425bc2f`. app.asar 에 고친 updater.js (받는 중이면 정리 미룸) · 1.13.3 · 1.13.4 의 고침 · 버전 1.13.5 확인. 실행 폴더를 빈 시험 데이터로 켜 봄: 서버 · 업데이트 상태 (`1.13.5 · idle`) · 화면이 예시 자료 저장 (표 27개) → 창 닫기로 끝남.
+- 데모 `ERP_Demo.html`: 7,883,051 bytes, SHA-256 `aa7d7dadfef0afdf13d4f13a9d746b244a390cbc57e2c3aa0a1b201c6528c445`.
+- 사용자가 할 일: GitHub Actions → "Release — 설치 파일" → **1.13.5** (1.13.3 · 1.13.4 의 고침이 모두 들어 있음). Apps Script 는 7판 (아직 6판이면 [Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전).

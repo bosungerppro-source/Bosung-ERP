@@ -238,7 +238,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 
 **규칙 (이후 버전에서도 지킬 것)**
 - **Release = 모든 PC 배포**: Release 워크플로가 설치 파일과 함께 `latest.json` `{version, file, sha256, size}` 를 올리고, 1.10.0 이상이 설치된 PC 는 `<releases>/latest/download/latest.json` 을 보고 자동 업데이트한다. main 버전의 Release 만 latest. latest.json 이름 · 형식 · 설치 파일 이름 규칙(`ColorPencil-ERP-Setup-<버전>.exe`)을 바꾸지 않는다.
-- **자동 업데이트** (`electron/updater.js`): 켠 뒤 1분 · 4시간마다 확인 → 받기 (크기 · SHA-256) → **다음에 켤 때** 또는 **[지금 업데이트]** 로 설치. 일하는 중에 저절로 다시 시작하지 않는다. 설치 전 데이터 폴더 복사 (`update_backup`, 최근 5). 같은 설치가 두 번 안 되면 저절로 다시 하지 않음. 설치형(Windows · packaged)만 설치. 설정 `config.json` `autoUpdate`.
+- **자동 업데이트** (`electron/updater.js`): 켠 뒤 1분 · 4시간마다 확인 → 받기 (크기 · SHA-256) → **다음에 켤 때** 또는 **[지금 업데이트]** 로 설치. 일하는 중에 저절로 다시 시작하지 않는다. 설치 전 데이터 폴더 복사 (`update_backup`, 최근 5). 같은 설치가 두 번 안 되면 저절로 다시 하지 않음. 설치형(Windows · packaged)만 설치. 설정 `config.json` `autoUpdate`. 남은 설치 파일 정리는 받는 중이면 미룬다 (1.13.5 — 받던 `.part` 를 지우지 않게).
 - **설치 프로그램 `/UPDATE`**: 진행 막대만 · ERP 가 닫히기를 30초 기다림 · 끝나면 ERP 다시 켬 · 바탕화면 바로가기를 다시 만들지 않음. ERP 는 `/UPDATE /D=<설치 폴더>` 로 부른다 (`/D=` 는 맨 끝 · 따옴표 없음 → `windowsVerbatimArguments`).
 - **업데이트 API**: `GET /api/update` (보기 — 다른 PC 도), `PUT /api/update` · `POST /api/update/check` · `POST /api/update/install` 은 loopback 만.
 - **휴대폰 (공장 Wi-Fi)**: 사내망 접속 그대로. 화면은 휴대폰 폭(390)에서 옆으로 밀리지 않게 만든다 — 새 화면 · 카드를 만들면 `npm run test:v15` 의 휴대폰 폭 시험에 넣는다 (`white-space: nowrap` 은 좁은 화면에서 풀리게, 넓은 표는 `.tbl-wrap` 안에서 옆으로). 900px 이하는 메뉴를 [☰] 로 접는다.
@@ -281,7 +281,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 - **종합 현황 기본 배치 = 사용자 배치 (1.12.5, 사용자 "이순서대로 하고 이게 기본세팅이야")**: 이번 달 포장 누계 · 신규 수주 · 수주량 · 조립 재고 (한 줄) → 월별 수주량 (차트 · 4칸) · 공정별 실적 (4칸) · 월별 조립 생산량 (조립 · 차트 · 4칸). 안전재고 미달 · 일별 조립 등 예전 기본 위젯은 "+ 위젯 추가" 에서. 15차의 "기본 배치에서 asm_daily 다음" 은 예전 기본 배치 이야기다. 기본 배치를 다시 바꾸려면 사용자에게 묻는다.
 - 시험: `npm run test:v17` 67개 + v16 · v15 · v14 · v13 · v12 · v11 · v9 · v8 · v7 · assistant.
 
-### 2-17. 18차: 여러 PC 자료 공유 — 구글 드라이브 (v1.13.0 ~ 1.13.4, 2026-10-22 ~ 24)
+### 2-17. 18차: 여러 PC 자료 공유 — 구글 드라이브 (v1.13.0 ~ 1.13.5, 2026-10-22 ~ 24)
 자세한 요청 · 결정은 `docs/PROMPT_v18_CLOUD.md`, 작업 기록은 `docs/history/v18_work_log.md`.
 
 **규칙 (이후 버전에서도 지킬 것)**
