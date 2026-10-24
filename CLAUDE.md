@@ -45,6 +45,8 @@ npm run dist                                # dist/win-unpacked + 설치 파일 
 - 새 화면: `app/js/p_*.js` 에서 `ERP.pages.<id>` 등록 → `main.js` NAV.
 - 날짜 · 숫자를 사용자 입력이나 엑셀에서 읽을 때는 공용 해석 함수(`ERP.fmt.parseDate`, `ERP.fmt.parseNum`)를 쓴다.
 - 표를 바꿀 때는 `DB.add / update / remove / replace / upsert / touch` 를 쓴다 (여러 PC 저장 합치기가 행 `_id` 와 저장 번호에 기댐). 서버 쓰기 API 는 JSON 만.
+- 행 합치기 (3-way merge) · 행 지문 · `_id` 맞추기는 `app/js/merge.js` 하나 — 화면 (`db.js`) 과 서버 (`cloudsync.js`) 가 같이 쓴다 (1.13.4). 규칙을 바꿀 때는 여기만 고치고, 두 곳에 따로 만들지 않는다.
+- 서버가 화면에 그대로 보내는 오류 글은 `'한국어 / Tiếng Việt'` 로 쓴다 (화면 글자 규칙과 같음).
 - AI 비서 대화 기록은 뒤에 붙이기만 한다 (중간 수정 · 삭제, 대화 중 시스템 프롬프트 · 도구 변경 금지).
 - 고칠 때는 재현 시험을 먼저 만들고(고치기 전 실패 확인) 고친다.
 

@@ -32,49 +32,14 @@
   }
   function idbClear(db) { return new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).clear(); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
 
-  // ---------- 행 지문 · 3-way merge (서버 모드) ----------
-  /** 53-bit string hash (cyrb53) — a row's fingerprint is the hash of its JSON */
-  function hash(s) {
-    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-    for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
-    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
-  }
-  const sigOf = (r) => hash(JSON.stringify(r));
-  const sigMap = (rows) => { const m = new Map(); rows.forEach(r => m.set(r._id, sigOf(r))); return m; };
+  // ---------- 행 지문 · 3-way merge (서버 모드) — 1.13.4: 규칙은 app/js/merge.js 하나 (서버 cloudsync.js 와 같은 코드) ----------
+  const MG = ERP.merge;
+  const hash = MG.hash, sigOf = MG.sig, ensureIds = MG.ensureIds, sigMap = (rows) => MG.sigMap(rows);
   const uid = () => ERP.fmt.uid() + Math.random().toString(36).slice(2, 5);
-  /** _id 가 없는 행(손으로 고친 파일): 같은 내용이면 어느 PC 에서나 같은 id → 합칠 때 맞춰진다 */
-  function ensureIds(rows) { let n = 0; rows.forEach((r, i) => { if (r && typeof r === 'object' && !r._id) { r._id = 'x' + hash(JSON.stringify(r)).toString(36) + '_' + i; n++; } }); return n; }
   /** l 을 r 과 같게 만든다 — 객체는 그대로 두고(열린 편집 창이 행 객체를 들고 있음) 키 순서까지 r 과 같게(지문이 같도록) */
   function syncInto(l, r) { Object.keys(l).forEach(k => { delete l[k]; }); return Object.assign(l, r); }
-  /** base = 마지막으로 서버와 맞춘 행 지문(_id → 지문), local = 이 PC, remote = 지금 서버.
-      한쪽만 바꾼 행은 바꾼 쪽, 둘 다 고친 행은 이 PC 내용(conflicts), 한쪽이 지우고 다른 쪽이 고친 행은 고친 행을 남긴다. */
-  function merge3(base, local, remote) {
-    const lm = new Map(); local.forEach(r => lm.set(r._id, r));
-    const rIds = new Set(); const out = []; let conflicts = 0, changed = 0;
-    remote.forEach(r => {
-      const id = r._id; rIds.add(id); const b = base.get(id); const l = lm.get(id);
-      if (!l) {
-        if (b === undefined) { out.push(r); changed++; return; }       // 다른 PC 가 더함
-        if (sigOf(r) === b) return;                                    // 이 PC 가 지움
-        conflicts++; changed++; out.push(r); return;                   // 이 PC 는 지웠는데 다른 PC 가 고침 → 고친 행을 남김
-      }
-      if (b === undefined) { out.push(l); return; }
-      const ls = sigOf(l);
-      if (ls === b) { if (sigOf(r) !== b) { syncInto(l, r); changed++; } out.push(l); return; }   // 이 PC 는 그대로 → 서버 내용
-      const rs = sigOf(r); if (rs !== b && rs !== ls) conflicts++;      // 둘 다 고침 → 이 PC 내용
-      out.push(l);
-    });
-    local.forEach(l => {
-      if (rIds.has(l._id)) return;
-      const b = base.get(l._id);
-      if (b === undefined) { out.push(l); return; }                    // 이 PC 가 더함
-      if (sigOf(l) !== b) { conflicts++; out.push(l); return; }        // 다른 PC 는 지웠는데 이 PC 가 고침 → 남김
-      changed++;                                                       // 다른 PC 가 지움
-    });
-    return { rows: out, conflicts, changed };
-  }
+  /** base = 마지막으로 서버와 맞춘 행 지문(_id → 지문), local = 이 PC, remote = 지금 서버. 다른 PC 가 고친 행은 같은 객체를 고쳐 쓴다 (syncInto) */
+  const merge3 = (base, local, remote) => MG.merge3(base, local, remote, { adopt: syncInto });
   const jsonMap = (o) => { const m = {}; Object.keys(o || {}).forEach(k => { if (o[k] !== undefined) m[k] = JSON.stringify(o[k]); }); return m; };
 
   const DB = ERP.db = {
@@ -270,7 +235,7 @@
         for (let k = 0; k < 6; k++) {
           // 보낸 내용의 행 지문 = 저장에 성공하면 새 기준(_base)
           const rows = DB.rows(n); const sigs = new Map(); const parts = new Array(rows.length);
-          for (let i = 0; i < rows.length; i++) { const s = JSON.stringify(rows[i]); parts[i] = s; sigs.set(rows[i]._id, hash(s)); }
+          for (let i = 0; i < rows.length; i++) { const s = JSON.stringify(rows[i]); parts[i] = s; sigs.set(String(rows[i]._id), hash(s)); }
           const r = await fetch('/api/t/' + n, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Base-Ver': String(DB.sver[n] || 0) }, body: '[' + parts.join(',') + ']' });
           if (r.status === 409) { const j = await r.json(); DB._absorb(n, Array.isArray(j.rows) ? j.rows : [], j.ver || 0); continue; }   // 다른 PC 가 먼저 저장 → 합쳐서 다시
           if (r.status === 401) { DB._needLogin(); throw new Error('LOGIN'); }

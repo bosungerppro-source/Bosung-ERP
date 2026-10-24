@@ -23,7 +23,7 @@
 | `docs/PROMPT_v15_UPDATE_MOBILE.md` | 15차 개정 프롬프트 (자동 업데이트: GitHub Release 의 latest.json → 받아 두고 다음에 켤 때 설치 · 휴대폰으로 보기: 공장 Wi-Fi QR · 구글 웹 앱 요약) |
 | `docs/PROMPT_v16_BUY.md` | 16차 개정 프롬프트 (해외 주문 품목: 자재구매 파일 → 안전재고 · 원부자재 재고의 해외 주문 탭 · 파일과 같은 표 · 리드타임 · 주문) |
 | `docs/PROMPT_v17_PIVOT.md` | 17차 개정 프롬프트 (현장 재고 위 = 피벗 표: 기본 조립 · 품목군 | 현재 재고, 표마다 공정 · 행 · 열 설정) |
-| `docs/PROMPT_v18_CLOUD.md` | 18차 개정 프롬프트 (여러 PC 자료 공유 — 구글 드라이브: PC 마다 ERP 가 바뀐 표만 주고받고 행 단위로 합침, Code.gs 5판 · 1.13.2 6판 구글 시트 표 보기 · 1.13.3 7판 보안 · 안정 고침) |
+| `docs/PROMPT_v18_CLOUD.md` | 18차 개정 프롬프트 (여러 PC 자료 공유 — 구글 드라이브: PC 마다 ERP 가 바뀐 표만 주고받고 행 단위로 합침, Code.gs 5판 · 1.13.2 6판 구글 시트 표 보기 · 1.13.3 7판 보안 · 안정 고침 · 1.13.4 합치기 코드 하나 `app/js/merge.js`) |
 | `docs/GUIDE_EXCEL_DATES.md` | **현장 일보 엑셀 날짜 칸 입력 안내** (한국어 · 베트남어, 반장 확인표 포함) |
 | `docs/history/` | 차수별 작업 기록 |
 | `app/` `server.js` `electron/` | 소스 코드 (비서: `app/js/assistant*.js`) |

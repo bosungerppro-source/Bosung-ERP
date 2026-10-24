@@ -2,7 +2,7 @@
 /* 18차(v1.13.0) 여러 PC 자료 공유 — 구글 드라이브 (Apps Script 웹 앱 google/Code.gs 5판)
    PC 마다 ERP 서버(이 파일)가 구글 쪽과 표를 주고받는다 — 화면이 아니라 서버가 하므로 화면 · 사내망 브라우저가 몇 개든 하나만 돈다.
    - 구글 쪽: 표마다 드라이브 파일 하나 (gzip + base64) 와 저장 번호. cloud_info(번호만) → 바뀐 표만 cloud_get / cloud_put.
-   - 합치기: 행 _id 와 지문(cyrb53, 화면 db.js 와 같음)으로 3-way merge. 기준 = 마지막으로 구글과 맞춘 행 지문 (<data>/cloud/<표>.json).
+   - 합치기: 행 _id 와 지문(cyrb53)으로 3-way merge — 화면 db.js 와 같은 app/js/merge.js. 기준 = 마지막으로 구글과 맞춘 행 지문 (<data>/cloud/<표>.json).
      한쪽만 바꾼 행은 바꾼 쪽, 둘 다 고친 행은 이 PC 내용 (= 나중에 맞춘 PC 가 남음), 한쪽이 지우고 다른 쪽이 고친 행은 남긴다.
    - 설정(meta)은 항목별로 합친다. 이 PC 에만 두는 항목(LOCAL_META)은 주고받지 않는다.
    - 언제: 30초마다 · 이 PC 에서 저장한 뒤 3초 · ERP 를 끄기 전 (electron/main.js). 그 사이 다른 PC 가 먼저 올렸으면(conflicts) 받아서 다시 합친다.
@@ -26,52 +26,17 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{16,128}$/;
 const BATCH = 20e6;                    // 한 번에 주고받는 글자 수 (Apps Script 요청 · 응답 크기)
 const MODES = ['upload', 'replace', 'merge', 'overwrite', 'resume'];
 
-/** db.js 와 같은 53-bit 지문 (cyrb53) */
-function hash(s) {
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
-}
+// 1.13.4: 행 합치기 · 지문 · _id 맞추기 = app/js/merge.js 하나 (화면 db.js 와 같은 코드 — 예전에는 따로 있어 조금씩 달라졌다)
+const MG = require('./app/js/merge.js');
+const hash = MG.hash, ensureIds = MG.ensureIds;
 const SIG = new WeakMap();   // 행은 읽은 뒤 바꾸지 않는다 → 지문을 한 번만 계산
-const sigOf = (r) => { let s = SIG.get(r); if (s === undefined) { s = hash(JSON.stringify(r)); SIG.set(r, s); } return s; };
+const sigOf = (r) => { let s = SIG.get(r); if (s === undefined) { s = MG.sig(r); SIG.set(r, s); } return s; };
 const jsig = (v) => hash(JSON.stringify(v));
-/** _id 가 없는 행: 화면(db.js ensureIds)과 같은 id → 어느 PC 에서나 같은 행. 같은 _id 가 또 나오면 뒤의 것은 _id~순번 (합칠 때 행이 사라지지 않게) */
-function ensureIds(rows) {
-  const seen = new Set();
-  rows.forEach((r, i) => { if (!r._id) r._id = 'x' + hash(JSON.stringify(r)).toString(36) + '_' + i; else if (seen.has(r._id)) r._id = String(r._id) + '~' + i; seen.add(r._id); });
-  return rows;
-}
 const rowsOf = (v) => (Array.isArray(v) ? v.filter(r => r && typeof r === 'object' && !Array.isArray(r)) : []);
-const sigMap = (rows) => { const m = new Map(); rows.forEach(r => m.set(String(r._id), sigOf(r))); return m; };   // 기준 파일(JSON)의 키는 글자
+const sigMap = (rows) => MG.sigMap(rows, sigOf);   // 기준 파일(JSON)의 키는 글자
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-
-/** base = 마지막으로 구글과 맞춘 행 지문(_id → 지문), local = 이 PC, remote = 지금 구글. db.js merge3 와 같은 규칙 */
-function merge3(base, local, remote) {
-  const lm = new Map(); local.forEach(r => lm.set(r._id, r));
-  const rIds = new Set(); const out = []; let conflicts = 0;
-  remote.forEach(r => {
-    const id = r._id; rIds.add(id); const b = base.get(String(id)); const l = lm.get(id);
-    if (!l) {
-      if (b === undefined) { out.push(r); return; }              // 다른 PC 가 더함
-      if (sigOf(r) === b) return;                                 // 이 PC 가 지움
-      conflicts++; out.push(r); return;                           // 이 PC 는 지웠는데 다른 PC 가 고침 → 고친 행을 남김
-    }
-    const ls = sigOf(l);
-    if (b === undefined) { if (ls !== sigOf(r)) conflicts++; out.push(l); return; }   // 양쪽에 같은 _id 가 새로 생김 → 이 PC
-    if (ls === b) { out.push(r); return; }                        // 이 PC 는 그대로 → 구글 내용
-    const rs = sigOf(r); if (rs !== b && rs !== ls) conflicts++;  // 둘 다 고침 → 이 PC 내용
-    out.push(l);
-  });
-  local.forEach(l => {
-    if (rIds.has(l._id)) return;
-    const b = base.get(String(l._id));
-    if (b === undefined) { out.push(l); return; }                 // 이 PC 가 더함
-    if (sigOf(l) !== b) { conflicts++; out.push(l); }             // 다른 PC 는 지웠는데 이 PC 가 고침 → 남김
-  });                                                             // 그 밖: 다른 PC 가 지움
-  return { rows: out, conflicts };
-}
+/** base = 마지막으로 구글과 맞춘 행 지문(_id → 지문), local = 이 PC, remote = 지금 구글 → {rows, conflicts, changed} (규칙은 merge.js) */
+const merge3 = (base, local, remote) => MG.merge3(base, local, remote, { sig: sigOf });
 function sameRows(a, b) { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i]._id !== b[i]._id || sigOf(a[i]) !== sigOf(b[i])) return false; return true; }
 const sameAsBase = (rows, base) => rows.length === base.size && rows.every(r => base.get(String(r._id)) === sigOf(r));
 
@@ -409,12 +374,13 @@ function create(o) {
       at: st.sheetAt, code: sh.code, error: sh.error, lag: sh.lag.slice(), errs: Object.assign({}, sh.errs), wrote: sh.wrote.slice() };
   }
 
-  /** 아직 구글에 보내지 않은 이 PC 의 변경이 있는가 */
+  /** 아직 구글에 보내지 않은 이 PC 의 변경이 있는가 — 1.13.4: 표 폴더를 읽지 않고 저장 번호 (versions.json) 로 본다 (상태를 물을 때마다 폴더를 훑지 않게).
+      ERP 가 쓴 표는 모두 저장 번호가 있다. 밖에서 넣은 표 파일은 다음 판 (localNames) 이 맞춘다 */
   function pending() {
     if (!st.on) return false;
     const v = store.versions();
     if (!st.m || (v.meta || 0) !== st.m.lv) return true;
-    return localNames().some(n => !st.t[n] || st.t[n].lv !== (v.t[n] || 0));
+    return Object.keys(v.t).some(n => n !== META && NAME_RE.test(n) && (!st.t[n] || st.t[n].lv !== (v.t[n] || 0)));
   }
 
   // ---- 처음 연결

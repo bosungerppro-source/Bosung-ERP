@@ -32,16 +32,22 @@ function createStore(dataDir) {
     fs.writeFileSync(tmp, data);
     fs.renameSync(tmp, file);
   }
+  // 1.13.4: 하루 백업 · 14일 정리는 그날 처음 한 번만 확인한다 (예전에는 저장할 때마다 백업 폴더를 훑음)
+  let backupDay = null, prunedDay = null; const backedUp = new Set();
   function backupOnce(name) {
     // keep one copy of each table per day (first write of the day), 14 days retained
-    const d = path.join(bdir, today());
+    const day = today(); if (backupDay !== day) { backupDay = day; backedUp.clear(); }
+    if (backedUp.has(name)) return;
     const src = path.join(tdir, name + '.json');
     if (!fs.existsSync(src)) return;
+    const d = path.join(bdir, day);
     fs.mkdirSync(d, { recursive: true });
     const dst = path.join(d, name + '.json');
     if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    backedUp.add(name);
   }
   function prune() {
+    const day = today(); if (prunedDay === day) return; prunedDay = day;
     try {
       const days = fs.readdirSync(bdir).filter(x => /^\d{4}-\d\d-\d\d$/.test(x)).sort();
       while (days.length > 14) fs.rmSync(path.join(bdir, days.shift()), { recursive: true, force: true });
@@ -129,6 +135,8 @@ const googleUrlOk = (url, re) => { try { const u = new URL(url); return re ? re.
     다른 PC 브라우저의 구글 요청(gproxy)은 서버가 키를 넣어, 연결된 웹 앱 주소로만 보낸다 */
 const OWNER_META = ['gUrl', 'gToken'], SECRET_META = ['gToken'];
 const metaFor = (m, loop) => { if (loop) return m; const o = Object.assign({}, m); SECRET_META.forEach(k => { delete o[k]; }); return o; };
+/** 화면에 그대로 보이는 서버 오류 글 = 한국어 / 베트남어 (화면 글자 규칙과 같음, 1.13.4) */
+const ONLY_HERE = 'ERP 가 실행 중인 PC 에서만 됩니다 / Chỉ làm được trên máy đang chạy ERP.';
 
 /** 매일 자동 백업: 지정한 폴더(USB · NAS · 구글 드라이브 동기화 폴더)에 전체 JSON + (선택) 구글 드라이브에 압축본 */
 function createBackup(dataDir, store, googleHosts, doFetch) {
@@ -327,14 +335,14 @@ function start(opts) {
     }
     // ---- 사내망 PIN · 자동 백업 설정 (ERP 가 실행 중인 PC 에서만) ----
     if (p === '/api/lan/pin' && req.method === 'PUT') {
-      if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
+      if (!loop) return send(403, { error: ONLY_HERE });
       const b = JSON.parse(await readBody(req, 1e4)); const pin = String(b.pin || '').trim();
-      if (pin && !/^\d{4,12}$/.test(pin)) return send(400, { error: 'PIN = 4~12 digits / 4~12 chữ số' });
+      if (pin && !/^\d{4,12}$/.test(pin)) return send(400, { error: 'PIN 은 숫자 4~12자리입니다 / Mã PIN gồm 4~12 chữ số' });
       auth.setPin(pin); return send(200, { ok: true, hasPin: auth.hasPin() });
     }
     if (p === '/api/backup' && req.method === 'GET') return send(200, backup.cfg());
     if (p === '/api/backup' && req.method === 'PUT') {
-      if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
+      if (!loop) return send(403, { error: ONLY_HERE });
       try { return send(200, backup.set(JSON.parse(await readBody(req, 1e5)))); } catch (e) { return send(400, { error: e.message }); }
     }
     if (p === '/api/backup/run' && req.method === 'POST') return send(200, await backup.run());
@@ -345,7 +353,7 @@ function start(opts) {
       try { await cloud.sheetNow(true); return send(200, Object.assign(cloud.status(), { local: loop })); } catch (e) { return send(e.code ? 400 : 500, { code: e.code || 'ERR', error: e.detail || e.message }); }
     }
     if (p.startsWith('/api/cloud/')) {
-      if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
+      if (!loop) return send(403, { error: ONLY_HERE });
       if (req.method !== 'POST') return send(404, { error: 'unknown api' });
       let b; try { b = JSON.parse(await readBody(req, 1e6) || '{}'); } catch (e) { return send(400, { code: 'BAD_JSON', error: e.message }); }
       try {
@@ -361,7 +369,7 @@ function start(opts) {
     if (p === '/api/update' && req.method === 'GET') return send(200, up ? Object.assign(up.status(), { desktop: true, local: loop }) : { desktop: false, local: loop });
     if (p === '/api/update' || p.startsWith('/api/update/')) {
       if (!up) return send(404, { error: 'not desktop' });
-      if (!loop) return send(403, { error: 'Only on the PC that runs the ERP. / Chỉ trên máy đang chạy ERP.' });
+      if (!loop) return send(403, { error: ONLY_HERE });
       const out = (s) => send(200, Object.assign(s, { desktop: true, local: true }));
       if (p === '/api/update' && req.method === 'PUT') { const b = JSON.parse(await readBody(req, 1e4) || '{}'); return out(b.auto === undefined ? up.status() : up.setAuto(!!b.auto)); }
       // 확인은 길어도 몇 초만 기다린다 — 받기(설치 파일)는 뒤에서 이어지고 화면은 상태를 다시 묻는다
@@ -387,7 +395,7 @@ function start(opts) {
     };
     if (p === '/api/ai/config' && req.method === 'GET') return send(200, cfgOut(aiCfg()));
     if (p === '/api/ai/config' && req.method === 'PUT') {
-      if (!loop) return send(403, { error: 'The API key can only be changed on the PC that runs the ERP. / Chỉ đổi API key trên máy đang chạy ERP.' });
+      if (!loop) return send(403, { error: 'API 키는 ERP 가 실행 중인 PC 에서만 바꿀 수 있습니다 / Chỉ đổi API key trên máy đang chạy ERP.' });
       const b = JSON.parse(await readBody(req, 1e5)); const c = aiCfg();
       if (typeof b.key === 'string') { if (b.key.trim()) c.key = b.key.trim(); else delete c.key; }
       if (b.model) c.model = String(b.model).trim();
@@ -413,7 +421,7 @@ function start(opts) {
     }
     if (p === '/api/gproxy' && req.method === 'POST') {
       const { url, body } = JSON.parse(await readBody(req, 100e6));
-      if (!googleUrlOk(url, opts.googleHosts)) return send(400, { error: 'only Google Apps Script URLs are allowed' });
+      if (!googleUrlOk(url, opts.googleHosts)) return send(400, { error: '구글 Apps Script 웹 앱 주소만 됩니다 / Chỉ nhận URL ứng dụng web Google Apps Script' });
       let out = typeof body === 'string' ? body : JSON.stringify(body);
       // 1.13.3: 키 없이 온 요청 (사내망의 다른 PC 브라우저 — 키를 받지 않음) 은 연결된 웹 앱 주소일 때만 서버가 키를 넣는다
       const gm = store.readMeta();

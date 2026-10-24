@@ -1,9 +1,9 @@
-; ColorPencil ERP - Windows installer (NSIS 3, Unicode). Compile: makensis -DVERSION=1.13.3 build/installer.nsi
+; ColorPencil ERP - Windows installer (NSIS 3, Unicode). Compile: makensis -DVERSION=1.13.4 build/installer.nsi
 ; 15차(v1.10.0): /UPDATE = ERP 자동 업데이트가 실행 — 첫 화면 · 폴더 · 마침 화면 없이 진행 막대만, ERP 가 닫히기를 기다리고, 끝나면 ERP 를 다시 켠다.
 ;   ERP 는 "ColorPencil-ERP-Setup-<버전>.exe /UPDATE /D=<지금 설치 폴더>" 로 실행한다 (/D= 는 NSIS 규칙대로 맨 끝 · 따옴표 없음)
 Unicode true
 !ifndef VERSION
-  !define VERSION "1.13.3"
+  !define VERSION "1.13.4"
 !endif
 !define APPNAME "ColorPencil ERP"
 !define EXENAME "ColorPencil ERP.exe"

@@ -134,3 +134,38 @@
 - 설치 파일 `ColorPencil-ERP-Setup-1.13.3.exe`: 114,299,010 bytes, SHA-256 `f0624825a131d1ed111bbc0220af1e400d1a0eafeb15ac2407c00cca319a4a51`. app.asar 에 7판 Code.gs (`CLOUD_VER_ = 7` · 휴대폰 열쇠) · server.js (`metaFor` · `OWNER_META`) · cloudsync.js (`known` · `SHEET_RETRY`) · cloud.js (7판 안내) · p_data.js (주소 · 키 잠금) · 버전 1.13.3 확인.
 - 데모 `ERP_Demo.html`: 7,880,556 bytes, SHA-256 `dc4c0fbd164ee1463b21be3d6e3ce76361a570c1c116b411b9f81f0ae24953a6`.
 - 사용자가 할 일: GitHub Actions → "Release — 설치 파일" → 1.13.3 (모든 PC 자동 업데이트), 구글 Apps Script 7판 다시 배포 ([Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전, 주소 그대로).
+- GitHub Actions "자동 업데이트 시험 (Windows)" 성공 (2026-10-24, `f8b1c0a`).
+
+## 1.13.4 (2026-10-24) — 정리: 합치기 코드 하나 · 서버 오류 글 한국어 · 저장마다 폴더를 훑지 않음
+- 사용자 (2026-10-24): "남은 정리 항목 3개도 고쳐줘" — 1.13.3 의 코드 검토에서 두었던 3개.
+
+### 찾은 것 (재현 시험으로 확인 — v18 12장, 고치기 전 실패 6개)
+1. **합치기 코드가 두 곳**: `app/js/db.js` (화면, 9차) 와 `cloudsync.js` (서버, 18차) 에 hash · ensureIds · merge3 가 따로 있었고 ("db.js 와 같은" 이라는 주석), 이미 달라져 있었다.
+   - 같은 `_id` 두 행: 서버는 뒤의 것을 `_id~순번` 으로, 화면은 그대로 → 화면에서 `DB.update` 는 앞 행만, 합칠 때 Map 이 한 행으로 섞음. 시험: 화면 `r1 · r1` (서버 `r1 · r1~1`), 둘째 행을 고칠 수 없음.
+   - 양쪽에 새로 생긴 같은 `_id` (기준에 없음) 가 내용이 다르면: 서버는 겹침 1, 화면은 0. 시험: 같은 입력에 화면 겹침 1 · 서버 2.
+2. **서버 오류 글에 한국어 없음**: "ERP 가 실행 중인 PC 에서만" 403 (사내망 PIN · 자동 백업 · 공유 연결 · 자동 업데이트) 은 영어 / 베트남어, PIN 형식은 영어 / 베트남어, Apps Script 주소는 영어만 — 화면 알림 (`cloud.js` · `p_data.js`) 에 그대로 나온다.
+3. **저장할 때마다 폴더를 훑음**: 표를 저장할 때마다 `prune()` 이 백업 폴더를 `readdir` (14일 정리), 공유 상태 (`GET /api/cloud`) 를 물을 때마다 `pending()` 이 표 폴더를 `readdir`. 시험: 20번 저장 → 백업 폴더 20번, 상태 20번 → 표 폴더 20번.
+
+### 정한 것
+- 1: 규칙을 하나로 (`app/js/merge.js`, 브라우저 · Node 둘 다 — `ERP.merge` / `module.exports`). 두 쪽의 다른 점은 옵션으로만 (서버: 지문 캐시 `sig`, 화면: 같은 객체에 고쳐 씀 `adopt`). 같은 `_id` 두 행은 서버 규칙 (`_id~순번` — 행이 사라지지 않고 화면에서도 따로 고침). 양쪽에 새로 생긴 같은 `_id` 는 화면 규칙 (겹침으로 세지 않음) — 기준에 없다는 것은 저장 답을 못 받은 경우 등이라 동시에 고친 증거가 없다 (세면 "같은 행을 동시에 고쳤습니다" 를 잘못 띄운다). 기준 (base) 키는 늘 `_id` 글자 (화면도).
+- 2: 서버는 화면 언어를 모르므로 `'한국어 / Tiếng Việt'` 한 줄 (자동 업데이트 · 백업 오류 글과 같은 모양).
+- 3: 하루 백업 · 정리는 그날 처음 한 번 (프로세스 안에서 그날 이미 한 표 · 정리한 날을 기억). 공유의 `pending` 은 저장 번호 (`versions.json`) 로 — ERP 를 거쳐 쓴 표는 모두 번호가 있다.
+
+### 한 것
+- `app/js/merge.js` (새 파일): hash · sig · ensureIds · sigMap · merge3 (`{rows, conflicts, changed}`, 옵션 `sig` · `adopt`). `app/index.html` 에서 db.js 바로 앞. 데모 (`tools/build_demo.js`) 는 index.html 의 스크립트를 그대로 넣으므로 저절로 들어간다. 설치형은 `app/**` 로.
+- `app/js/db.js`: 자기 hash · ensureIds · merge3 를 지우고 `ERP.merge` 를 씀 (syncInto 는 `adopt` 로). 저장 성공 뒤 기준 키를 글자로 (`String(_id)`).
+- `cloudsync.js`: 자기 hash · ensureIds · merge3 를 지우고 `require('./app/js/merge.js')` (지문 캐시는 `sig` 로). `pending()` 은 저장 번호로.
+- `server.js`: `ONLY_HERE` (한국어 / 베트남어) 를 403 넷에, AI 키 · PIN 형식 · Apps Script 주소 글. `createStore` 의 `backupOnce` · `prune` 은 그날 처음 한 번.
+- 저장소 `CLAUDE.md` 확장 규칙: 합치기는 merge.js 하나 · 서버 오류 글은 한국어 / 베트남어.
+- 버전 1.13.4 (package · core.js · installer.nsi · dist · release.yml 기본값). Code.gs 는 7판 그대로.
+
+### 시험
+- 고치기 전 (1.13.3 + 새 시험): 12장에서 실패 6개 — 파일 하나 · 화면 = 서버 결과 · 같은 `_id` 두 행 · 오류 글 · 백업 폴더 20번 · 표 폴더 20번. 다른 장은 모두 통과.
+- 고친 뒤: `npm run test:v18` 184개 (177 + 12장 7개).
+- 전체 (이 PC, Windows, 2026-10-24): v18 184 · v17 67 · v16 86 · v15 158 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.3 `f8b1c0a` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음; v9 의 행 합치기 단위 시험 · 두 PC 동시 저장은 새 merge.js 로도 통과), 현장 엑셀 인식.
+
+### 설치 파일 · 데모 (이 PC 에서 만듦, 2026-10-24)
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.4.exe`: 114,192,990 bytes, SHA-256 `091fab54334a973835035163c3010e59f87060179541451f9734f7f7651af8fb`. app.asar 에 `app/js/merge.js` · index.html 순서 (merge.js → db.js) · cloudsync 가 merge.js 를 씀 · db.js 가 `ERP.merge` · `ONLY_HERE` · 하루 한 번 정리 · 버전 1.13.4 확인, asar 안의 merge.js 를 불러 써 봄.
+- 실행 폴더 (`dist/win-unpacked`) 를 빈 시험 데이터 폴더 (`ERP_USER_DATA_DIR`) 로 켜 봄: 서버 응답 · `/js/merge.js` · `/api/cloud` · 화면이 예시 자료를 저장 (표 27개, 수주 521행) → 창 닫기로 끝남. 시험 폴더는 지움.
+- 데모 `ERP_Demo.html`: 7,883,051 bytes, SHA-256 `6986d459fdd596e410c9f4d26e3e27bf5e62d285c3b1874169b6ed3368416b56`.
+- 사용자가 할 일: GitHub Actions → "Release — 설치 파일" → 1.13.4 (1.13.3 을 아직 안 했으면 1.13.4 만 하면 됨 — 1.13.3 의 고침이 모두 들어 있음). Apps Script 는 7판 그대로 (1.13.3 에서 바꾸지 않았으면 7판으로 다시 배포).

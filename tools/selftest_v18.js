@@ -11,6 +11,7 @@
       표마다 탭 · 화면과 같은 이름 · 머리글 · 저장은 시트를 기다리지 않음 · 모아서 갱신 · 다른 PC 대신 · 오류 표 · 모두 다시 쓰기 · 시간 예산 · 5판 · 시트 없는 스크립트 · 화면
    11 (1.13.3) 코드 검토에서 찾은 문제: 구글 비밀 키는 사내망의 다른 PC 브라우저에 보내지 않음 · 덮어쓰기는 구글에만 있는 표도 · 휴대폰 보기 잠금이 기억한 휴대폰은 막지 않음
       · 속성 9KB 한도 (바이트) · 긴 탭 이름 · "(ERP 2)" · 끊긴 동안 누른 [구글 시트 다시 쓰기] 를 잃지 않음
+   12 (1.13.4) 정리: 행 합치기 코드는 app/js/merge.js 하나 (화면 · 서버 같은 결과, 같은 _id 두 행) · 서버 오류 글에 한국어 · 베트남어 · 저장마다 폴더를 훑지 않음
    사용:  npm run test:v18   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os'), http = require('http'), crypto = require('crypto'), zlib = require('zlib'), vm = require('vm');
 const ROOT = path.join(__dirname, '..');
@@ -638,7 +639,7 @@ async function ownerData(S) {
     ok('ERP 창을 닫기 · 업데이트 설치 · 사내망 재시작 전에 구글로 보냄 (flushAll → cloud.flush)', /async function flushAll\(\)/.test(main) && /info\.cloud\.flush\(15000\)/.test(main) && /beforeInstall: \(\) => flushAll\(\)/.test(main) && /flushAll\(\)\.then\(/.test(main) && /await flushAll\(\); app\.relaunch\(\)/.test(main));
     ok('Windows 자동 업데이트 시험이 cloudsync.js 바뀜에도 돎', /- 'cloudsync\.js'/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'update-test.yml'), 'utf8')));
     const core = fs.readFileSync(path.join(ROOT, 'app', 'js', 'core.js'), 'utf8'), nsi = fs.readFileSync(path.join(ROOT, 'build', 'installer.nsi'), 'utf8');
-    eq('버전 1.13.3 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.3 /.test(pkg.scripts.dist)], ['1.13.3', '1.13.3', '1.13.3', true]);
+    eq('버전 1.13.4 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.4 /.test(pkg.scripts.dist)], ['1.13.4', '1.13.4', '1.13.4', true]);
     ok('index.html 에 cloud.js', /<script src="js\/cloud\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8')));
   });
 
@@ -906,6 +907,74 @@ async function ownerData(S) {
       ok('끊긴 동안 누른 [구글 시트 다시 쓰기] → 실패 표시 → 다시 되면 저절로 모든 탭을 다시 씀 (손으로 고친 칸도)', rw.status === 200 && failed && fixed,
         { failed, fixed, st: (await stat(R)).sheet, cell: bkR.tab('수주 (PO)').table()[1] });
       await capi(R, 'off');
+    }
+  });
+
+  // ------------------------------------------------------------------------------------------
+  await sec('12. 정리 (1.13.4) — 합치기 코드 하나 · 서버 오류 글 한국어 · 저장마다 폴더를 훑지 않음', async () => {
+    const src = fs.readFileSync(CODE_FILE, 'utf8').replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';");
+    const hasKo = (s) => /[가-힣]/.test(String(s || '')), hasVi = (s) => /[ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệịỉọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(String(s || ''));
+    const clone = (v) => JSON.parse(JSON.stringify(v));
+
+    // ⑦ 행 합치기 · 지문 · _id 맞추기는 app/js/merge.js 하나 — 화면 (db.js) 과 서버 (cloudsync.js) 가 같은 입력에 같은 결과
+    {
+      const csSrc = fs.readFileSync(path.join(ROOT, 'cloudsync.js'), 'utf8'), dbSrc = fs.readFileSync(path.join(ROOT, 'app', 'js', 'db.js'), 'utf8');
+      ok('app/js/merge.js 하나: cloudsync.js 가 그것을 쓰고, db.js · cloudsync.js 에 따로 만든 merge3 · ensureIds · hash 없음 · index.html 이 db.js 바로 앞에서 부름',
+        fs.existsSync(path.join(ROOT, 'app', 'js', 'merge.js')) && /require\('\.\/app\/js\/merge\.js'\)/.test(csSrc) && !/function (merge3|ensureIds|hash)\(/.test(csSrc) && !/function (merge3|ensureIds|hash)\(/.test(dbSrc)
+        && /<script src="js\/merge\.js"><\/script>\s*<script src="js\/db\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8')));
+      // 이 PC 만 고침 (a) · 다른 쪽만 고침 (b) · 이 PC 가 지우고 다른 쪽이 고침 (c) · 양쪽에 새로 생긴 같은 _id (n — 저장 답을 못 받은 경우, 겹침이 아님)
+      const CASE = { base: [{ _id: 'a', v: 1 }, { _id: 'b', v: 1 }, { _id: 'c', v: 1 }], local: [{ _id: 'a', v: 2 }, { _id: 'b', v: 1 }, { _id: 'n', v: 'L' }],
+        remote: [{ _id: 'a', v: 1 }, { _id: 'b', v: 5 }, { _id: 'c', v: 9 }, { _id: 'n', v: 'R' }] };
+      const ssig = (r) => CS.hash(JSON.stringify(r));
+      const sm = CS.merge3(new Map(CASE.base.map(r => [r._id, ssig(r)])), clone(CASE.local), clone(CASE.remote));
+      const srv = { rows: sm.rows.map(r => r._id + ':' + r.v), conflicts: sm.conflicts };
+      const P = keep(await startPc(tmp('erp-v18-d-')), servers); await ownerData(P);
+      await putT(P, 'returns', [{ _id: 'r1', code: 'A-1', qty: 1 }, { _id: 'r1', code: 'A-2', qty: 2 }]);
+      const browser = await pw.chromium.launch(exe ? { executablePath: exe } : {});
+      try {
+        const pg = await (await browser.newContext()).newPage(); pg.on('pageerror', e => errors.push('pageerror: ' + e.message));
+        await pg.goto(P.url + '/#/settings'); await pg.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 });
+        const scr = await pg.evaluate((C) => { const sig = ERP.db._sigOf; const m = ERP.db._merge3(new Map(C.base.map(r => [r._id, sig(r)])), JSON.parse(JSON.stringify(C.local)), JSON.parse(JSON.stringify(C.remote)));
+          return { rows: m.rows.map(r => r._id + ':' + r.v), conflicts: m.conflicts }; }, CASE);
+        eq('같은 입력 → 화면 · 서버의 합치기 결과가 같음 (행 · 겹침 수 — 양쪽에 새로 생긴 같은 _id 는 겹침이 아님)', [scr, srv], [{ rows: ['a:2', 'b:5', 'c:9', 'n:L'], conflicts: 1 }, { rows: ['a:2', 'b:5', 'c:9', 'n:L'], conflicts: 1 }]);
+        const di = await pg.evaluate(async () => { const before = ERP.db.rows('returns').map(r => r._id); ERP.db.update('returns', 'r1~1', { qty: 5 }); await ERP.db.flush(); return before; });
+        const f = await getT(P, 'returns');
+        ok('같은 _id 두 행: 화면도 서버처럼 r1 · r1~1 로 나누고, 둘째 행만 고쳐 저장할 수 있음', di.join() === 'r1,r1~1' && f.length === 2 && (byId(f, 'r1') || {}).qty === 1 && (byId(f, 'r1~1') || {}).qty === 5, { di, f });
+      } finally { await browser.close(); }
+    }
+
+    // ⑧ 서버가 화면에 보내는 오류 글 = 한국어 · 베트남어 (화면 글자 규칙과 같음)
+    {
+      const E = keep(await startPc(tmp('erp-v18-e-')), servers);
+      await req(E.port, 'PUT', '/api/lan/pin', { pin: '2468' });
+      const L2 = { localAddress: '127.0.0.2' };
+      const lg = await req(E.port, 'POST', '/api/login', { pin: '2468' }, L2);
+      const o = Object.assign({ cookie: String((lg.headers['set-cookie'] || [''])[0]).split(';')[0] }, L2);
+      const rs = [await req(E.port, 'PUT', '/api/lan/pin', { pin: '1234' }, o), await req(E.port, 'PUT', '/api/backup', { dir: 'C:\\x' }, o),
+        await req(E.port, 'POST', '/api/cloud/connect', { url: 'x', token: 'y', mode: 'upload' }, o), await req(E.port, 'PUT', '/api/ai/config', { key: 'k' }, o),
+        await req(E.port, 'PUT', '/api/lan/pin', { pin: '12' }), await req(E.port, 'POST', '/api/gproxy', { url: 'https://example.com/x', body: '{}' })];
+      const got = rs.map(r => [r.status, r.json && r.json.error]);
+      ok('오류 글: ERP 가 실행 중인 PC 에서만 (PIN · 자동 백업 · 공유 연결 · AI 키) · PIN 형식 · Apps Script 주소만 — 한국어 · 베트남어 둘 다',
+        JSON.stringify(got.map(g => g[0])) === '[403,403,403,403,400,400]' && got.every(g => hasKo(g[1]) && hasVi(g[1])), got);
+    }
+
+    // ⑨ 저장할 때마다 하루 백업 폴더를 정리 (readdir) 하지 않고, 공유 상태를 물을 때마다 표 폴더를 읽지 않는다
+    {
+      const GE = keep(await fakeGoogle(src), googles);
+      const dE = tmp('erp-v18-f-'); const F = keep(await startPc(dE), servers); await ownerData(F);
+      await capi(F, 'connect', { url: GE.url, token: TK, mode: 'upload' });
+      const rd = fs.readdirSync, bdir = path.join(dE, 'backup'), tdir = path.join(dE, 'tables'); let nB = 0, nT = 0;
+      fs.readdirSync = function (p) { const s = path.resolve(String(p)); if (s === bdir) nB++; if (s === tdir) nT++; return rd.apply(fs, arguments); };
+      let st = null;
+      try {
+        for (let i = 0; i < 20; i++) await putT(F, 'returns', [{ _id: 'rt', code: 'A', qty: i }]);
+        for (let i = 0; i < 20; i++) st = await stat(F);
+      } finally { fs.readdirSync = rd; }
+      ok('표를 20번 저장해도 하루 백업 폴더 정리는 한 번 (예전: 저장마다)', nB <= 1, nB);
+      ok('공유 상태를 20번 물어도 표 폴더를 읽지 않음 · 보낼 것 있음은 그대로 (예전: 물을 때마다 폴더)', nT === 0 && st && st.pending === true, { nT, pending: st && st.pending });
+      const days = fs.readdirSync(bdir).filter(x => /^\d{4}-\d\d-\d\d$/.test(x));
+      ok('하루 백업은 그대로 (그날 처음 저장하기 전 내용)', days.length === 1 && JSON.stringify(JSON.parse(fs.readFileSync(path.join(bdir, days[0], 'returns.json'), 'utf8'))) === '[]', days);
+      await capi(F, 'off');
     }
   });
 
