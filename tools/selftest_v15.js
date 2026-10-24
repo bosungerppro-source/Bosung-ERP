@@ -375,7 +375,7 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
       HtmlService: { XFrameOptionsMode: { DEFAULT: 'DEFAULT' }, createHtmlOutput(html) { const o = { meta: {}, setTitle(t) { o.title = t; return o; }, addMetaTag(k, v) { o.meta[k] = v; return o; }, setXFrameOptionsMode(x) { o.xf = x; return o; }, getContent: () => html }; return o; } },
       SpreadsheetApp: { getActiveSpreadsheet: () => ({ getName: () => 'TEST', getUrl: () => 'https://sheet.example' }) },
       DriveApp: { getFoldersByName: () => iter(made ? [folder] : []), createFolder: () => { made = true; return folder; } },
-      PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (props.has(k) ? props.get(k) : null), setProperties: (o) => Object.keys(o).forEach(k => props.set(k, String(o[k]))), deleteProperty: (k) => props.delete(k) }) },
+      PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => { props.set(k, String(v)); }, setProperties: (o) => Object.keys(o).forEach(k => props.set(k, String(o[k]))), deleteProperty: (k) => props.delete(k) }) },
       CacheService: { getScriptCache: () => ({ get: (k) => (cache.has(k) ? cache.get(k) : null), put: (k, v) => cache.set(k, String(v)), remove: (k) => cache.delete(k) }) },
       Utilities: { DigestAlgorithm: { SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' }, getUuid: () => crypto.randomUUID(),
         computeDigest: (alg, s) => Array.from(crypto.createHash('sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
@@ -385,13 +385,13 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     const post = (o) => JSON.parse(c.doPost({ postData: { contents: JSON.stringify(o) } }).getContent());
     return { c, props, cache, files, post };
   }
-  await sec('9. 구글 웹 앱 (Code.gs 4판 기능 — 1.13.0 부터 5판 · 1.13.2 부터 6판)', async () => {
+  await sec('9. 구글 웹 앱 (Code.gs 4판 기능 — 1.13.0 부터 5판 · 1.13.2 부터 6판 · 1.13.3 부터 7판)', async () => {
     const G = gas();
     const g = G.c.doGet({ parameter: {} });
     ok('브라우저로 열면 휴대폰 화면 (제목 · 휴대폰 폭 · 화면 글자는 textContent)', g.title === 'ColorPencil ERP' && g.meta.viewport === 'width=device-width, initial-scale=1' && /google\.script\.run/.test(g.getContent()) && !/innerHTML/.test(g.getContent()), { title: g.title, meta: g.meta });
-    eq('?ping=1 → 상태 JSON (6판, 1.13.2)', JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, 6);
+    eq('?ping=1 → 상태 JSON (7판, 1.13.3)', JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, 7);
     eq('TOKEN 이 틀리면 거절', G.post({ token: 'x', action: 'ping' }).error, 'bad token');
-    eq('ping → 6판 (1.13.2)', G.post({ token: 'T15', action: 'ping' }).ver, 6);
+    eq('ping → 7판 (1.13.3)', G.post({ token: 'T15', action: 'ping' }).ver, 7);
     eq('비밀번호 없음 → NO_PW', G.c.mobileData('secret12').error, 'NO_PW');
     eq('비밀번호 6자 미만 → 거절', G.post({ token: 'T15', action: 'mobile_pw', pw: '12345' }).ok, false);
     ok('비밀번호 정하기 → 소금 + SHA-256 해시만 저장 (원문 없음)', G.post({ token: 'T15', action: 'mobile_pw', pw: 'secret12' }).on === true && /^[0-9a-f]{64}$/.test(G.props.get('MOBILE_HASH')) && G.props.get('MOBILE_SALT') && !Array.from(G.props.values()).some(v => v.includes('secret12')), Array.from(G.props.entries()));
@@ -478,17 +478,25 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     ok('휴대폰: null · undefined · NaN 글자 없음', !/\bnull\b|undefined|NaN/.test(ph.t), (ph.t.match(/.{0,30}(null|undefined|NaN).{0,30}/) || [])[0]);
     await M.click('.lg button[data-l=vi]'); await M.waitForTimeout(200);
     ok('휴대폰: 베트남어', /Tổng quan/.test(await M.evaluate(() => document.body.innerText)) && /Sản xuất/.test(await M.evaluate(() => document.body.innerText)));
+    const st0 = await M.evaluate(() => ({ dev: localStorage.getItem('erpm_dev'), pw: localStorage.getItem('erpm_pw') }));
+    ok('휴대폰: 비밀번호가 아니라 이 휴대폰의 열쇠만 기억 (7판, 1.13.3)', /^[0-9a-f]{64}$/.test(String(st0.dev || '')) && !st0.pw, st0);
     await M.reload(); await M.waitForSelector('.k', { timeout: 10000 }).catch(() => {});
-    ok('휴대폰: 비밀번호 기억 → 다시 열면 바로 보임 (베트남어 그대로)', /Tổng quan/.test(await M.evaluate(() => document.body.innerText)) && !(await M.$('input[type=password]')));
+    ok('휴대폰: 기억 → 다시 열면 바로 보임 (베트남어 그대로)', /Tổng quan/.test(await M.evaluate(() => document.body.innerText)) && !(await M.$('input[type=password]')));
     await M.click('text=Khóa'); await M.waitForTimeout(200);
-    ok('잠그기 → 비밀번호 화면 · 기억 지움', !!(await M.$('input[type=password]')) && !(await M.evaluate(() => localStorage.getItem('erpm_pw'))));
+    ok('잠그기 → 비밀번호 화면 · 기억 지움 (열쇠 · 옛 비밀번호)', !!(await M.$('input[type=password]')) && !(await M.evaluate(() => localStorage.getItem('erpm_pw') || localStorage.getItem('erpm_dev'))));
+    // 6판까지의 화면이 기억해 둔 비밀번호 → 7판 화면은 한 번 열면서 열쇠로 바꾸고 비밀번호는 지움
+    await M.evaluate(() => localStorage.setItem('erpm_pw', 'secret12')); await M.reload(); await M.waitForSelector('.k', { timeout: 10000 }).catch(() => {});
+    const st1 = await M.evaluate(() => ({ dev: localStorage.getItem('erpm_dev'), pw: localStorage.getItem('erpm_pw'), t: document.body.innerText }));
+    ok('예전에 기억한 비밀번호 → 열쇠로 바꿈 (비밀번호는 지움) · 바로 보임', /^[0-9a-f]{64}$/.test(String(st1.dev || '')) && !st1.pw && /Tổng quan/.test(st1.t), { dev: st1.dev, pw: st1.pw });
+    await M.click('text=Khóa'); await M.waitForTimeout(200);
     await P.close();
     // 옛 Code.gs · 끄기
     oldScript = true; await A.click('#phoneCard >> text=지금 보내기'); await A.waitForTimeout(800);
-    ok('옛 Code.gs → "새 코드(6판)를 붙여넣고 배포" 알림 · 카드에 실패 표시 (1.13.2)', /6판/.test(await A.evaluate(() => document.querySelector('#toasts').innerText)) && /실패/.test(await A.evaluate(() => document.querySelector('#phoneCard').innerText)));
+    ok('옛 Code.gs → "새 코드(7판)를 붙여넣고 배포" 알림 · 카드에 실패 표시 (1.13.3)', /7판/.test(await A.evaluate(() => document.querySelector('#toasts').innerText)) && /실패/.test(await A.evaluate(() => document.querySelector('#phoneCard').innerText)));
     oldScript = false;
     await A.click('#phoneCard >> text=끄기'); await A.waitForSelector('.modal'); await A.click('.modal .modal-foot button.primary');
-    await A.waitForFunction(() => /꺼짐/.test(document.querySelector('#phoneCard').innerText), null, { timeout: 10000 }).catch(() => {});
+    // 카드에는 "사내망 접속 꺼짐" 이 늘 있어 "꺼짐" 으로는 바로 지나간다 → 끈 뒤에만 보이는 [비밀번호 정하고 켜기] 를 기다린다 (1.13.3: 바쁠 때 끄기가 끝나기 전에 보던 시험 고침)
+    await A.waitForFunction(() => /비밀번호 정하고 켜기/.test((document.querySelector('#phoneCard') || {}).innerText || ''), null, { timeout: 10000 }).catch(() => {});
     ok('끄기 → 구글 비밀번호 지움 · 꺼짐 · 더 보내지 않음', !G.props.has('MOBILE_HASH') && await A.evaluate(() => ERP.db.setting('mobileOn') === false) && /꺼짐/.test(await A.evaluate(() => document.querySelector('#phoneCard').innerText)));
     const n2 = posts.filter(p => p.action === 'mobile').length; await A.evaluate(() => ERP.mobileAuto(30, 600000)); await A.waitForTimeout(500);
     ok('꺼져 있으면 자동으로 보내지 않음', posts.filter(p => p.action === 'mobile').length === n2);

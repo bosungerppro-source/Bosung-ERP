@@ -26,7 +26,7 @@
       NOT_JSON: L('웹 앱의 응답이 아닙니다 — 주소가 웹 앱 URL(…/exec)인지, 배포할 때 액세스 권한을 "모든 사용자"로 했는지 확인하세요', 'Không phải phản hồi của ứng dụng web — kiểm tra URL (…/exec) và quyền truy cập "Bất kỳ ai" (Anyone)'),
       NOT_FOUND: L('주소를 찾을 수 없습니다 — 웹 앱 URL 을 다시 복사해 넣으세요', 'Không tìm thấy địa chỉ — hãy sao chép lại URL ứng dụng web'),
       BAD_TOKEN: L('비밀 키(TOKEN)가 맞지 않습니다 — 사장님 PC 에서 [Apps Script 코드 복사] 로 다시 붙여넣고 새 버전으로 배포하세요 (직원 PC 는 연결 코드를 다시 받으세요)', 'TOKEN không khớp — trên máy chủ hãy dán lại mã và triển khai phiên bản mới (máy nhân viên lấy lại mã kết nối)'),
-      OLD_SCRIPT: L('구글 Apps Script 가 옛 판입니다 — [Apps Script 코드 복사] 로 새 코드(6판)를 붙여넣고 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 하세요', 'Apps Script là bản cũ — dán mã mới (bản 6) rồi Triển khai → Quản lý → Sửa → Phiên bản mới'),
+      OLD_SCRIPT: L('구글 Apps Script 가 옛 판입니다 — [Apps Script 코드 복사] 로 새 코드(7판)를 붙여넣고 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 하세요', 'Apps Script là bản cũ — dán mã mới (bản 7) rồi Triển khai → Quản lý → Sửa → Phiên bản mới'),
       NO_SHEET: L('이 Apps Script 는 구글 시트 없이 만들어져서 시트에 쓸 수 없습니다 (자료 공유는 됩니다)', 'Apps Script này không gắn với Google Sheet nên không ghi lên Sheet được (dùng chung vẫn chạy)'),
       OFF: L('공유가 꺼져 있습니다', 'Đang tắt dùng chung'),
       CID: L('다른 구글 저장소로 바뀌었습니다 (다른 Apps Script 주소) — 아래에서 다시 연결하세요', 'Đã đổi sang kho Google khác — hãy kết nối lại bên dưới'),
@@ -157,8 +157,10 @@
     try { c = await api('/api/cloud/check', cfg); } catch (e) { res.replaceChildren(h('p', { class: 'warn-text' }, e.message)); e.shown = true; throw e; }
     const lc = c.local || { tables: 0, rows: 0 };
     const items = [h('div', { class: 'toolbar' }, ERP.chip('ok', L('연결됨', 'Đã kết nối')), h('span', { class: 'muted' }, 'Apps Script ' + c.ver + L('판', '') + (c.sheet ? ' · ' + c.sheet : '')))];
-    if (Number(c.ver) < 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 ' + c.ver + '판입니다 — 자료 공유는 되고, 구글 시트에서 표로 보려면 6판 코드로 바꾸세요 ([Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전).',
-      'Apps Script này là bản ' + c.ver + ' — dùng chung vẫn chạy; muốn xem bảng trên Google Sheet hãy đổi sang mã bản 6 ([Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới).')));
+    if (Number(c.ver) < 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 ' + c.ver + '판입니다 — 자료 공유는 되고, 구글 시트에서 표로 보려면 새 코드(7판)로 바꾸세요 ([Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전).',
+      'Apps Script này là bản ' + c.ver + ' — dùng chung vẫn chạy; muốn xem bảng trên Google Sheet hãy đổi sang mã mới (bản 7) ([Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới).')));
+    else if (Number(c.ver) === 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 6판입니다 — 그대로 써도 되고, 7판 (보안 · 안정 고침) 으로 바꾸려면 [Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전.',
+      'Apps Script này là bản 6 — vẫn dùng được; muốn đổi sang bản 7 (sửa bảo mật · ổn định): [Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới.')));
     if (c.resume) items.push(h('p', { class: 'help' }, L('이 PC 는 전에 이 구글 저장소와 공유했습니다. 다시 켜면 꺼 둔 동안 양쪽에서 바뀐 것을 합칩니다.', 'Máy này đã từng dùng chung với kho này. Bật lại sẽ gộp các thay đổi của cả hai bên.')),
       h('div', { class: 'toolbar' }, btn('primary', L('다시 켜기', 'Bật lại'), () => connect(cfg, 'resume'))));
     if (c.empty) {
@@ -224,8 +226,8 @@
       const g = s.sheet || {}, head = h('h4', L('구글 시트 (표 보기)', 'Google Sheet (xem bảng)'));
       if (g.has === false) return h('div', { class: 'cloud-sheet' }, head, h('p', { class: 'help' }, L('이 Apps Script 는 구글 시트 없이 만들어져서 표 보기는 없습니다 (자료 공유는 그대로 됩니다). 표로 보려면 새 구글 시트 → 확장 프로그램 → Apps Script 에서 다시 만드세요.',
         'Apps Script này không gắn với Google Sheet nên không có xem bảng (dùng chung vẫn chạy). Muốn xem bảng, hãy tạo lại từ Google Sheet mới → Tiện ích mở rộng → Apps Script.')));
-      if (g.ver !== null && g.ver !== undefined && Number(g.ver) < 6) return h('div', { class: 'cloud-sheet' }, head, h('p', { class: 'warn-text' }, L('구글 시트에서 표로 보려면 Apps Script 6판이 필요합니다 — [Apps Script 코드 복사] → Apps Script 편집기에 붙여넣기 → 저장 → 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 (주소는 그대로). 자료 공유는 지금도 됩니다.',
-        'Muốn xem bảng trên Google Sheet cần Apps Script bản 6 — [Sao chép mã Apps Script] → dán vào trình soạn thảo → Lưu → Triển khai → Quản lý → Sửa → Phiên bản mới (URL giữ nguyên). Dùng chung vẫn đang chạy.')));
+      if (g.ver !== null && g.ver !== undefined && Number(g.ver) < 6) return h('div', { class: 'cloud-sheet' }, head, h('p', { class: 'warn-text' }, L('구글 시트에서 표로 보려면 Apps Script 6판 이상이 필요합니다 — [Apps Script 코드 복사] → Apps Script 편집기에 붙여넣기 → 저장 → 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 (주소는 그대로). 자료 공유는 지금도 됩니다.',
+        'Muốn xem bảng trên Google Sheet cần Apps Script bản 6 trở lên — [Sao chép mã Apps Script] → dán vào trình soạn thảo → Lưu → Triển khai → Quản lý → Sửa → Phiên bản mới (URL giữ nguyên). Dùng chung vẫn đang chạy.')));
       const errN = Object.keys(g.errs || {}), lagN = (g.lag || []).length, unknown = g.ver === null || g.ver === undefined;   // 서버를 켜고 아직 한 판도 돌지 않음
       const tone = g.code || errN.length ? 'bad' : g.busy ? 'info' : lagN ? 'warn' : unknown ? 'neutral' : 'ok';
       const chip = g.code ? L('오류', 'Lỗi') : g.busy ? L('갱신 중…', 'Đang cập nhật…') : errN.length ? L('일부 표 오류', 'Lỗi một số bảng')
@@ -255,6 +257,9 @@
           h('dt', L('시작', 'Bắt đầu')), h('dd', when(s.since) + ' · ' + modeLabel(s.mode)),
           h('dt', L('웹 앱 주소', 'URL ứng dụng web')), h('dd', h('code', s.url || '–'))),
         sheetPart(s),
+        // 1.13.3: 6판으로 배포한 채 — 7판 (휴대폰 보기 잠금 · 속성 크기 · 탭 이름 고침) 을 다시 배포하라고 한 번 알림 (구글 계정 주인 PC 에서만)
+        own && Number((s.sheet || {}).ver) === 6 ? h('p', { class: 'help' }, L('구글 Apps Script 7판 (보안 · 안정 고침) 이 나왔습니다 — [Apps Script 코드 복사] → Apps Script 편집기에 붙여넣기 → 저장 → 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 (주소는 그대로). 지금도 공유 · 시트 보기는 됩니다.',
+          'Đã có Apps Script bản 7 (sửa bảo mật · ổn định) — [Sao chép mã Apps Script] → dán vào trình soạn thảo → Lưu → Triển khai → Quản lý → Sửa → Phiên bản mới (URL giữ nguyên). Dùng chung · xem Sheet vẫn đang chạy.')) : null,
         s.conflicts ? h('p', { class: 'help' }, L('두 PC 에서 같은 행을 거의 동시에 고친 것 ' + s.conflicts + '건은 나중에 맞춘 PC 의 내용으로 맞췄습니다.', 'Hai máy cùng sửa một dòng gần như cùng lúc: ' + s.conflicts + ' — giữ theo máy đồng bộ sau.')) : null,
         s.shrink && s.shrink.length ? h('p', { class: 'warn-text' }, L('다른 PC 에서 많이 지운 표가 있습니다: ', 'Có bảng bị xóa nhiều ở máy khác: ') + s.shrink.map(x => label(x.table) + ' ' + F.n(x.from) + ' → ' + F.n(x.to)).join(', ')
           + L(' — 지우기 전 자료는 데이터 폴더의 cloud_backup 에 복사해 두었습니다.', ' — dữ liệu trước khi xóa đã được sao chép vào cloud_backup.')) : null,

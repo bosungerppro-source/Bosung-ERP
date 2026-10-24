@@ -125,6 +125,10 @@ function loadLayouts(appDir) {
 /** Apps Script 웹 앱 주소만 (구글 중계 · 드라이브 백업). 시험은 opts.googleHosts 로 바꾼다 */
 const GOOGLE_HOSTS = /(^|\.)script\.google\.com$|(^|\.)googleusercontent\.com$/;
 const googleUrlOk = (url, re) => { try { const u = new URL(url); return re ? re.test(u.hostname) : (u.protocol === 'https:' && GOOGLE_HOSTS.test(u.hostname)); } catch (e) { return false; } };
+/** 1.13.3: 구글 웹 앱 주소 · 비밀 키는 ERP 가 실행 중인 PC 에서만 바꾸고, 키는 사내망의 다른 PC 브라우저에 보내지 않는다 (AI 키와 같음).
+    다른 PC 브라우저의 구글 요청(gproxy)은 서버가 키를 넣어, 연결된 웹 앱 주소로만 보낸다 */
+const OWNER_META = ['gUrl', 'gToken'], SECRET_META = ['gToken'];
+const metaFor = (m, loop) => { if (loop) return m; const o = Object.assign({}, m); SECRET_META.forEach(k => { delete o[k]; }); return o; };
 
 /** 매일 자동 백업: 지정한 폴더(USB · NAS · 구글 드라이브 동기화 폴더)에 전체 JSON + (선택) 구글 드라이브에 압축본 */
 function createBackup(dataDir, store, googleHosts, doFetch) {
@@ -250,7 +254,7 @@ function start(opts) {
   const layouts = loadLayouts(appDir);   // 구글 시트 탭 이름 · 머리글 (1.13.2)
   const cloud = cloudsync.create({ dataDir, store, fetch: doFetch, urlOk: (u) => googleUrlOk(u, opts.googleHosts), codeFile: path.join(__dirname, 'google', 'Code.gs'),
     every: opts.cloudEvery, poke: opts.cloudPoke, log: opts.cloudLog, layout: (n) => layouts[n] || null, pc: opts.pcName || os.hostname(),
-    sheet: opts.cloudSheet, sheetLag: opts.cloudSheetLag });
+    sheet: opts.cloudSheet, sheetLag: opts.cloudSheetLag, sheetRetry: opts.cloudSheetRetry });
 
   /** 다른 웹사이트(DNS rebinding · 다른 출처의 요청)는 막는다: Host 는 이 PC 이름, Origin 이 있으면 같은 곳, 쓰기 요청은 JSON 만 */
   function guard(req, isApi) {
@@ -295,16 +299,20 @@ function start(opts) {
     if (!authed) return send(401, { error: 'LOGIN', hasPin: auth.hasPin() });
 
     if (p === '/api/info') return send(200, { dataDir: store.dir, port, host, lan: lanAddresses(port), lanOn: host !== '127.0.0.1' && host !== 'localhost', platform: process.platform, hasPin: auth.hasPin(), loopback: loop });
-    if (p === '/api/db' && req.method === 'GET') return send(200, store.readAll());
+    if (p === '/api/db' && req.method === 'GET') { const all = store.readAll(); all.meta = metaFor(all.meta, loop); return send(200, all); }
     if (p === '/api/versions' && req.method === 'GET') return send(200, Object.assign(store.versions(), { cloud: cloud.brief() }));
-    if (p === '/api/meta' && req.method === 'GET') return send(200, { meta: store.readMeta(), ver: store.versions().meta });
-    // 설정: 바뀐 항목만 합친다 (다른 PC 가 바꾼 다른 항목은 그대로)
+    if (p === '/api/meta' && req.method === 'GET') return send(200, { meta: metaFor(store.readMeta(), loop), ver: store.versions().meta });
+    // 설정: 바뀐 항목만 합친다 (다른 PC 가 바꾼 다른 항목은 그대로). 구글 주소 · 키는 ERP 가 실행 중인 PC 에서만 (1.13.3)
     if (p === '/api/meta' && req.method === 'PATCH') {
-      const b = JSON.parse(await readBody(req, 5e6)); const m = store.readMeta();
-      Object.keys(b.set || {}).forEach(k => { m[k] = b.set[k]; }); (b.del || []).forEach(k => { delete m[k]; });
-      const ver = store.writeMeta(m); cloud.poke(); return send(200, { ok: true, ver, meta: m });
+      const b = JSON.parse(await readBody(req, 5e6)); const m = store.readMeta(); const mine = (k) => loop || !OWNER_META.includes(k);
+      Object.keys(b.set || {}).forEach(k => { if (mine(k)) m[k] = b.set[k]; }); (b.del || []).forEach(k => { if (mine(k)) delete m[k]; });
+      const ver = store.writeMeta(m); cloud.poke(); return send(200, { ok: true, ver, meta: metaFor(m, loop) });
     }
-    if (p === '/api/meta' && req.method === 'PUT') { const ver = store.writeMeta(JSON.parse(await readBody(req, 5e6))); cloud.poke(); return send(200, { ok: true, ver }); }   // 옛 화면(1.3.0 이전)용
+    if (p === '/api/meta' && req.method === 'PUT') {   // 옛 화면(1.3.0 이전)용: 설정 전체
+      const m = JSON.parse(await readBody(req, 5e6));
+      if (!loop) { const cur = store.readMeta(); OWNER_META.forEach(k => { if (cur[k] === undefined) delete m[k]; else m[k] = cur[k]; }); }
+      const ver = store.writeMeta(m); cloud.poke(); return send(200, { ok: true, ver });
+    }
     let m = p.match(/^\/api\/t\/([A-Za-z0-9_]+)$/);
     if (m && req.method === 'GET') { const name = safeName(m[1]); if (!name) return send(400, { error: 'bad name' }); return send(200, { rows: store.readTable(name), ver: store.ver(name) }); }
     if (m && req.method === 'PUT') {
@@ -406,7 +414,11 @@ function start(opts) {
     if (p === '/api/gproxy' && req.method === 'POST') {
       const { url, body } = JSON.parse(await readBody(req, 100e6));
       if (!googleUrlOk(url, opts.googleHosts)) return send(400, { error: 'only Google Apps Script URLs are allowed' });
-      const r = await doFetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: typeof body === 'string' ? body : JSON.stringify(body), redirect: 'follow' });
+      let out = typeof body === 'string' ? body : JSON.stringify(body);
+      // 1.13.3: 키 없이 온 요청 (사내망의 다른 PC 브라우저 — 키를 받지 않음) 은 연결된 웹 앱 주소일 때만 서버가 키를 넣는다
+      const gm = store.readMeta();
+      if (gm.gToken && url === gm.gUrl) { try { const o = JSON.parse(out); if (o && typeof o === 'object' && !Array.isArray(o) && !o.token) { o.token = gm.gToken; out = JSON.stringify(o); } } catch (e) { /* JSON 이 아니면 그대로 */ } }
+      const r = await doFetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: out, redirect: 'follow' });
       const text = await r.text();
       res.writeHead(r.status, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(text);

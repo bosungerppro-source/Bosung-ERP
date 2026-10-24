@@ -9,6 +9,8 @@
    7 안전 (많이 지우면 백업 · 이 PC 만 연결 · 처음 합치기 · 덮어쓰기) · 8 화면 (사장님 PC → 직원 PC, 입력이 서로 보임, 베트남어, 휴대폰 폭)
    10 (1.13.2, Code.gs 6판) 구글 시트 = 공유 자료 보기: 가짜 구글 시트 (탭 · 칸 · 서식 · 보호 — General 칸의 글자는 숫자 · 날짜로, '=' 는 수식으로 바뀌는 것까지)
       표마다 탭 · 화면과 같은 이름 · 머리글 · 저장은 시트를 기다리지 않음 · 모아서 갱신 · 다른 PC 대신 · 오류 표 · 모두 다시 쓰기 · 시간 예산 · 5판 · 시트 없는 스크립트 · 화면
+   11 (1.13.3) 코드 검토에서 찾은 문제: 구글 비밀 키는 사내망의 다른 PC 브라우저에 보내지 않음 · 덮어쓰기는 구글에만 있는 표도 · 휴대폰 보기 잠금이 기억한 휴대폰은 막지 않음
+      · 속성 9KB 한도 (바이트) · 긴 탭 이름 · "(ERP 2)" · 끊긴 동안 누른 [구글 시트 다시 쓰기] 를 잃지 않음
    사용:  npm run test:v18   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os'), http = require('http'), crypto = require('crypto'), zlib = require('zlib'), vm = require('vm');
 const ROOT = path.join(__dirname, '..');
@@ -114,6 +116,7 @@ function gasCtx(code, opt) {
   const props = new Map(), cache = new Map(), files = new Map(), folders = new Map(); let seq = 0;
   const stats = { setContent: 0, created: 0, locks: 0, propReads: 0, cacheFail: false, failName: null, docBusy: false, docLocks: 0 };
   const sheet = fakeBook(opt); const clock = { off: 0 };
+  const propVal = (v) => { v = String(v); if (Buffer.byteLength(v, 'utf8') > 9216) throw new Error('Exception: Argument too large: value'); return v; };   // 속성 값 하나는 9KB 까지 (Apps Script 한도, 1.13.3)
   class GDate extends Date { static now() { return Date.now() + clock.off; } }   // 시험: 시트 쓰기 시간 예산 (Date.now 만 앞당김)
   const mkFile = (name, content, folder) => {
     if (stats.failName && String(name).indexOf(stats.failName + '.') === 0) throw new Error('Exception: Drive 오류 (시험)');
@@ -135,7 +138,7 @@ function gasCtx(code, opt) {
     DriveApp: { getFoldersByName: (n) => iter(folders.has(n) ? [folders.get(n)] : []), createFolder: (n) => mkFolder(n),
       getFileById: (id) => { const f = files.get(id); if (!f) throw new Error('Exception: No item with the given ID could be found'); return f; } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (props.has(k) ? props.get(k) : null), getProperties: () => { stats.propReads++; return Object.fromEntries(props); },
-      setProperty: (k, v) => { props.set(k, String(v)); }, setProperties: (o) => Object.keys(o).forEach(k => props.set(k, String(o[k]))), deleteProperty: (k) => props.delete(k) }) },
+      setProperty: (k, v) => { props.set(k, propVal(v)); }, setProperties: (o) => Object.keys(o).forEach(k => props.set(k, propVal(o[k]))), deleteProperty: (k) => props.delete(k) }) },
     LockService: { getScriptLock: () => ({ waitLock: () => { stats.locks++; }, releaseLock: () => {} }),
       getDocumentLock: () => (opt.noSheet ? null : { tryLock: () => { stats.docLocks++; return !stats.docBusy; }, releaseLock: () => {} }),
       getUserLock: () => ({ tryLock: () => !stats.docBusy, releaseLock: () => {} }) },
@@ -231,14 +234,14 @@ async function ownerData(S) {
   // ------------------------------------------------------------------------------------------
   await sec('1. Code.gs 6판 (구글 쪽) — 5판 공유: 표마다 파일 · 저장 번호 · 충돌 · 이름표', async () => {
     const src = fs.readFileSync(CODE_FILE, 'utf8');
-    ok('6판 머리글 · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /6판 \(v1\.13\.\d\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
+    ok('7판 머리글 (1.13.3) · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /7판 \(v1\.13\.\d\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
     const raw = gasCtx(src);
     eq("'CHANGE-ME' 그대로 배포하면 아무 요청도 받지 않음", raw.post({ token: 'CHANGE-ME', action: 'ping' }).error, 'bad token');
     const G = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"));
-    eq('?ping=1 · ping → 6판', [JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, G.post({ token: TK, action: 'ping' }).ver], [6, 6]);
+    eq('?ping=1 · ping → 7판', [JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, G.post({ token: TK, action: 'ping' }).ver], [7, 7]);
     eq('틀린 키 → bad token', G.post({ token: TK + 'x', action: 'cloud_info' }).error, 'bad token');
     const i0 = G.post({ token: TK, action: 'cloud_info' }), i1 = G.post({ token: TK, action: 'cloud_info' });
-    ok('빈 저장소: 표 없음 · 이름표(cid) 한 번 만들고 그대로', i0.ok && Object.keys(i0.tables).length === 0 && /^[0-9a-f-]{36}$/.test(i0.cid) && i1.cid === i0.cid && i0.ver === 6, { i0, i1 });
+    ok('빈 저장소: 표 없음 · 이름표(cid) 한 번 만들고 그대로', i0.ok && Object.keys(i0.tables).length === 0 && /^[0-9a-f-]{36}$/.test(i0.cid) && i1.cid === i0.cid && i0.ver === 7, { i0, i1 });
     const p1 = G.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'AAA', n: 2 } } });
     const x1 = JSON.parse(G.props.get('T_po')); const f1 = G.files.get(x1.f);
     ok('올리기 → 번호 1 · 드라이브 "ColorPencil ERP Data/po.json.gz.b64" · 크기 · 행 수 · 시각', p1.ok && p1.vers.po === 1 && x1.v === 1 && x1.s === 3 && x1.n === 2 && x1.at && f1 && f1.name === 'po.json.gz.b64' && f1.content === 'AAA' && f1.folder === G.folders.get('ColorPencil ERP Data'), { p1, x1 });
@@ -261,7 +264,7 @@ async function ownerData(S) {
     // 시트 없이 만든 스크립트 (script.google.com 에서 바로)
     const SA = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"), { noSheet: true });
     const sp = SA.post({ token: TK, action: 'ping' }), sl = SA.post({ token: TK, action: 'list' }), sc = SA.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'A' } } });
-    ok('시트 없는(독립형) 스크립트: ping · 공유는 됨, 시트 기능만 안내', sp.ok && sp.ver === 6 && sp.sheet === '' && sl.ok === false && /no spreadsheet/.test(sl.error) && sc.vers.po === 1, { sp, sl, sc });
+    ok('시트 없는(독립형) 스크립트: ping · 공유는 됨, 시트 기능만 안내', sp.ok && sp.ver === 7 && sp.sheet === '' && sl.ok === false && /no spreadsheet/.test(sl.error) && sc.vers.po === 1, { sp, sl, sc });
     // 4판까지의 기능 그대로
     ok('휴대폰 보기 · 드라이브 백업 그대로 (4판 기능)', G.post({ token: TK, action: 'mobile_pw', pw: 'secret12' }).on === true && G.post({ token: TK, action: 'mobile', summary: JSON.stringify({ v: 1, kpi: {} }) }).ok
       && G.c.mobileData('secret12').ok && G.post({ token: TK, action: 'backup', name: 'ERP_backup_2026-10-22.json.gz', b64: Buffer.from('x').toString('base64') }).ok);
@@ -324,7 +327,7 @@ async function ownerData(S) {
     const wrong = await capi(A, 'check', { url: G.url, token: TK.replace('T18', 'X18') });
     eq('키가 다르면 BAD_TOKEN', wrong.json.code, 'BAD_TOKEN');
     const ck = await capi(A, 'check', { url: G.url, token: TK });
-    ok('연결 확인: 6판 · 비어 있음 · 이 PC 자료 (표 · 행) · 다시 켤 것 없음', ck.status === 200 && ck.json.ver === 6 && ck.json.empty === true && ck.json.resume === false && ck.json.local.tables === 3 && ck.json.local.rows === 125 && ck.json.sheet === 'ERP 공유', ck.json);
+    ok('연결 확인: 7판 · 비어 있음 · 이 PC 자료 (표 · 행) · 다시 켤 것 없음', ck.status === 200 && ck.json.ver === 7 && ck.json.empty === true && ck.json.resume === false && ck.json.local.tables === 3 && ck.json.local.rows === 125 && ck.json.sheet === 'ERP 공유', ck.json);
     const nb = await capi(A, 'connect', { url: G.url, token: TK, mode: 'replace' });
     eq('빈 저장소에 "구글 자료로" 는 안 됨 (EMPTY)', nb.json.code, 'EMPTY');
     const up = await capi(A, 'connect', { url: G.url, token: TK, mode: 'upload' });
@@ -558,7 +561,7 @@ async function ownerData(S) {
       await P.click('#cloudCard .cloud-setup .toolbar button:has-text("연결 확인") >> nth=0');
       await P.waitForSelector('#cloudCard .cloud-res button:has-text("이 PC 자료를 올리고 공유 시작")', { timeout: 15000 });
       const r0 = await P.evaluate(() => document.querySelector('#cloudCard .cloud-res').innerText);
-      ok('연결 확인 → 연결됨 · 6판 · 아직 자료 없음 · 이 PC 자료 수', /연결됨/.test(r0) && /Apps Script 6판/.test(r0) && /아직 자료가 없습니다/.test(r0) && /표 \d+개/.test(r0), r0);
+      ok('연결 확인 → 연결됨 · 7판 · 아직 자료 없음 · 이 PC 자료 수', /연결됨/.test(r0) && /Apps Script 7판/.test(r0) && /아직 자료가 없습니다/.test(r0) && /표 \d+개/.test(r0), r0);
       await P.click('#cloudCard .cloud-res button:has-text("이 PC 자료를 올리고 공유 시작")');
       await P.waitForSelector('.modal .cloud-done', { timeout: 30000 });
       const done = await P.evaluate(() => document.querySelector('.modal').innerText);
@@ -635,7 +638,7 @@ async function ownerData(S) {
     ok('ERP 창을 닫기 · 업데이트 설치 · 사내망 재시작 전에 구글로 보냄 (flushAll → cloud.flush)', /async function flushAll\(\)/.test(main) && /info\.cloud\.flush\(15000\)/.test(main) && /beforeInstall: \(\) => flushAll\(\)/.test(main) && /flushAll\(\)\.then\(/.test(main) && /await flushAll\(\); app\.relaunch\(\)/.test(main));
     ok('Windows 자동 업데이트 시험이 cloudsync.js 바뀜에도 돎', /- 'cloudsync\.js'/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'update-test.yml'), 'utf8')));
     const core = fs.readFileSync(path.join(ROOT, 'app', 'js', 'core.js'), 'utf8'), nsi = fs.readFileSync(path.join(ROOT, 'build', 'installer.nsi'), 'utf8');
-    eq('버전 1.13.2 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.2 /.test(pkg.scripts.dist)], ['1.13.2', '1.13.2', '1.13.2', true]);
+    eq('버전 1.13.3 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.3 /.test(pkg.scripts.dist)], ['1.13.3', '1.13.3', '1.13.3', true]);
     ok('index.html 에 cloud.js', /<script src="js\/cloud\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8')));
   });
 
@@ -655,7 +658,7 @@ async function ownerData(S) {
     const w1 = put('po', poRows, 0, LAY.po, 'PC-A');
     ok('저장(cloud_put)은 시트를 기다리지 않음 — 저장 번호만 주고, 시트는 아직 그대로', w1.ok && w1.vers.po === 1 && !('sheet' in w1) && S.book.names().join() === '시트1' && S.book.writes === 0, { w1, tabs: S.book.names() });
     const i1 = info();
-    ok('cloud_info: 6판 · 보낸 PC · 시트에 쓴 번호 (sv 0 = 아직)', i1.ver === 6 && i1.tables.po.pc === 'PC-A' && i1.tables.po.sv === 0 && i1.tables.po.v === 1, i1.tables.po);
+    ok('cloud_info: 7판 · 보낸 PC · 시트에 쓴 번호 (sv 0 = 아직)', i1.ver === 7 && i1.tables.po.pc === 'PC-A' && i1.tables.po.sv === 0 && i1.tables.po.v === 1, i1.tables.po);
     const s1 = sheetGo(); const tab = S.book.tab('수주 (PO)');
     ok('cloud_sheet → 표마다 탭 (ERP 화면과 같은 한국어 이름) · 쓴 표 · 시트 주소 · 이름', s1.ok && s1.sheet === true && JSON.stringify(s1.written) === '["po"]' && !s1.more && !!tab && s1.url === 'https://sheet.example' && s1.name === 'ColorPencil ERP 공유 자료', s1);
     const t1 = tab ? tab.table() : [];
@@ -721,7 +724,7 @@ async function ownerData(S) {
     const plTab = bk.tab('생산 일보');
     ok('생산 일보 탭: 머리글 = 화면 (생산일 …) · 맨 끝 ID (ERP) · 120행', !!plTab && plTab.table()[0][0] === '생산일' && plTab.table()[0].slice(-1)[0] === 'ID (ERP)' && plTab.table().length === 121, plTab && plTab.table()[0]);
     const st1 = await stat(P1);
-    ok('상태: 구글 시트 있음 · 주소 · 이름 · 6판 · 최신 (갱신 대기 · 오류 없음)', !!st1.sheet && st1.sheet.has === true && st1.sheet.url === 'https://sheet.example' && st1.sheet.name === 'ColorPencil ERP 공유 자료' && st1.sheet.ver === 6 && !st1.sheet.code && st1.sheet.lag.length === 0 && !Object.keys(st1.sheet.errs).length && !!st1.sheet.at, st1.sheet);
+    ok('상태: 구글 시트 있음 · 주소 · 이름 · 7판 · 최신 (갱신 대기 · 오류 없음)', !!st1.sheet && st1.sheet.has === true && st1.sheet.url === 'https://sheet.example' && st1.sheet.name === 'ColorPencil ERP 공유 자료' && st1.sheet.ver === 7 && !st1.sheet.code && st1.sheet.lag.length === 0 && !Object.keys(st1.sheet.errs).length && !!st1.sheet.at, st1.sheet);
     const pl = await getT(P1, 'prod_log'); byId(pl, 'pl7').ok_ea = 7777; await putT(P1, 'prod_log', pl); await sync(P1);
     const rowOf = (tn, id) => ((bk.tab(tn) && bk.tab(tn).table().find(r => r[r.length - 1] === id)) || []);
     ok('ERP 에서 고쳐 저장 → 구글 시트 탭도 (몇 초 안에) · 안내 탭에 보낸 PC', await waitFor(() => rowOf('생산 일보', 'pl7').includes(7777)) && (bk.sheets[0].table().find(r => r[5] === 'prod_log') || [])[3] === 'PC-사장', bk.sheets[0].table());
@@ -791,7 +794,119 @@ async function ownerData(S) {
     const cj = path.join(P1.dataDir, 'cloud.json'), cjo = JSON.parse(fs.readFileSync(cj, 'utf8')); delete cjo.sheet; delete cjo.sheetAt; fs.writeFileSync(cj, JSON.stringify(cjo));
     const P1b = keep(await startPc(P1.dataDir, { pcName: 'PC-사장', cloudSheet: 1000, cloudSheetLag: 0 }), servers);
     const sb0 = (await stat(P1b)).sheet; await sync(P1b); const sb1 = (await stat(P1b)).sheet;
-    ok('1.13.1 까지 연결한 PC: 처음엔 시트를 모름 (확인 중) → 한 판 뒤 6판 · 시트 주소', sb0.has === null && sb0.ver === null && sb1.has === true && sb1.url === 'https://sheet.example' && sb1.ver === 6 && !sb1.lag.length, { sb0, sb1 });
+    ok('1.13.1 까지 연결한 PC: 처음엔 시트를 모름 (확인 중) → 한 판 뒤 7판 · 시트 주소', sb0.has === null && sb0.ver === null && sb1.has === true && sb1.url === 'https://sheet.example' && sb1.ver === 7 && !sb1.lag.length, { sb0, sb1 });
+  });
+
+  // ------------------------------------------------------------------------------------------
+  await sec('11. 코드 검토에서 찾은 문제 (1.13.3) — 비밀 키 · 덮어쓰기 · 휴대폰 잠금 · 속성 크기 · 탭 이름 · 다시 쓰기 요청', async () => {
+    const src = fs.readFileSync(CODE_FILE, 'utf8').replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';");
+    const gz = (v) => zlib.gzipSync(JSON.stringify(v)).toString('base64');
+    const waitFor = async (fn, ms) => { for (let i = 0; i < (ms || 10000) / 100; i++) { if (await fn()) return true; await sleep(100); } return false; };
+
+    // ① 구글 비밀 키(gToken)는 ERP 가 실행 중인 PC 밖으로 보내지 않고, 사내망의 다른 PC 브라우저는 주소 · 키를 바꾸지 못한다
+    {
+      const GK = keep(await fakeGoogle(src), googles), GX = keep(await fakeGoogle(src), googles);   // GX = 남의 Apps Script (같은 키를 받으면 받아들임)
+      const K = keep(await startPc(tmp('erp-v18-k-')), servers); await ownerData(K);
+      await capi(K, 'connect', { url: GK.url, token: TK, mode: 'upload' });
+      await req(K.port, 'PUT', '/api/lan/pin', { pin: '1357' });
+      const L2 = { localAddress: '127.0.0.2' };
+      const lg = await req(K.port, 'POST', '/api/login', { pin: '1357' }, L2);
+      const o = Object.assign({ cookie: String((lg.headers['set-cookie'] || [''])[0]).split(';')[0] }, L2);
+      const db = await req(K.port, 'GET', '/api/db', undefined, o), mt = await req(K.port, 'GET', '/api/meta', undefined, o);
+      ok('다른 PC 브라우저: /api/db · /api/meta 에 비밀 키 없음 (웹 앱 주소 · 다른 설정은 보임)', lg.status === 200 && db.status === 200 && !db.text.includes(TK) && !mt.text.includes(TK) && db.json.meta.gUrl === GK.url && mt.json.meta.buyLead === 30,
+        { db: db.json && db.json.meta, mt: mt.json && mt.json.meta });
+      const pt = await req(K.port, 'PATCH', '/api/meta', { set: { gUrl: GX.url, gToken: 'evil-token-1234567890', buyLead: 12 }, del: [] }, o);
+      const pd = await req(K.port, 'PATCH', '/api/meta', { set: {}, del: ['gToken', 'gUrl'] }, o);
+      const pu = await req(K.port, 'PUT', '/api/meta', { buyLead: 13 }, o);   // 옛 화면 (1.3.0 이전): 설정 전체를 보냄
+      const m1 = await metaOf(K);
+      ok('다른 PC 브라우저가 주소 · 키를 바꾸거나 지우려 해도 그대로 · 다른 설정은 저장 · 답에도 키 없음',
+        pt.status === 200 && pd.status === 200 && pu.status === 200 && m1.gUrl === GK.url && m1.gToken === TK && m1.buyLead === 13 && !pt.text.includes(TK) && !pd.text.includes(TK), { m1, pt: pt.json });
+      const hk = GK.hits.length;
+      const gp = await req(K.port, 'POST', '/api/gproxy', { url: GK.url, body: JSON.stringify({ token: '', action: 'ping' }) }, o);
+      ok('다른 PC 브라우저의 구글 요청 (gproxy): 서버가 키를 넣어 연결된 웹 앱으로 보냄 (시트 올리기 · 휴대폰 요약이 그대로 됨)', gp.status === 200 && gp.json && gp.json.ok === true && GK.hits.length === hk + 1, gp.json);
+      const gx = await req(K.port, 'POST', '/api/gproxy', { url: GX.url, body: JSON.stringify({ action: 'ping' }) }, o);
+      ok('다른 웹 앱 주소로는 키를 넣지 않음 (키가 새지 않음)', !!gx.json && gx.json.ok === false && gx.json.error === 'bad token', gx.json);
+      ok('ERP 가 실행 중인 PC 는 키를 그대로 앎 (직원 PC 연결 코드 · 코드 복사)', (await req(K.port, 'GET', '/api/db')).json.meta.gToken === TK);
+      await capi(K, 'off');
+    }
+
+    // ② 덮어쓰기: 구글에만 있는 표 (이 PC 에 그 표 파일이 없음) 도 이 PC 자료 (= 빈 표) 로 — 이 PC 로 가져오지 않는다. ERP 가 모르는 표 (새 판 ERP 의 표) 는 그대로
+    {
+      const GO = keep(await fakeGoogle(src), googles);
+      const A1 = keep(await startPc(tmp('erp-v18-oa-')), servers); await ownerData(A1);
+      await putT(A1, 'warehouses', [{ _id: 'w1', code: 'W-1', name: '본 창고' }, { _id: 'w2', code: 'W-2', name: '둘째 창고' }]);
+      await capi(A1, 'connect', { url: GO.url, token: TK, mode: 'upload' });
+      GO.putRaw('future_tbl', [{ _id: 'f1', x: 1 }]);
+      const dB = tmp('erp-v18-ob-'); const B1 = keep(await startPc(dB), servers);
+      await putT(B1, 'po', [{ _id: 'poB', po_no: 'P-B', item_no: 'IT-B', sets: 3 }]);
+      const ow = await capi(B1, 'connect', { url: GO.url, token: TK, mode: 'overwrite' }); await sync(B1);
+      const whB = await getT(B1, 'warehouses');
+      ok('덮어쓰기: 이 PC 에 없는 표 (창고) 는 구글에서도 비우고 이 PC 로 가져오지 않음 · 수주 = 이 PC',
+        ow.status === 200 && (GO.rows('warehouses') || []).length === 0 && whB.length === 0 && ids(GO.rows('po')).join() === 'poB', { wh: GO.rows('warehouses'), whB, po: ids(GO.rows('po')) });
+      ok('ERP 가 모르는 표 (새 판의 표) 는 덮어쓰지 않음', (GO.rows('future_tbl') || []).length === 1, GO.rows('future_tbl'));
+      await sync(A1);
+      ok('다른 PC 도 따라감 (창고 비움 · 수주 = 덮어쓴 PC)', (await getT(A1, 'warehouses')).length === 0 && ids(await getT(A1, 'po')).join() === 'poB');
+      await capi(A1, 'off'); await capi(B1, 'off');
+    }
+
+    // ③ 휴대폰 보기: 누가 비밀번호를 10번 넘게 틀려도, 이 휴대폰을 기억해 둔 사람은 그대로 본다 (잠금이 모두를 막지 않음)
+    {
+      const MB = gasCtx(src);
+      MB.post({ token: TK, action: 'mobile_pw', pw: 'secret12' }); MB.post({ token: TK, action: 'mobile', summary: JSON.stringify({ v: 1, kpi: {} }) });
+      const first = MB.c.mobileData({ pw: 'secret12', keep: true }) || {};
+      ok('맞는 비밀번호 + 기억 → 요약과 이 휴대폰의 열쇠 (비밀번호 대신 기억)', first.ok === true && /^[0-9a-f]{64}$/.test(String(first.dev || '')), first);
+      for (let i = 0; i < 12; i++) MB.c.mobileData({ pw: 'wrong' + i });
+      eq('누가 10번 넘게 틀리면 비밀번호로는 잠김 (WAIT)', (MB.c.mobileData({ pw: 'secret12' }) || {}).error, 'WAIT');
+      ok('기억해 둔 휴대폰은 잠긴 동안에도 바로 보임', (MB.c.mobileData({ dev: first.dev }) || {}).ok === true);
+      eq('없는 열쇠 → BAD_DEV', (MB.c.mobileData({ dev: 'f'.repeat(64) }) || {}).error, 'BAD_DEV');
+      ok('열쇠는 해시로만 저장 (원문 없음)', !!first.dev && !Array.from(MB.props.values()).some(v => String(v).includes(first.dev)));
+      MB.post({ token: TK, action: 'mobile_pw', pw: 'newpass99' });
+      eq('비밀번호를 바꾸면 기억해 둔 휴대폰도 다시 넣어야 함', (MB.c.mobileData({ dev: first.dev }) || {}).error, 'BAD_DEV');
+      ok('옛 휴대폰 화면 (비밀번호 글자만 보냄) 도 그대로', (MB.c.mobileData('newpass99') || {}).ok === true);
+    }
+
+    // ④ 구글 속성 한도 (값 하나 9KB, 바이트): 한국어 머리글이 아주 많은 표도 저장이 실패하지 않고, 같은 묶음의 다른 표도 저장된다
+    {
+      const PB = gasCtx(src);
+      const wide = { title: '넓은 표', ord: 0, cols: Array.from({ length: 150 }, (_, i) => ({ k: 'c' + i, h: '한국어머리글이름가나다라마바사' + i, t: 't' })) };
+      const ls = JSON.stringify(wide);
+      ok('시험 준비: 머리글 글자 수는 8,500 미만 · UTF-8 은 9KB 넘음', ls.length < 8500 && Buffer.byteLength(ls, 'utf8') > 9216, [ls.length, Buffer.byteLength(ls, 'utf8')]);
+      const r = PB.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: gz([{ _id: 'a', c1: 'x' }]), n: 1, sheet: wide }, items: { base: 0, b64: gz([{ _id: 'b', code: 'A' }]), n: 1 } } });
+      ok('저장은 됨 (두 표 모두 번호 1) · 속성은 9KB 안', r.ok === true && !!r.vers && r.vers.po === 1 && r.vers.items === 1 && Buffer.byteLength(PB.props.get('L_po') || '', 'utf8') <= 9216, r);
+      const s = PB.post({ token: TK, action: 'cloud_sheet' });
+      ok('그 표의 탭도 시트에 씀 (탭 이름 그대로)', s.ok === true && (s.written || []).includes('po') && !!PB.book.tab('넓은 표'), { s, names: PB.book.names() });
+    }
+
+    // ⑤ 구글 시트 탭 이름: 같은 이름의 탭이 이미 있으면 "(ERP)" → "(ERP 2)" … · 아주 긴 이름이어도 멈추지 않음 (100자 안)
+    {
+      const TB = gasCtx(src); const ssT = TB.c.SpreadsheetApp.getActiveSpreadsheet();
+      ssT.insertSheet('창고'); ssT.insertSheet('창고 (ERP)'); ssT.insertSheet('가'.repeat(90));
+      TB.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: gz([{ _id: 'p', po_no: 'P' }]), n: 1, sheet: { title: '가'.repeat(95), ord: 0, cols: [] } },
+        warehouses: { base: 0, b64: gz([{ _id: 'w', code: 'W' }]), n: 1, sheet: { title: '창고', ord: 1, cols: [] } } } });
+      let res = null, err = null;
+      try { res = JSON.parse(vm.runInContext("JSON.stringify(cloud_({ action: 'cloud_sheet', all: false }))", TB.c, { timeout: 8000 })); } catch (e) { err = String((e && e.message) || e); }
+      const names = TB.book.names();
+      ok('아주 긴 이름의 탭이 이미 있어도 멈추지 않고 새 탭 ("… (ERP)", 100자 안)', !err && !!res && (res.written || []).includes('po') && names.some(n => /\(ERP\)$/.test(n) && n.length <= 100 && n.indexOf('가'.repeat(20)) === 0), { err, names });
+      ok('"창고" · "창고 (ERP)" 가 이미 있으면 "창고 (ERP 2)"', names.includes('창고 (ERP 2)'), names);
+    }
+
+    // ⑥ [구글 시트 다시 쓰기] 를 누른 순간 인터넷이 끊겨도, 다시 되면 저절로 모든 탭을 다시 쓴다 (요청이 사라지지 않음)
+    {
+      const GR = keep(await fakeGoogle(src), googles); const bkR = GR.gas.book;
+      const R = keep(await startPc(tmp('erp-v18-r-'), { cloudSheet: 100, cloudSheetLag: 0, cloudSheetRetry: 300 }), servers);
+      await ownerData(R); await capi(R, 'connect', { url: GR.url, token: TK, mode: 'upload' });
+      const idleR = () => waitFor(async () => { const s = (await stat(R)).sheet || {}; return !s.busy && !s.queued; });
+      ok('시험 준비: 올린 뒤 수주 탭', await waitFor(() => !!bkR.tab('수주 (PO)')) && await idleR(), bkR.names());
+      bkR.tab('수주 (PO)').getRange(2, 1, 1, 1).setValues([['손으로 고침']]);
+      GR.down = true;
+      const rw = await req(R.port, 'POST', '/api/cloud/sheet', {});
+      const failed = await waitFor(async () => ((await stat(R)).sheet || {}).code === 'NET', 5000);
+      GR.down = false;
+      const fixed = await waitFor(() => bkR.tab('수주 (PO)').table()[1][0] !== '손으로 고침', 6000);
+      ok('끊긴 동안 누른 [구글 시트 다시 쓰기] → 실패 표시 → 다시 되면 저절로 모든 탭을 다시 씀 (손으로 고친 칸도)', rw.status === 200 && failed && fixed,
+        { failed, fixed, st: (await stat(R)).sheet, cell: bkR.tab('수주 (PO)').table()[1] });
+      await capi(R, 'off');
+    }
   });
 
   ok('화면 오류 없음', !errors.length, errors.slice(0, 6));

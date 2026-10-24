@@ -1,5 +1,5 @@
 /**
- * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 6판 (v1.13.2)
+ * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 7판 (v1.13.3)
  * 설치 (ERP → 엑셀 · 구글 연동 → 구글 시트 · 드라이브 → "여러 PC 자료 공유" 카드의 순서와 같다):
  *   1) ERP 의 [Apps Script 코드 복사] — 이 코드에 비밀 키(TOKEN)를 넣어서 복사해 준다
  *   2) 새 구글 시트 (sheets.new) > 확장 프로그램 > Apps Script > 원래 코드를 모두 지우고 붙여넣기 > 저장
@@ -9,6 +9,9 @@
  *   (이미 배포했으면: 코드를 바꾼 뒤 배포 > 배포 관리 > 수정(연필) > 버전: 새 버전 > 배포 — 주소는 그대로)
  * Cài đặt: ERP > [Sao chép mã Apps Script] (đã có TOKEN) > Google Sheet mới > Tiện ích mở rộng > Apps Script > dán mã > Lưu
  *          > Triển khai (Deploy) > Bản triển khai mới > Ứng dụng web (Thực thi: Tôi, Truy cập: Bất kỳ ai / Anyone) > dán URL vào ERP > [Kiểm tra kết nối].
+ * 7판 (1.13.3): 보안 · 안정 — 휴대폰 보기는 비밀번호 대신 "이 휴대폰의 열쇠" 를 기억해, 누가 비밀번호를 여러 번 틀려 잠겨도 기억해 둔 휴대폰은 그대로 본다
+ *      (비밀번호를 바꾸거나 끄면 열쇠도 모두 지움). 탭 이름 · 머리글이 속성 한도(9KB)를 넘어도 저장이 실패하지 않고, 같은 이름의 탭이 있으면 "(ERP 2)" …, 아주 긴 이름도.
+ *      6판 그대로여도 자료 공유 · 시트 보기는 된다 — 이 고침을 쓰려면 새 코드를 붙여넣고 배포 관리 → 수정 → 새 버전 (주소 그대로).
  * 6판: 이 스프레드시트 = 공유 자료 보기 — 표마다 탭 (ERP 화면과 같은 한국어 이름 · 머리글) + 맨 앞 "ERP 자료 안내". 어느 PC 가 저장하든 몇십 초 안에 갱신
  *      (ERP 가 저장(cloud_put) 뒤 따로 cloud_sheet 를 부른다 — 저장 응답이 시트 쓰기를 기다리지 않게). 고치는 것은 ERP 에서 (탭은 경고만 보호).
  *      이미 5판으로 배포했으면 새 코드를 붙여넣고 배포 관리 → 수정 → 새 버전 (주소 그대로). 5판 그대로여도 자료 공유는 된다 (시트 표 보기만 없음).
@@ -136,7 +139,7 @@ function backup_(req) {
 //   캐시를 채우고 바꾸는 것은 언제나 잠금 안에서 속성을 읽은 뒤 (쓰기 사이에 옛 목록이 끼지 않게). 캐시에 못 쓰면 지워서 다음 물음은 속성에서 읽는다.
 var NAME_RE_ = /^[A-Za-z0-9_]{1,40}$/;
 var IDX_KEY_ = 'CLOUD_IDX', IDX_TTL_ = 600;
-var CLOUD_VER_ = 6;   // 6판 (1.13.2): 구글 시트 = 공유 자료 보기 (표마다 탭, 쓸 때마다 갱신)
+var CLOUD_VER_ = 7;   // 7판 (1.13.3): 보안 · 안정 고침 — 6판 (1.13.2): 구글 시트 = 공유 자료 보기 (표마다 탭, 쓸 때마다 갱신)
 function cloud_(req) {
   if (req.action === 'cloud_info') {
     var hit = null; try { hit = JSON.parse(CacheService.getScriptCache().get(IDX_KEY_) || 'null'); } catch (e) { hit = null; }
@@ -200,10 +203,27 @@ function cloudPut_(props, p, tables, pc) {
     var nx = { v: cur + 1, f: f.getId(), s: b64.length, n: Number(t.n) || 0, at: now, pc: pc || '' };
     props.setProperty('T_' + n, JSON.stringify(nx)); p['T_' + n] = JSON.stringify(nx);
     // 6판: 시트에 쓸 탭 이름 · 머리글 (ERP 가 보냄 — 화면과 같은 한국어). 바뀌었을 때만 저장
-    if (t.sheet && typeof t.sheet === 'object') { var ls = JSON.stringify(t.sheet); if (ls.length < 8500 && p['L_' + n] !== ls) { props.setProperty('L_' + n, ls); p['L_' + n] = ls; } }
+    // 7판: 속성 값 하나는 9KB (UTF-8 바이트) 까지 — 넘으면 줄여서 두고, 그래도 못 쓰면 이름표만 그대로 (저장은 실패하지 않게)
+    if (t.sheet && typeof t.sheet === 'object') {
+      var ls = layoutJson_(t.sheet);
+      if (ls && p['L_' + n] !== ls) { try { props.setProperty('L_' + n, ls); p['L_' + n] = ls; } catch (e) { /* 탭 이름 · 머리글만 바꾸지 못함 */ } }
+    }
     vers[n] = nx.v;
   });
   return { ok: true, vers: vers, conflicts: conflicts };
+}
+var LAYOUT_MAX_ = 8500;   // 탭 이름 · 머리글 속성 (UTF-8 바이트) — 속성 값 하나 9KB 안
+function utf8Len_(s) { try { return unescape(encodeURIComponent(s)).length; } catch (e) { return String(s).length * 3; } }   // 짝 없는 서로게이트 → 넉넉히
+/** 탭 이름 · 열 → 속성에 둘 JSON. 크면 머리글을 줄이고 (24 · 12 · 6자), 그래도 크면 이름 · 순서만 (머리글 = 칸 이름) */
+function layoutJson_(lay) {
+  var full = JSON.stringify(lay); if (utf8Len_(full) <= LAYOUT_MAX_) return full;
+  var cols = Array.isArray(lay.cols) ? lay.cols : [];
+  for (var cut = 24; cut >= 6; cut = Math.floor(cut / 2)) {
+    var s = JSON.stringify({ title: lay.title, ord: lay.ord, cols: cols.map(function (c) { c = c || {}; return { k: c.k, h: String(c.h || c.k || '').slice(0, cut) }; }) });
+    if (utf8Len_(s) <= LAYOUT_MAX_) return s;
+  }
+  var bare = JSON.stringify({ title: String(lay.title || '').slice(0, 90), ord: lay.ord });
+  return utf8Len_(bare) <= LAYOUT_MAX_ ? bare : null;
 }
 function dataFolder_() {
   var it = DriveApp.getFoldersByName(DATA_FOLDER);
@@ -275,13 +295,13 @@ function clearMarks_(props) { Object.keys(props.getProperties()).forEach(functio
 function layoutOf_(p, n) { try { var o = JSON.parse(p['L_' + n] || 'null'); if (o && typeof o === 'object') return o; } catch (e) { /* 깨짐 */ } return { title: n, cols: [] }; }
 function safeTitle_(s) { return String(s || '').replace(/[:\\\/?*\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'ERP'; }
 function ourSheetIds_(p) { var ids = {}; Object.keys(p).forEach(function (k) { if (k.indexOf('SN_') === 0 || k === 'SNOV') ids[String(p[k])] = 1; }); return ids; }
-/** 표의 탭: 저장한 탭 id → 없으면 새로 (같은 이름의 다른 탭이 있으면 " (ERP)") */
+/** 표의 탭: 저장한 탭 id → 없으면 새로 (같은 이름의 다른 탭이 있으면 " (ERP)" · " (ERP 2)" …). 꼬리를 붙인 뒤에도 90자 안 (탭 이름은 100자까지) */
 function tabOf_(ss, props, p, n, lay) {
   var want = safeTitle_(lay.title || n), id = p['SN_' + n], sh = null;
   if (id) ss.getSheets().forEach(function (s) { if (String(s.getSheetId()) === String(id)) sh = s; });
   if (!sh) {
-    var name = want, k = 1;
-    while (ss.getSheetByName(name)) name = safeTitle_(want + ' (ERP' + (k++ > 1 ? ' ' + k : '') + ')');
+    var name = want;
+    for (var k = 1; ss.getSheetByName(name) && k < 1000; k++) { var tail = ' (ERP' + (k > 1 ? ' ' + k : '') + ')'; name = want.slice(0, 90 - tail.length) + tail; }   // 꼬리가 달라 이름이 늘 다름 → 끝남
     sh = ss.insertSheet(name, ss.getNumSheets());
     props.setProperty('SN_' + n, String(sh.getSheetId())); p['SN_' + n] = String(sh.getSheetId());
   } else if (sh.getName() !== want && !ss.getSheetByName(want)) sh.setName(want);   // ERP 의 표 이름이 바뀌었으면 탭 이름도
@@ -374,30 +394,46 @@ function mobile_(req) {
   if (it.hasNext()) it.next().setContent(s); else folder.createFile(MOBILE_FILE, s, 'application/json');
   return { ok: true, at: new Date().toISOString(), size: s.length };
 }
-// mobile_pw: {pw} — 휴대폰 보기 비밀번호 (빈 값 = 끄기). 소금 + SHA-256 해시로만 둔다
+// mobile_pw: {pw} — 휴대폰 보기 비밀번호 (빈 값 = 끄기). 소금 + SHA-256 해시로만 둔다. 바꾸거나 끄면 기억해 둔 휴대폰의 열쇠도 모두 지운다 (7판)
 function mobilePw_(req) {
   var props = PropertiesService.getScriptProperties(), pw = String(req.pw || '');
-  if (!pw) { props.deleteProperty('MOBILE_HASH'); props.deleteProperty('MOBILE_SALT'); return { ok: true, on: false }; }
+  if (!pw) { props.deleteProperty('MOBILE_HASH'); props.deleteProperty('MOBILE_SALT'); props.deleteProperty(DEVS_KEY_); return { ok: true, on: false }; }
   if (pw.length < 6 || pw.length > 32) return { ok: false, error: 'password: 6~32' };
   var salt = Utilities.getUuid();
-  props.setProperties({ MOBILE_SALT: salt, MOBILE_HASH: hash_(salt, pw) });
+  props.setProperties({ MOBILE_SALT: salt, MOBILE_HASH: hash_(salt, pw) }); props.deleteProperty(DEVS_KEY_);
   CacheService.getScriptCache().remove('mfail');
   return { ok: true, on: true };
 }
+// 7판: 기억해 둔 휴대폰의 열쇠 — 속성 MOBILE_DEVS = [{h: 해시, at}] (최근 10개). 열쇠 원문은 휴대폰에만 있다
+var DEVS_KEY_ = 'MOBILE_DEVS', DEVS_MAX_ = 10;
+function devs_(props) { try { var a = JSON.parse(props.getProperty(DEVS_KEY_) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 function hash_(salt, pw) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + '|' + pw, Utilities.Charset.UTF_8)
     .map(function (b) { var x = (b + 256) % 256; return (x < 16 ? '0' : '') + x.toString(16); }).join('');
 }
-// 휴대폰 화면이 부른다 (google.script.run). 10번 틀리면 10분 잠금
-function mobileData(pw) {
+// 휴대폰 화면이 부른다 (google.script.run). a = {pw, keep} · {dev} (7판) · 비밀번호 글자 (옛 화면).
+// 비밀번호를 10번 틀리면 10분 동안 비밀번호로는 잠근다 — 기억해 둔 휴대폰 (열쇠) 은 그대로 본다 (누가 일부러 틀려 모두를 막지 못하게, 7판).
+// keep 이면 이 휴대폰의 열쇠를 새로 만들어 돌려준다 (휴대폰은 비밀번호 대신 열쇠를 기억)
+function mobileData(a) {
+  var o = a && typeof a === 'object' ? a : { pw: a };
   var props = PropertiesService.getScriptProperties(), hash = props.getProperty('MOBILE_HASH'), salt = props.getProperty('MOBILE_SALT');
   if (!hash || !salt) return { ok: false, error: 'NO_PW' };
-  var cache = CacheService.getScriptCache(), fails = Number(cache.get('mfail') || 0);
-  if (fails >= 10) return { ok: false, error: 'WAIT' };
-  if (hash_(salt, String(pw || '')) !== hash) { cache.put('mfail', String(fails + 1), 600); return { ok: false, error: 'BAD_PW' }; }
+  if (o.dev) {
+    var dh = hash_(salt, 'dev|' + String(o.dev));
+    if (!devs_(props).some(function (x) { return x && x.h === dh; })) return { ok: false, error: 'BAD_DEV' };
+  } else {
+    var cache = CacheService.getScriptCache(), fails = Number(cache.get('mfail') || 0);
+    if (fails >= 10) return { ok: false, error: 'WAIT' };
+    if (hash_(salt, String(o.pw || '')) !== hash) { cache.put('mfail', String(fails + 1), 600); return { ok: false, error: 'BAD_PW' }; }
+  }
   var it = folder_().getFilesByName(MOBILE_FILE);
   if (!it.hasNext()) return { ok: false, error: 'NO_DATA' };
-  return { ok: true, data: it.next().getBlob().getDataAsString('UTF-8') };
+  var out = { ok: true, data: it.next().getBlob().getDataAsString('UTF-8') };
+  if (!o.dev && o.keep) {
+    out.dev = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').toLowerCase();
+    props.setProperty(DEVS_KEY_, JSON.stringify(devs_(props).concat([{ h: hash_(salt, 'dev|' + out.dev), at: new Date().toISOString() }]).slice(-DEVS_MAX_)));
+  }
+  return out;
 }
 
 // 휴대폰 화면 (글자는 모두 textContent 로 넣는다)
@@ -423,7 +459,9 @@ input{font:inherit;min-height:42px;padding:0 12px;border:1px solid #C9CFD6;borde
 <script>
 (function () {
   var LS = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: function (k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 없음 */ } } };
-  var lang = LS.get('erpm_lang') === 'vi' ? 'vi' : 'ko', pw = LS.get('erpm_pw') || '', data = null, msg = '';
+  // 7판: 기억하는 것은 비밀번호가 아니라 이 휴대폰의 열쇠 (erpm_dev). 예전에 기억한 비밀번호 (erpm_pw) 는 다음에 열 때 열쇠로 바꾼다
+  var lang = LS.get('erpm_lang') === 'vi' ? 'vi' : 'ko', data = null, msg = '';
+  var cred = LS.get('erpm_dev') ? { dev: LS.get('erpm_dev') } : (LS.get('erpm_pw') ? { pw: LS.get('erpm_pw'), keep: true } : null);
   var m = document.getElementById('m');
   function L(ko, vi) { return lang === 'vi' ? vi : ko; }
   function el(tag, cls, kids) { var e = document.createElement(tag); if (cls) e.className = cls; (kids || []).forEach(function (c) { if (c === null || c === undefined || c === false) return; e.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c))); }); return e; }
@@ -441,26 +479,32 @@ input{font:inherit;min-height:42px;padding:0 12px;border:1px solid #C9CFD6;borde
     var inp = el('input'); inp.type = 'password'; inp.autocomplete = 'current-password'; inp.placeholder = L('휴대폰 보기 비밀번호', 'Mật khẩu xem trên điện thoại');
     var keep = el('input'); keep.type = 'checkbox'; keep.checked = true; keep.style.width = 'auto'; keep.style.minHeight = '0';
     var go = el('button', 'btn p', [L('보기', 'Xem')]); go.type = 'button';
-    var f = function () { if (!inp.value) return; go.disabled = true; load(inp.value, keep.checked); };
+    var f = function () { if (!inp.value) return; go.disabled = true; load({ pw: inp.value, keep: keep.checked }); };
     go.onclick = f; inp.onkeydown = function (e) { if (e.key === 'Enter') f(); };
     m.replaceChildren(el('div', 'card', [el('h2', '', [L('휴대폰 보기', 'Xem trên điện thoại')]), el('p', 'muted', [L('ERP 설정 → 휴대폰으로 보기에서 정한 비밀번호를 넣으세요.', 'Nhập mật khẩu đã đặt ở ERP → Cài đặt → Xem trên điện thoại.')]),
       note ? el('p', 'bad', [note]) : null, inp, el('label', 'muted', [keep, ' ', L('이 휴대폰에서 기억', 'Ghi nhớ trên điện thoại này')]), el('div', 'bar', [go])]));
     inp.focus();
   }
-  function errText(c) { return { BAD_PW: L('비밀번호가 맞지 않습니다', 'Sai mật khẩu'), WAIT: L('여러 번 틀려 10분 동안 잠겼습니다', 'Sai nhiều lần — khóa 10 phút'), NO_PW: L('아직 휴대폰 보기가 켜지지 않았습니다 (ERP 설정 → 휴대폰으로 보기)', 'Chưa bật xem trên điện thoại (ERP → Cài đặt)'), NO_DATA: L('아직 ERP 가 요약을 보내지 않았습니다', 'ERP chưa gửi tóm tắt') }[c] || String(c); }
-  function load(p, keep) {
+  function errText(c) { return { BAD_PW: L('비밀번호가 맞지 않습니다', 'Sai mật khẩu'), WAIT: L('여러 번 틀려 10분 동안 잠겼습니다', 'Sai nhiều lần — khóa 10 phút'), NO_PW: L('아직 휴대폰 보기가 켜지지 않았습니다 (ERP 설정 → 휴대폰으로 보기)', 'Chưa bật xem trên điện thoại (ERP → Cài đặt)'), NO_DATA: L('아직 ERP 가 요약을 보내지 않았습니다', 'ERP chưa gửi tóm tắt'), BAD_DEV: L('이 휴대폰의 기억이 지워졌습니다 (비밀번호가 바뀜) — 비밀번호를 다시 넣으세요', 'Điện thoại này không còn được ghi nhớ (mật khẩu đã đổi) — hãy nhập lại mật khẩu') }[c] || String(c); }
+  /** a = {pw, keep} · {dev}. 열쇠를 받으면 그것만 기억하고, 기억하지 않으면 이 화면에서만 (새로 고침용) */
+  function load(a) {
     m.replaceChildren(el('div', 'card', [el('p', 'muted', [L('불러오는 중…', 'Đang tải…')])]));
-    call(p, function (r) {
-      if (r && r.ok) { try { data = JSON.parse(r.data); } catch (e) { data = null; } pw = p; if (keep) LS.set('erpm_pw', p); show(); return; }
+    call(a, function (r) {
+      if (r && r.ok) {
+        try { data = JSON.parse(r.data); } catch (e) { data = null; }
+        if (r.dev) { LS.set('erpm_dev', r.dev); cred = { dev: r.dev }; } else cred = a.dev ? { dev: a.dev } : { pw: a.pw };
+        LS.set('erpm_pw', null); show(); return;
+      }
+      if (r && r.error === 'BAD_DEV') LS.set('erpm_dev', null);
       if (r && r.error === 'BAD_PW') LS.set('erpm_pw', null);
-      login(errText(r && r.error));
+      cred = null; login(errText(r && r.error));
     }, function (e) { login(L('불러오지 못했습니다: ', 'Không tải được: ') + (e && e.message || e)); });
   }
   function show() {
     var d = data; if (!d || !d.kpi) { login(errText('NO_DATA')); return; }
     var k = d.kpi;
     var head = el('div', 'card', [el('div', 'bar', [el('b', '', [L('기준일 (생산일보) ', 'Ngày (báo cáo SX) ') + d.ref]), el('span', 'muted', [L('보낸 시각 ', 'Gửi lúc ') + hm(d.at) + ' · ' + ago(d.at)])]),
-      el('div', 'bar', [btn(L('새로 고침', 'Làm mới'), function () { load(pw, !!LS.get('erpm_pw')); }), btn(L('잠그기', 'Khóa'), function () { LS.set('erpm_pw', null); pw = ''; data = null; login(''); })])]);
+      el('div', 'bar', [btn(L('새로 고침', 'Làm mới'), function () { if (cred) load(cred); else login(''); }), btn(L('잠그기', 'Khóa'), function () { LS.set('erpm_dev', null); LS.set('erpm_pw', null); cred = null; data = null; login(''); })])]);
     var dash = el('div', 'card', [el('h2', '', [L('종합 현황', 'Tổng quan')]), el('div', 'kpis', [
       kpi(L('기준일 포장 실적', 'Đóng gói trong ngày'), n(k.pckDay.ok), L('세트', 'bộ'), k.pckDay.avgPct === null ? '' : k.pckDay.avgPct + L('% (최근 평균 대비)', '% so với TB'), k.pckDay.n ? (k.pckDay.avgPct >= 90 ? 'ok' : 'warn') : ''),
       // 1.12.3: 이번 달 포장 누계 = pcs (ERP 1.12.3 이상이 보낸 요약에 ea 가 있으면, 옛 요약은 세트)
@@ -500,6 +544,6 @@ input{font:inherit;min-height:42px;padding:0 12px;border:1px solid #C9CFD6;borde
   function btn(t, fn) { var b = el('button', 'btn', [t]); b.type = 'button'; b.onclick = fn; return b; }
   function paintLang() { Array.prototype.forEach.call(document.querySelectorAll('.lg button'), function (b) { b.className = b.getAttribute('data-l') === lang ? 'on' : ''; b.onclick = function () { lang = b.getAttribute('data-l'); LS.set('erpm_lang', lang); paintLang(); if (data) show(); else login(msg); }; }); document.documentElement.lang = lang; }
   paintLang();
-  if (pw) load(pw, true); else login('');
+  if (cred) load(cred); else login('');
 })();
 </script></body></html>`;

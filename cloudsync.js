@@ -12,7 +12,9 @@
    1.13.2 (Code.gs 6판): 그 Apps Script 의 구글 시트 = 공유 자료 보기 (표마다 탭, 화면과 같은 한국어 이름 · 머리글).
    - 보낼 때 표마다 탭 이름 · 열 (o.layout, schema.js) 과 이 PC 이름 (o.pc) 을 같이 보낸다.
    - 시트 갱신(cloud_sheet)은 주고받기와 따로 돈다: 이 PC 가 보낸 뒤 20초 (그 사이 저장은 모아서 한 번), 다른 PC 가 못 한 갱신 (뒤처진 지 1분) 은 대신, [구글 시트 다시 쓰기] 는 바로.
-     저장 응답 · 30초 판 · 끄기 전 보내기는 시트 쓰기를 기다리지 않는다. 5판 · 시트 없이 만든 스크립트는 부르지 않는다. */
+     저장 응답 · 30초 판 · 끄기 전 보내기는 시트 쓰기를 기다리지 않는다. 5판 · 시트 없이 만든 스크립트는 부르지 않는다.
+   1.13.3: 덮어쓰기는 구글에만 있는 표도 (이 ERP 가 아는 표면 빈 표로 — 이 PC 로 가져오지 않음, 모르는 표는 그대로).
+     [구글 시트 다시 쓰기] 가 실패하면 그 요청을 남겨 두고 기다린 뒤 다시 한다. */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), util = require('util');
 const gzip = util.promisify(zlib.gzip), gunzip = util.promisify(zlib.gunzip);
 
@@ -111,14 +113,15 @@ const stamp = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d
 
 /**
  * o: { dataDir, store (server.js createStore), fetch, urlOk(url), codeFile, every (ms, 30000), poke (ms, 3000), log(msg),
- *      layout(표) → 시트 탭 이름 · 열 {title, ord, cols} (6판), pc (보낸 PC 이름), sheet (보낸 뒤 시트 갱신까지 ms, 20000 · -1 = 끔), sheetLag (다른 PC 대신 갱신하기 전 기다림 ms, 60000) }
+ *      layout(표) → 시트 탭 이름 · 열 {title, ord, cols} (6판), pc (보낸 PC 이름), sheet (보낸 뒤 시트 갱신까지 ms, 20000 · -1 = 끔), sheetLag (다른 PC 대신 갱신하기 전 기다림 ms, 60000),
+ *      sheetRetry (시트 갱신이 실패한 뒤 처음 기다림 ms, 60000 — 두 배씩 30분까지), known(표) → 이 ERP 가 아는 표인지 (기본: layout 이 있으면) }
  */
 function create(o) {
   const dir = o.dataDir, store = o.store, doFetch = o.fetch || global.fetch, urlOk = o.urlOk || (() => true);
   const tdir = path.join(dir, 'tables'), bdir = path.join(dir, 'cloud'), stFile = path.join(dir, 'cloud.json');
   const EVERY = o.every || 30000, POKE = o.poke === undefined ? 3000 : o.poke;
-  const layout = o.layout || (() => null), PC = String(o.pc || '').slice(0, 60);
-  const SHEET = o.sheet === undefined ? 20000 : o.sheet, SHEET_LAG = o.sheetLag === undefined ? 60000 : o.sheetLag;
+  const layout = o.layout || (() => null), PC = String(o.pc || '').slice(0, 60), known = o.known || ((n) => !!layout(n));
+  const SHEET = o.sheet === undefined ? 20000 : o.sheet, SHEET_LAG = o.sheetLag === undefined ? 60000 : o.sheetLag, SHEET_RETRY = o.sheetRetry === undefined ? 60000 : o.sheetRetry;
   const atomic = (file, data) => { const tmp = file + '.tmp'; fs.writeFileSync(tmp, data); fs.renameSync(tmp, file); };
   // st (cloud.json): on · cid (구글 저장소 이름표) · mode · since · lastOk/Got/Sent · t[표] = {cv 구글 번호, lv 이 PC 번호} · m = 설정의 {cv, lv}
   //   sheet = 그 Apps Script 의 구글 시트 {url, name} (false = 시트 없이 만든 스크립트, null = 아직 모름) · sheetAt = 이 PC 가 마지막으로 시트를 갱신한 시각
@@ -364,10 +367,10 @@ function create(o) {
   async function sheetRun() {
     if (sh.busy) return;
     if (!sheetOk()) { sh.all = false; return; }
-    sh.busy = true; let later = 0;
+    sh.busy = true; let later = 0, all = false, failed = false;
     try {
       for (let i = 0; i < 8; i++) {                        // more = Apps Script 한 번 실행 시간 (6분) 안에 다 못 씀 → 이어서
-        const all = sh.all; sh.all = false;
+        all = sh.all; sh.all = false;
         const j = await call(cfgNow(), { action: 'cloud_sheet', all }, 330000);
         if (j.sheet === false) { st.sheet = false; sh.lag = []; sh.errs = {}; saveState(); break; }
         st.sheet = { url: String(j.url || ''), name: String(j.name || '') };
@@ -378,15 +381,17 @@ function create(o) {
       }
       sh.code = null; sh.error = null; sh.fails = 0; sh.next = 0;
     } catch (e) {
+      failed = true; if (all) sh.all = true;               // 1.13.3: [구글 시트 다시 쓰기] 가 닿지 못함 → 요청을 남겨 두고, 기다린 뒤 다시
       sh.code = e.code || 'ERR'; sh.error = e.detail || String((e && e.message) || e); sh.fails++;
-      sh.next = Date.now() + Math.min(1800000, 60000 * Math.pow(2, Math.min(sh.fails - 1, 5)));   // 1분 · 2분 … 30분 뒤 (그동안 자료 공유는 그대로)
-      if (sh.code === 'OLD_SCRIPT') { sh.ver = 5; sh.lag = []; sh.errs = {}; }
+      sh.next = Date.now() + Math.min(1800000, SHEET_RETRY * Math.pow(2, Math.min(sh.fails - 1, 5)));   // 1분 · 2분 … 30분 뒤 (그동안 자료 공유는 그대로)
+      if (sh.code === 'OLD_SCRIPT') { sh.ver = 5; sh.lag = []; sh.errs = {}; sh.all = false; }
       const last = run.log[run.log.length - 1];
       if (!last || last.k !== 'sheeterr' || last.x.code !== sh.code) note('sheeterr', { code: sh.code, detail: sh.error });
     } finally {
       sh.busy = false;
       if (later) sheetLater(later);
       else if (sh.again) { sh.again = false; sheetLater(sh.all ? 0 : SHEET, sh.all); }
+      else if (failed && sh.all) sheetLater(0);            // 기다림 (sh.next) 뒤 모두 다시 쓰기
     }
   }
   /** [구글 시트 다시 쓰기] — 시작만 하고 바로 돌아온다 (화면은 상태를 다시 물어 진행을 본다) */
@@ -413,12 +418,19 @@ function create(o) {
   }
 
   // ---- 처음 연결
-  async function doUpload(cfg, ct, res) {
-    const v = store.versions(); const items = [];
-    for (const n of localNames()) {
+  async function doUpload(cfg, ct, res, mode) {
+    const v = store.versions(); const items = []; const have = localNames();
+    for (const n of have) {
       const rows = readLocal(n);
       if (!rows.length && !ct[n]) { st.t[n] = { cv: 0, lv: v.t[n] || 0 }; writeBase(n, new Map()); continue; }   // 빈 표는 올리지 않음
       items.push({ n, base: ct[n] ? Number(ct[n].v) || 0 : 0, rows, lv: v.t[n] || 0, newBase: sigMap(rows) }); res.tables++; res.rows += rows.length;
+    }
+    // 1.13.3 덮어쓰기: 구글에만 있는 표 = 이 PC 에서는 빈 표 → 구글도 비운다 (그대로 두면 다음 판에 이 PC 로 내려옴). 이 ERP 가 모르는 표 (새 판 ERP 의 표) 는 그대로
+    if (mode === 'overwrite') {
+      for (const n of Object.keys(ct)) {
+        if (n === META || have.includes(n) || !NAME_RE.test(n) || !known(n)) continue;
+        items.push({ n, base: Number(ct[n].v) || 0, rows: [], lv: v.t[n] || 0, newBase: new Map() }); res.tables++;
+      }
     }
     const ms = sharedMeta(store.readMeta());
     items.push({ n: META, base: ct[META] ? Number(ct[META].v) || 0 : 0, obj: ms, lv: v.meta || 0, newBase: metaBase(ms) });
@@ -506,7 +518,7 @@ function create(o) {
       st.sheet = p.sheet ? { url: String(p.url || ''), name: String(p.sheet) } : false;   // 6판: 그 Apps Script 의 구글 시트 (없으면 시트 없이 만든 스크립트)
       sh.ver = Number(p.ver) || 0; sh.lag = []; sh.errs = {}; sh.code = null; sh.error = null; sh.fails = 0; sh.next = 0;
       saveState();
-      if (mode === 'upload' || mode === 'overwrite') await doUpload(cfg, ct, res);
+      if (mode === 'upload' || mode === 'overwrite') await doUpload(cfg, ct, res, mode);
       else if (mode === 'replace') await doReplace(cfg, ct, res);
       else if (mode === 'merge') await doMerge(cfg, ct, o2.nat || {}, res);
       const now = new Date().toISOString();

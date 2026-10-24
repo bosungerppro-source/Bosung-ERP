@@ -179,11 +179,13 @@
     }
   }
   function googleTab(host) {
-    const g = G(); const url = h('input', { class: 'inp', value: g.url, placeholder: 'https://script.google.com/macros/s/…/exec', style: { width: '100%' } });
-    const tok = h('input', { class: 'inp', type: 'password', value: g.token, style: { width: '260px' } });
+    // 1.13.3: 사내망의 다른 PC 브라우저는 주소 · 키를 보지도 바꾸지도 않는다 (키는 서버만 앎 — 올리기 · 가져오기는 서버가 키를 넣어 보냄)
+    const own = DB.mode !== 'server' || !DB.ping || DB.ping.loopback !== false;
+    const g = G(); const url = h('input', { class: 'inp', value: g.url, disabled: !own, placeholder: 'https://script.google.com/macros/s/…/exec', style: { width: '100%' } });
+    const tok = h('input', { class: 'inp', type: 'password', value: g.token, disabled: !own, placeholder: own ? '' : L('ERP 가 실행 중인 PC 에서만', 'Chỉ trên máy đang chạy ERP'), style: { width: '260px' } });
     const log = h('pre', { class: 'help', style: { background: '#F6F8FA', padding: '10px', borderRadius: '8px', minHeight: '60px', maxHeight: '220px', overflow: 'auto', whiteSpace: 'pre-wrap' } });
     const say = (s) => { log.textContent += s + '\n'; log.scrollTop = log.scrollHeight; };
-    const save = () => { DB.setSetting('gUrl', url.value.trim()); DB.setSetting('gToken', tok.value); };
+    const save = () => { if (!own) return; DB.setSetting('gUrl', url.value.trim()); DB.setSetting('gToken', tok.value); };
     const names = () => Array.from(host.querySelectorAll('input[data-t]')).filter(x => x.checked).map(x => x.dataset.t);
     const busy = (b, fn) => async () => { save(); b.disabled = true; try { await fn(); } catch (e) { say('✗ ' + e.message); ERP.toast(e.message, 'bad'); } b.disabled = false; };
     const prog = (n, a, b) => say(`${n}: ${a}/${b}`);
@@ -195,7 +197,7 @@
     const oldScript = () => say(L('⚠ 구글 Apps Script 가 옛 버전입니다. 위 카드의 [Apps Script 코드 복사] 로 새 코드를 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요 (코드 · 날짜가 숫자로 바뀌는 문제 수정).', '⚠ Apps Script là bản cũ. Hãy dán mã mới ([Sao chép mã Apps Script] ở thẻ trên) và triển khai phiên bản mới (sửa lỗi mã bị đổi thành số).'));
     const noBackup = () => say(L('ⓘ 구글 드라이브 자동 백업을 쓰려면 google/Code.gs 3판을 다시 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn sao lưu tự động lên Google Drive, hãy dán lại google/Code.gs bản 3 và triển khai phiên bản mới.'));
     const noMobile = () => say(L('ⓘ 휴대폰 보기(설정 → 휴대폰으로 보기)를 쓰려면 google/Code.gs 4판을 다시 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn xem trên điện thoại, hãy dán lại google/Code.gs bản 4 và triển khai phiên bản mới.'));
-    const noCloud = () => say(L('ⓘ 여러 PC 자료 공유를 쓰려면 위 카드의 [Apps Script 코드 복사] 로 6판 코드를 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn dùng chung dữ liệu nhiều máy, hãy dán mã bản 6 ([Sao chép mã Apps Script] ở thẻ trên) và triển khai phiên bản mới.'));
+    const noCloud = () => say(L('ⓘ 여러 PC 자료 공유를 쓰려면 위 카드의 [Apps Script 코드 복사] 로 7판 코드를 붙여넣고 새 버전으로 배포하세요.', 'ⓘ Muốn dùng chung dữ liệu nhiều máy, hãy dán mã bản 7 ([Sao chép mã Apps Script] ở thẻ trên) và triển khai phiên bản mới.'));
     bTest.onclick = busy(bTest, async () => { const j = await gcall({ action: 'ping' }); say('✓ ' + j.sheet + ' ' + j.url); if (!(j.ver >= 2)) oldScript(); else if (!(j.ver >= 3)) noBackup(); else if (!(j.ver >= 4)) noMobile(); else if (!(j.ver >= 5)) noCloud(); });
     bPush.onclick = busy(bPush, async () => { const n = names(); if (!n.length) return; const pj = await gcall({ action: 'ping' }); if (!(pj.ver >= 2)) oldScript(); say(L('업로드 시작', 'Bắt đầu đẩy')); await gpush(n, prog); say('✓ ' + L('완료', 'Xong')); });
     bPull.onclick = busy(bPull, async () => { const n = names(); if (!n.length) return; if (!(await ERP.confirm(L('선택한 표의 현재 데이터를 구글 시트 내용으로 교체합니다. 계속할까요?', 'Dữ liệu các bảng đã chọn sẽ bị thay bằng nội dung Google Sheet. Tiếp tục?') + ERP.cloudWarn()))) return; await gpull(n, prog); say('✓ ' + L('완료', 'Xong')); ERP.toast(L('구글 시트 데이터를 가져왔습니다', 'Đã lấy dữ liệu từ Google Sheet'), 'ok'); });
@@ -205,7 +207,8 @@
       h('div', { class: 'card' }, h('h3', L('구글 시트 · 드라이브 연동', 'Kết nối Google Sheet · Drive')),
         h('p', { class: 'help' }, L('표를 구글 시트로 보내 시트에서 보거나(↑), 구글 시트에서 고친 표를 가져옵니다(↓). 웹 앱 주소 · TOKEN 은 위 "여러 PC 자료 공유" 카드에서 연결하면 저절로 들어갑니다 (직접 넣어도 됩니다). PC 끼리 자료를 주고받는 것은 위 카드가 합니다.', 'Đẩy bảng sang Google Sheet để xem (↑) hoặc lấy bảng đã sửa từ Sheet (↓). URL · TOKEN tự điền khi kết nối ở thẻ "Dùng chung dữ liệu nhiều máy" phía trên (cũng có thể nhập tay). Việc trao đổi dữ liệu giữa các máy do thẻ phía trên đảm nhiệm.')),
         h('label', { class: 'field' }, h('span', 'Apps Script URL'), url), h('label', { class: 'field' }, h('span', 'TOKEN'), tok),
-        h('div', { class: 'toolbar' }, bTest, h('button', { class: 'btn', onclick: save }, L('저장', 'Lưu'))),
+        h('div', { class: 'toolbar' }, bTest, h('button', { class: 'btn', onclick: save, disabled: !own }, L('저장', 'Lưu'))),
+        own ? null : h('p', { class: 'help' }, L('사내망의 다른 PC 에서는 주소 · TOKEN 을 보거나 바꿀 수 없습니다 (ERP 가 실행 중인 PC 에서만). 연결 테스트 · 올리기 · 가져오기는 그대로 됩니다.', 'Từ máy khác trong mạng LAN không xem/đổi được URL · TOKEN (chỉ trên máy đang chạy ERP). Kiểm tra kết nối · đẩy · lấy dữ liệu vẫn dùng được.')),
         DB.mode !== 'server' ? h('p', { class: 'help' }, L('※ 브라우저 테스트 모드에서는 Apps Script 의 CORS 제약으로 실패할 수 있습니다. 설치 프로그램(PC 서버 모드)에서는 서버가 중계하여 정상 동작합니다.', '※ Ở chế độ trình duyệt có thể bị chặn CORS. Bản cài đặt trên PC sẽ chuyển tiếp qua máy chủ nội bộ nên hoạt động bình thường.')) : null),
       h('div', { class: 'card' }, h('h3', L('동기화할 표', 'Bảng cần đồng bộ')),
         h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: '6px' } }, Object.keys(ERP.TABLES).map(n => h('label', { class: 'nowrap' }, h('input', { type: 'checkbox', 'data-t': n, checked: true }), ' ', ERP.tableLabel(n), h('small', { class: 'muted' }, ' (' + F.n(DB.rows(n).length) + ')')))),
