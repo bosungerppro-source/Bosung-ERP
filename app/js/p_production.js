@@ -128,7 +128,7 @@
         h('button', { class: 'btn', onclick: () => { st.month = addM(st.month, -1); draw(); } }, '‹'),
         h('input', { class: 'inp', type: 'month', value: st.month, onchange: (e) => { if (e.target.value) { st.month = e.target.value; draw(); } } }),
         h('button', { class: 'btn', onclick: () => { st.month = addM(st.month, 1); draw(); } }, '›'),
-        h('select', { class: 'inp', onchange: (e) => { st.by = e.target.value; draw(); } }, [['process', L('열: 공정별', 'Cột: theo công đoạn')], ['division', L('열: 품목군별', 'Cột: theo nhóm hàng')]].map(o => h('option', { value: o[0], selected: st.by === o[0] }, o[1]))),
+        h('select', { class: 'inp', onchange: (e) => { st.by = e.target.value; draw(); } }, [['process', L('행: 공정별', 'Hàng: theo công đoạn')], ['division', L('행: 품목군별', 'Hàng: theo nhóm hàng')]].map(o => h('option', { value: o[0], selected: st.by === o[0] }, o[1]))),
         h('select', { class: 'inp', onchange: (e) => { st.proc = e.target.value; draw(); } }, h('option', { value: '' }, L('공정: 전체', 'Công đoạn: tất cả')), ERP.PROC.map(p => h('option', { value: p.id, selected: st.proc === p.id }, L(p.ko, p.vi)))),
         h('select', { class: 'inp', onchange: (e) => { st.div = e.target.value; draw(); } }, h('option', { value: '' }, L('품목군: 전체', 'Nhóm: tất cả')), divs.map(d => h('option', { value: d, selected: st.div === d }, d))));
     }
@@ -141,17 +141,20 @@
       const lastIn = rows.reduce((a, r) => (r.date > a ? r.date : a), '');
       // 품목군: 대소문자·공백 차이는 한 묶음 (종합 현황 '일별 조립 생산량'과 같은 규칙)
       const canon = new Map(); const dk = (r) => { const raw = String(r.division || '').trim(); const k = raw.toLowerCase() || '–'; if (!canon.has(k)) canon.set(k, raw || L('(품목군 없음)', '(không nhóm)')); return k; };
-      const colKeys = st.by === 'process' ? (st.proc ? ERP.PROC.filter(p => p.id === st.proc) : ERP.PROC).map(p => ({ k: p.id, label: L(p.ko, p.vi) })) : Array.from(new Set(rows.map(dk))).sort().map(d => ({ k: d, label: canon.get(d) }));
+      // 1.13.7: 가로 = 날짜, 세로 = 품목군 (또는 공정) — 종합 현황 '일별 조립 생산량' 위젯과 같은 표 (사용자: "가로에 날짜 세로에 품목군")
+      const keys = st.by === 'process' ? (st.proc ? ERP.PROC.filter(p => p.id === st.proc) : ERP.PROC).map(p => ({ k: p.id, label: L(p.ko, p.vi) })) : Array.from(new Set(rows.map(dk))).sort().map(d => ({ k: d, label: canon.get(d) }));
       const keyOf = (r) => st.by === 'process' ? r.process : dk(r);
-      const cell = {}; const dayTot = {}; const colTot = {}; let grand = 0;
-      rows.forEach(r => { const q = C.qty(r); const k = keyOf(r); (cell[r.date] = cell[r.date] || {})[k] = (cell[r.date][k] || 0) + q; dayTot[r.date] = (dayTot[r.date] || 0) + q; colTot[k] = (colTot[k] || 0) + q; grand += q; });
+      const cell = {}; const dayTot = {}; const keyTot = {}; let grand = 0;
+      rows.forEach(r => { const q = C.qty(r); const k = keyOf(r); (cell[r.date] = cell[r.date] || {})[k] = (cell[r.date][k] || 0) + q; dayTot[r.date] = (dayTot[r.date] || 0) + q; keyTot[k] = (keyTot[k] || 0) + q; grand += q; });
       const days = []; if (lastIn) { let d = from; while (d <= lastIn) { days.push(d); d = F.addDays(d, 1); } }
       const active = Object.keys(dayTot).length; const a = C.agg(rows);
-      const trs = days.map(d => { const has = dayTot[d] !== undefined; const wk = F.dow(d); const off = /일|토|CN|T7|Sun|Sat/.test(wk);
-        return h('tr', { style: has ? null : { color: '#9AA3AF', background: off ? '#FAFAFB' : null } }, h('td', { style: { whiteSpace: 'nowrap' } }, F.md(d) + ' ', h('small', { class: 'muted' }, wk)),
-          colKeys.map(c => h('td', { class: 'num' }, cell[d] && cell[d][c.k] ? F.n(cell[d][c.k]) : '–')), h('td', { class: 'num' }, has ? h('b', F.n(dayTot[d])) : '–')); });
-      const totRow = h('tr', { style: { background: '#F4F6F9', fontWeight: '700', position: 'sticky', bottom: 0 } }, h('td', L('월 합계', 'Tổng tháng')), colKeys.map(c => h('td', { class: 'num' }, F.n(colTot[c.k] || 0))), h('td', { class: 'num' }, F.n(grand)));
-      const tbl = h('div', { class: 'tbl-wrap', style: { maxHeight: '62vh' } }, h('table', { class: 'tbl' }, h('thead', h('tr', h('th', L('일자', 'Ngày')), colKeys.map(c => h('th', { class: 'num' }, c.label)), h('th', { class: 'num' }, L('일 합계', 'Tổng ngày')))), h('tbody', trs, totRow)));
+      const keyHead = st.by === 'process' ? L('공정', 'Công đoạn') : L('품목군', 'Nhóm');
+      // 일보가 없는 날: 회색 (주말은 옅은 바탕) — 1.13.6 까지 날짜 줄의 모양 그대로
+      const off = (d) => (dayTot[d] === undefined ? { color: '#9AA3AF', background: /일|토|CN|T7|Sun|Sat/.test(F.dow(d)) ? '#FAFAFB' : null } : null);
+      const tbl = h('div', { class: 'tbl-wrap', style: { maxHeight: '62vh' } }, h('table', { class: 'tbl dt' },
+        h('thead', h('tr', h('th', keyHead), h('th', { class: 'num' }, L('월 합계', 'Tổng tháng')), days.map(d => h('th', { class: 'num', style: off(d) }, String(+d.slice(8, 10)), h('small', F.dow(d)))))),
+        h('tbody', keys.map(c => h('tr', h('td', h('b', c.label)), h('td', { class: 'num' }, h('b', F.n(keyTot[c.k] || 0))), days.map(d => h('td', { class: 'num', style: off(d) }, cell[d] && cell[d][c.k] ? F.n(cell[d][c.k]) : '–')))),
+          h('tr', { class: 'tot' }, h('td', L('일 합계', 'Tổng ngày')), h('td', { class: 'num' }, F.n(grand)), days.map(d => h('td', { class: 'num' }, dayTot[d] !== undefined ? F.n(dayTot[d]) : '–'))))));
       // machine ranking
       // 설비 = 공정 + 종류 + 번호 (Mini 1번과 Regular 1번은 다른 설비)
       const mm = {}; rows.forEach(r => { const k = C.machKey(r); const o = mm[k] || (mm[k] = { proc: r.process, no: k.slice(k.indexOf(':') + 1).replace('#', ' ').trim() || '-', ea: 0, days: new Set() }); o.ea += C.qty(r); o.days.add(r.date); });
@@ -164,7 +167,7 @@
           ERP.kpi(L('입력된 일수', 'Số ngày có dữ liệu'), F.n(active), L('일', 'ngày'), 'info', lastIn ? F.d(from) + ' ~ ' + F.d(lastIn) : '–', null),
           ERP.kpi(L('일 평균', 'Trung bình/ngày'), F.n(active ? grand / active : 0), 'pcs', 'neutral', null, L('입력된 일 기준', 'theo ngày có dữ liệu')),
           ERP.kpi(L('가동 설비 수', 'Số máy có chạy'), F.n(a.machines.size), L('대', 'máy'), 'neutral', null, null)),
-        h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', (st.proc ? L('일별 ' + ERP.procName(st.proc) + ' 생산수량 · ', 'Sản lượng ' + ERP.procName(st.proc) + ' theo ngày · ') : L('일별 생산수량 · ', 'Sản lượng theo ngày · ')) + st.month), h('button', { class: 'btn sm', onclick: () => ERP.xl.exportAoa('daily_' + st.month, [L('일자', 'Ngày')].concat(colKeys.map(c => c.label), [L('일 합계', 'Tổng')]), days.filter(d => dayTot[d] !== undefined).map(d => [d].concat(colKeys.map(c => (cell[d] && cell[d][c.k]) || 0), [dayTot[d]]))) }, L('엑셀', 'Excel'))), days.length ? tbl : h('div', { class: 'empty' }, L('이 달에 입력된 일보가 없습니다.', 'Tháng này chưa có báo cáo.'))),
+        h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', (st.proc ? L('일별 ' + ERP.procName(st.proc) + ' 생산수량 · ', 'Sản lượng ' + ERP.procName(st.proc) + ' theo ngày · ') : L('일별 생산수량 · ', 'Sản lượng theo ngày · ')) + st.month), h('button', { class: 'btn sm', onclick: () => { const ds = days.filter(d => dayTot[d] !== undefined); ERP.xl.exportAoa('daily_' + st.month, [keyHead, L('월 합계', 'Tổng tháng')].concat(ds), keys.map(c => [c.label, keyTot[c.k] || 0].concat(ds.map(d => (cell[d] && cell[d][c.k]) || 0))).concat([[L('일 합계', 'Tổng ngày'), grand].concat(ds.map(d => dayTot[d]))])); } }, L('엑셀', 'Excel'))), days.length ? tbl : h('div', { class: 'empty' }, L('이 달에 입력된 일보가 없습니다.', 'Tháng này chưa có báo cáo.'))),
         h('div', { class: 'grid2' },
           h('section', { class: 'card' }, h('h2', L('설비별 실적', 'Hiệu suất theo máy')),
             ERP.simpleTable([{ label: L('공정', 'Công đoạn'), render: m => ERP.chip('neutral', ERP.procName(m.proc)) }, { label: L('설비', 'Máy'), render: m => m.no === undefined ? '–' : m.no }, { label: L('가동일', 'Số ngày'), num: 1, render: m => m.days.size }, { label: 'pcs', num: 1, render: m => F.n(m.ea) }], mlist.slice(0, 40), { maxH: '360px' })),
@@ -175,7 +178,7 @@
     host.append(bar, body); draw();
   }
 
-  // ------------ tab: monthly (1.10.1 — 월별 조립 생산량: 일별 탭과 같은 고르기, 행 = 1~12월) ------------
+  // ------------ tab: monthly (1.10.1 — 월별 조립 생산량: 일별 탭과 같은 고르기 · 1.13.7 부터 열 = 1~12월, 행 = 품목군) ------------
   function monthlyTab(host) {
     const ref = C.latestProdDate();
     const st = ERP.state.pmon = ERP.state.pmon || {};
@@ -189,7 +192,7 @@
         h('button', { class: 'btn', onclick: () => { st.year--; draw(); } }, '‹'),
         h('input', { class: 'inp', type: 'number', min: '2000', max: '2100', value: st.year, style: { width: '96px' }, onchange: (e) => { const y = Math.floor(Number(e.target.value)); if (y >= 2000 && y <= 2100) { st.year = y; draw(); } } }),
         h('button', { class: 'btn', onclick: () => { st.year++; draw(); } }, '›'),
-        h('select', { class: 'inp', onchange: (e) => { st.by = e.target.value; draw(); } }, [['process', L('열: 공정별', 'Cột: theo công đoạn')], ['division', L('열: 품목군별', 'Cột: theo nhóm hàng')]].map(o => h('option', { value: o[0], selected: st.by === o[0] }, o[1]))),
+        h('select', { class: 'inp', onchange: (e) => { st.by = e.target.value; draw(); } }, [['process', L('행: 공정별', 'Hàng: theo công đoạn')], ['division', L('행: 품목군별', 'Hàng: theo nhóm hàng')]].map(o => h('option', { value: o[0], selected: st.by === o[0] }, o[1]))),
         h('select', { class: 'inp', onchange: (e) => { st.proc = e.target.value; ERP.render(); } }, h('option', { value: '' }, L('공정: 전체', 'Công đoạn: tất cả')), ERP.PROC.map(p => h('option', { value: p.id, selected: st.proc === p.id }, L(p.ko, p.vi)))),
         h('select', { class: 'inp', onchange: (e) => { st.div = e.target.value; draw(); } }, h('option', { value: '' }, L('품목군: 전체', 'Nhóm: tất cả')), divs.map(d => h('option', { value: d, selected: st.div === d }, d))));
     }
@@ -200,17 +203,20 @@
       const rows = C.rowsBetween(st.year + '-01-01', st.year + '-12-31', st.proc).filter(r => !st.div || r.division === st.div);
       // 품목군: 대소문자 · 공백 차이는 한 묶음 (일별 탭 · 종합 현황과 같은 규칙), 수량 = 양품 pcs (일별 탭과 같음)
       const canon = new Map(); const dk = (r) => { const raw = String(r.division || '').trim(); const k = raw.toLowerCase() || '–'; if (!canon.has(k)) canon.set(k, raw || L('(품목군 없음)', '(không nhóm)')); return k; };
-      const colKeys = st.by === 'process' ? (st.proc ? ERP.PROC.filter(p => p.id === st.proc) : ERP.PROC).map(p => ({ k: p.id, label: L(p.ko, p.vi) })) : Array.from(new Set(rows.map(dk))).sort().map(d => ({ k: d, label: canon.get(d) }));
+      const keys = st.by === 'process' ? (st.proc ? ERP.PROC.filter(p => p.id === st.proc) : ERP.PROC).map(p => ({ k: p.id, label: L(p.ko, p.vi) })) : Array.from(new Set(rows.map(dk))).sort().map(d => ({ k: d, label: canon.get(d) }));
       const keyOf = (r) => (st.by === 'process' ? r.process : dk(r));
-      const cell = new Array(12).fill(0).map(() => ({})), mTot = new Array(12).fill(0), colTot = {}, days = new Array(12).fill(0).map(() => new Set()); let grand = 0;
-      rows.forEach(r => { const mi = +String(r.date).slice(5, 7) - 1; if (!(mi >= 0 && mi < 12)) return; const q = C.qty(r); const k = keyOf(r); cell[mi][k] = (cell[mi][k] || 0) + q; mTot[mi] += q; colTot[k] = (colTot[k] || 0) + q; grand += q; days[mi].add(r.date); });
+      const cell = new Array(12).fill(0).map(() => ({})), mTot = new Array(12).fill(0), keyTot = {}, days = new Array(12).fill(0).map(() => new Set()); let grand = 0;
+      rows.forEach(r => { const mi = +String(r.date).slice(5, 7) - 1; if (!(mi >= 0 && mi < 12)) return; const q = C.qty(r); const k = keyOf(r); cell[mi][k] = (cell[mi][k] || 0) + q; mTot[mi] += q; keyTot[k] = (keyTot[k] || 0) + q; grand += q; days[mi].add(r.date); });
       const act = mTot.filter(v => v > 0).length; let best = -1; mTot.forEach((v, i) => { if (v > 0 && (best < 0 || v > mTot[best])) best = i; });
       const pn = st.proc ? ERP.procName(st.proc) : '';
-      const trs = mTot.map((v, i) => h('tr', { style: v ? null : { color: '#9AA3AF' } }, h('td', { style: { whiteSpace: 'nowrap' } }, mLabel(i), days[i].size ? h('small', { class: 'muted' }, ' · ' + days[i].size + L('일', ' ngày')) : null),
-        colKeys.map(c => h('td', { class: 'num' }, cell[i][c.k] ? F.n(cell[i][c.k]) : '–')), h('td', { class: 'num' }, v ? h('b', F.n(v)) : '–')));
-      const totRow = h('tr', { style: { background: '#F4F6F9', fontWeight: '700' } }, h('td', st.year + L(' 합계', ' tổng')), colKeys.map(c => h('td', { class: 'num' }, F.n(colTot[c.k] || 0))), h('td', { class: 'num' }, F.n(grand)));
-      const tbl = h('div', { class: 'tbl-wrap', style: { maxHeight: '62vh' } }, h('table', { class: 'tbl' }, h('thead', h('tr', h('th', L('월', 'Tháng')), colKeys.map(c => h('th', { class: 'num' }, c.label)), h('th', { class: 'num' }, L('월 합계', 'Tổng tháng')))), h('tbody', trs, totRow)));
-      const chart = grand ? ERP.chart({ type: 'bar', data: { labels: mTot.map((x, i) => mLabel(i)), datasets: colKeys.map((c, i) => ({ label: c.label, data: cell.map(o => o[c.k] || 0), backgroundColor: ERP.palette[i % ERP.palette.length], stack: 's' })) }, options: { scales: { x: { stacked: true }, y: { stacked: true } } } }, true) : null;
+      // 1.13.7: 가로 = 1~12월, 세로 = 품목군 (또는 공정) — 종합 현황 '월별 조립 생산량' 위젯과 같은 표. 일보가 없는 달은 회색 (1.13.6 까지의 줄 모양 그대로)
+      const keyHead = st.by === 'process' ? L('공정', 'Công đoạn') : L('품목군', 'Nhóm');   // '\' 는 한글 글꼴에서 ₩ 로 보여 쓰지 않음
+      const off = (i) => (mTot[i] ? null : { color: '#9AA3AF' });
+      const tbl = h('div', { class: 'tbl-wrap', style: { maxHeight: '62vh' } }, h('table', { class: 'tbl dt' },
+        h('thead', h('tr', h('th', keyHead), h('th', { class: 'num' }, st.year + L(' 합계', ' tổng')), mTot.map((v, i) => h('th', { class: 'num', style: off(i) }, mLabel(i), days[i].size ? h('small', days[i].size + L('일', ' ngày')) : null)))),
+        h('tbody', keys.map(c => h('tr', h('td', h('b', c.label)), h('td', { class: 'num' }, h('b', F.n(keyTot[c.k] || 0))), cell.map((o, i) => h('td', { class: 'num', style: off(i) }, o[c.k] ? F.n(o[c.k]) : '–')))),
+          h('tr', { class: 'tot' }, h('td', L('월 합계', 'Tổng tháng')), h('td', { class: 'num' }, F.n(grand)), mTot.map(v => h('td', { class: 'num' }, v ? F.n(v) : '–'))))));
+      const chart = grand ? ERP.chart({ type: 'bar', data: { labels: mTot.map((x, i) => mLabel(i)), datasets: keys.map((c, i) => ({ label: c.label, data: cell.map(o => o[c.k] || 0), backgroundColor: ERP.palette[i % ERP.palette.length], stack: 's' })) }, options: { scales: { x: { stacked: true }, y: { stacked: true } } } }, true) : null;
       body.replaceChildren();
       ERP.put(body,
         h('section', { class: 'kpis' },
@@ -219,7 +225,7 @@
           ERP.kpi(L('월 평균', 'Trung bình/tháng'), F.n(act ? grand / act : 0), 'pcs', 'neutral', null, L('입력된 달 기준', 'theo tháng có dữ liệu')),
           ERP.kpi(L('가장 많은 달', 'Tháng cao nhất'), best >= 0 ? mLabel(best) : '–', '', 'neutral', best >= 0 ? F.n(mTot[best]) + ' pcs' : null, null)),
         h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', (pn ? L('월별 ' + pn + ' 생산량 · ', 'Sản lượng ' + pn + ' theo tháng · ') : L('월별 생산량 · ', 'Sản lượng theo tháng · ')) + st.year),
-          h('button', { class: 'btn sm', onclick: () => ERP.xl.exportAoa('monthly_' + (st.proc || 'all') + '_' + st.year, [L('월', 'Tháng')].concat(colKeys.map(c => c.label), [L('월 합계', 'Tổng tháng')]), mTot.map((v, i) => [mLabel(i)].concat(colKeys.map(c => cell[i][c.k] || 0), [v])).concat([[st.year + L(' 합계', ' tổng')].concat(colKeys.map(c => colTot[c.k] || 0), [grand])])) }, L('엑셀', 'Excel'))), tbl,
+          h('button', { class: 'btn sm', onclick: () => ERP.xl.exportAoa('monthly_' + (st.proc || 'all') + '_' + st.year, [keyHead, st.year + L(' 합계', ' tổng')].concat(mTot.map((v, i) => mLabel(i))), keys.map(c => [c.label, keyTot[c.k] || 0].concat(cell.map(o => o[c.k] || 0))).concat([[L('월 합계', 'Tổng tháng'), grand].concat(mTot)])) }, L('엑셀', 'Excel'))), tbl,
           h('p', { class: 'help', style: { margin: '8px 0 0' } }, L('생산일보 양품 기준 (pcs). 그 달의 날짜별 수량은 일별 생산량 탭에서 봅니다.', 'Theo SL đạt của báo cáo (pcs). Xem từng ngày ở tab sản lượng theo ngày.'))),
         chart ? h('section', { class: 'card' }, h('h2', L('달별 막대', 'Biểu đồ theo tháng')), chart) : null);
     }

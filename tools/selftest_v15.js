@@ -556,17 +556,46 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     });
     eq('저장한 배치에 한 번 넣음 (일별 다음)', mig.ids1, ['kpi_due', 'asm_daily', 'asm_monthly', 'flow']);
     eq('사용자가 빼면 다시 넣지 않음', [mig.ids2, mig.flag], [['kpi_due', 'asm_daily', 'flow'], true]);
-    // 생산 관리: 일별 · 월별 조립 생산량 탭
+    // 생산 관리: 일별 · 월별 조립 생산량 탭 — 1.13.7: 가로 = 날짜 (일별 1일 ~ · 월별 1 ~ 12월), 세로 = 품목군 (종합 현황 위젯과 같은 모양, 사용자: "가로에 날짜 세로에 품목군")
     await A.evaluate(() => { ERP.state.prodTab = 'analysis'; ERP.state.pan = null; ERP.state.pmon = null; location.hash = '#/production'; ERP.render(); }); await A.waitForTimeout(700);
     const tabs = await A.evaluate(() => Array.from(document.querySelectorAll('.tabs .tab')).map(t => t.textContent));
     ok('생산 관리 탭: 일별 조립 생산량 · 월별 조립 생산량', tabs.includes('일별 조립 생산량') && tabs.includes('월별 조립 생산량'), tabs);
-    const dailyTot = await A.evaluate(() => { const t = document.querySelector('main table.tbl'); const tr = t && Array.from(t.querySelectorAll('tbody tr')).pop(); return tr ? tr.lastChild.textContent : null; });   // 첫 표 = 날짜별 표, 마지막 줄 = 월 합계
-    await A.evaluate(() => { ERP.state.prodTab = 'monthly'; ERP.render(); }); await A.waitForTimeout(900);
-    const mt = await A.evaluate(() => { const ref = ERP.calc.latestProdDate(); const trs = Array.from(document.querySelectorAll('main table.tbl tbody tr'));
-      return { h2: document.querySelector('main .card h2').textContent, n: trs.length, month: trs[+ref.slice(5, 7) - 1] ? trs[+ref.slice(5, 7) - 1].lastChild.textContent : null, year: ref.slice(0, 4), chart: !!document.querySelector('main canvas'), kpi: document.querySelector('main .kpis').innerText }; });
-    ok('월별 조립 생산량 탭: 1~12월 + 연 합계 · 제목 · 막대 · 연 생산량 · 가장 많은 달', mt.n === 13 && mt.h2 === '월별 조립 생산량 · ' + mt.year && mt.chart && /가장 많은 달/.test(mt.kpi) && mt.kpi.includes(mt.year + '년 조립 생산량'), mt);
-    eq('이 달 칸 = 일별 조립 생산량 탭의 월 합계', num(mt.month), num(dailyTot));
-    ok('연 합계 = 그해 조립 합', await A.evaluate((s) => Number(Array.from(document.querySelectorAll('main table.tbl tbody tr')).pop().lastChild.textContent.replace(/[^\d]/g, '')) === s, d.sum));
+    // 첫 표 읽기 + 엑셀로 내보낼 내용 (ERP.xl.exportAoa 를 잠시 바꿔 받음)
+    const grid = () => A.evaluate(() => { const t = document.querySelector('main table.tbl'); if (!t) return null;
+      const g = { head: Array.from(t.querySelectorAll('thead th')).map(th => th.textContent), rows: Array.from(t.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.textContent)),
+        opts: Array.from(document.querySelectorAll('main .toolbar select:first-of-type option')).map(o => o.textContent), h2: document.querySelector('main .card h2').textContent };
+      const keep = ERP.xl.exportAoa; ERP.xl.exportAoa = (n, hd, rs) => { g.xl = { n, hd, rs }; };
+      try { const b = Array.from(document.querySelectorAll('main .card-head button')).find(x => x.textContent === '엑셀'); if (b) b.click(); } finally { ERP.xl.exportAoa = keep; }
+      return g; });
+    const exp = await A.evaluate(() => { const C = ERP.calc; const ref = C.latestProdDate(); const mo = ref.slice(0, 7), y = ref.slice(0, 4); const key = (r) => String(r.division || '').trim().toLowerCase() || '–';
+      const to = ERP.fmt.addDays(new Date(Date.UTC(+y, +mo.slice(5, 7), 1)).toISOString().slice(0, 10), -1); const day = {}, mon = {}; let last = '';
+      C.rowsBetween(mo + '-01', to, 'ASM').forEach(r => { const k = key(r), dd = +r.date.slice(8, 10); (day[k] = day[k] || {})[dd] = (day[k][dd] || 0) + C.qty(r); if (r.date > last) last = r.date; });
+      C.rowsBetween(y + '-01-01', y + '-12-31', 'ASM').forEach(r => { const k = key(r), mi = +r.date.slice(5, 7); (mon[k] = mon[k] || {})[mi] = (mon[k][mi] || 0) + C.qty(r); });
+      return { day, mon, lastDay: +last.slice(8, 10), y }; });
+    const lab = (s) => (s === '(품목군 없음)' ? '–' : String(s).trim().toLowerCase()); const sumOf = (o) => Object.values(o || {}).reduce((a, b) => a + b, 0);
+    const g1 = await grid(); const dk = Object.keys(exp.day); const t1 = g1 ? g1.rows[g1.rows.length - 1] : [];
+    ok('일별 표: 가로 = 날짜 (1일 ~ 마지막 입력일, 요일) · 세로 = 품목군 · 둘째 칸 월 합계 · 마지막 줄 일 합계',
+      !!g1 && g1.head[0] === '품목군' && g1.head[1] === '월 합계' && g1.head.length === 2 + exp.lastDay && /^1\D/.test(g1.head[2]) && g1.rows.length === dk.length + 1 && t1[0] === '일 합계' && g1.rows.slice(0, -1).every(r => dk.includes(lab(r[0]))),
+      g1 && { head: g1.head.slice(0, 5), n: g1.head.length, rows: g1.rows.map(r => r[0]), lastDay: exp.lastDay });
+    ok('일별 표 숫자: 품목군 × 날짜 칸 · 품목군 월 합계 · 일 합계 = 일보', !!g1 && g1.rows.slice(0, -1).every(r => { const v = exp.day[lab(r[0])] || {}; return num(r[1]) === sumOf(v) && r.slice(2).every((c, i) => num(c) === (v[i + 1] || 0)); })
+      && t1.slice(2).every((c, i) => num(c) === dk.reduce((a, k) => a + (exp.day[k][i + 1] || 0), 0)) && num(t1[1]) === d.sumM, { tot: t1.slice(0, 6), sumM: d.sumM });
+    ok('일별 고르기 = 행: 품목군별 / 행: 공정별', !!g1 && g1.opts.includes('행: 품목군별') && g1.opts.includes('행: 공정별') && !g1.opts.some(o => /^열:/.test(o)), g1 && g1.opts);
+    ok('일별 엑셀도 같은 모양 (품목군 · 월 합계 · 입력된 날짜 / 마지막 줄 일 합계)', !!(g1 && g1.xl) && g1.xl.hd[0] === '품목군' && g1.xl.hd[1] === '월 합계' && /^\d{4}-\d\d-\d\d$/.test(g1.xl.hd[2]) && g1.xl.rs.length === dk.length + 1
+      && g1.xl.rs[g1.xl.rs.length - 1][0] === '일 합계' && g1.xl.rs[g1.xl.rs.length - 1][1] === d.sumM, g1 && g1.xl && { hd: g1.xl.hd.slice(0, 4), last: g1.xl.rs.slice(-1)[0].slice(0, 4) });
+    await A.evaluate(() => { ERP.state.pan.by = 'process'; ERP.render(); }); await A.waitForTimeout(400);
+    const g1p = await grid();
+    ok('일별 행: 공정별 → 세로 = 공정 (조립 한 줄 + 일 합계)', !!g1p && g1p.head[0] === '공정' && g1p.rows.length === 2 && g1p.rows[0][0] === '조립' && num(g1p.rows[0][1]) === d.sumM, g1p && { head: g1p.head.slice(0, 3), rows: g1p.rows.map(r => r.slice(0, 2)) });
+    await A.evaluate(() => { ERP.state.pan.by = 'division'; ERP.state.prodTab = 'monthly'; ERP.render(); }); await A.waitForTimeout(900);
+    const g2 = await grid(); const mk = Object.keys(exp.mon); const t2 = g2 ? g2.rows[g2.rows.length - 1] : [];
+    const mt = await A.evaluate(() => ({ chart: !!document.querySelector('main canvas'), kpi: document.querySelector('main .kpis').innerText }));
+    ok('월별 표: 가로 = 1 ~ 12월 · 세로 = 품목군 · 둘째 칸 연 합계 · 마지막 줄 월 합계 · 제목 · 막대 · 가장 많은 달',
+      !!g2 && g2.head[0] === '품목군' && g2.head[1] === exp.y + ' 합계' && g2.head.length === 14 && g2.head.slice(2).every((x, i) => x.startsWith((i + 1) + '월')) && g2.rows.length === mk.length + 1 && t2[0] === '월 합계'
+      && g2.h2 === '월별 조립 생산량 · ' + exp.y && mt.chart && /가장 많은 달/.test(mt.kpi) && mt.kpi.includes(exp.y + '년 조립 생산량'), g2 && { head: g2.head, rows: g2.rows.map(r => r[0]) });
+    ok('월별 표 숫자: 품목군 × 달 칸 · 품목군 연 합계 · 월 합계 = 일보 · 연 합계 = 그해 조립 합', !!g2 && g2.rows.slice(0, -1).every(r => { const v = exp.mon[lab(r[0])] || {}; return num(r[1]) === sumOf(v) && r.slice(2).every((c, i) => num(c) === (v[i + 1] || 0)); })
+      && num(t2[1]) === d.sum, { tot: t2, sum: d.sum });
+    eq('이 달 칸 (월 합계 줄) = 일별 표의 월 합계', num(t2[1 + d.mi]), num(t1[1]));
+    ok('월별 엑셀도 같은 모양 (품목군 · 연 합계 · 1~12월 / 마지막 줄 월 합계)', !!(g2 && g2.xl) && g2.xl.hd[0] === '품목군' && g2.xl.hd[1] === exp.y + ' 합계' && g2.xl.hd[2] === '1월' && g2.xl.hd.length === 14
+      && g2.xl.rs.length === mk.length + 1 && g2.xl.rs[g2.xl.rs.length - 1][0] === '월 합계' && g2.xl.rs[g2.xl.rs.length - 1][1] === d.sum, g2 && g2.xl && { hd: g2.xl.hd, last: g2.xl.rs.slice(-1) });
     await A.selectOption('main .toolbar select:nth-of-type(2)', 'INJ'); await A.waitForTimeout(800);
     ok('공정을 바꾸면 탭 이름 · 제목도 (월별 사출 생산량)', await A.evaluate(() => Array.from(document.querySelectorAll('.tabs .tab')).some(t => t.textContent === '월별 사출 생산량') && /월별 사출 생산량/.test(document.querySelector('main .card h2').textContent)));
     await A.evaluate(() => { ERP.state.pmon = null; ERP.setLang('vi'); }); await A.waitForTimeout(500);
