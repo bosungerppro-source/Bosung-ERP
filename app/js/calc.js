@@ -181,4 +181,15 @@
   /** 보고 싶은 품목군 (수주 관리 표 · 종합 현황 위젯이 같이 쓴다). 설정에는 '숨긴 품목군'을 저장 → 새 품목군은 기본으로 보인다 */
   C.poKindsShown = function () { const off = new Set(DB.setting('poKindsOff', []) || []); return C.poKinds().filter(k => !off.has(k)); };
   C.setPoKindsShown = function (shown) { const s = new Set(shown); DB.setSetting('poKindsOff', C.poKinds().filter(k => !s.has(k))); };
+  // 1.13.8: 생산일보 품목군 — 대소문자 · 앞뒤 공백만 다르면 한 묶음 (생산 관리 · 종합 현황의 일별 · 월별 표와 같은 규칙). 열쇠 = 소문자, 품목군이 없으면 '–'
+  C.divKey = (r) => String((r && r.division) || '').trim().toLowerCase() || '–';
+  /** 그 공정 ('' = 모든 공정) 일보에 있는 품목군 [[열쇠, 이름]] + 이미 고른 것 (keep) — 이름은 처음 나온 글자, 순서는 열쇠 순 (표와 같음) */
+  C.prodDivs = function (proc, keep) {
+    const seen = DB.memo('prodDivs:' + (proc || ''), ['prod_log'], () => { const m = new Map(); DB.rows('prod_log').forEach(r => { if (proc && r.process !== proc) return; const k = C.divKey(r); if (!m.has(k)) m.set(k, String(r.division || '').trim()); }); return m; });
+    const m = new Map(seen); (keep || []).forEach(k => { if (!m.has(k)) m.set(k, k); });
+    return Array.from(m.keys()).sort().map(k => [k, k === '–' ? L('(품목군 없음)', '(không nhóm)') : m.get(k)]);
+  };
+  /** 생산 관리 일별 · 월별 탭에서 보는 품목군 (공정마다, 비면 전체) — 현장 재고 표 설정처럼 저장 (모든 PC 같음) */
+  C.prodDivsShown = (proc) => { const a = (DB.setting('prodDivs', null) || {})[proc || '*']; return Array.isArray(a) ? a.map(String) : []; };
+  C.setProdDivsShown = (proc, keys) => { const m = Object.assign({}, DB.setting('prodDivs', null) || {}); if (keys && keys.length) m[proc || '*'] = keys.slice(); else delete m[proc || '*']; DB.setSetting('prodDivs', m); };
 })();

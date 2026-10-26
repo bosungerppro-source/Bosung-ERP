@@ -5,7 +5,8 @@
    1 기본 표 = 조립 · 품목군 | 현재 재고 · 단계 카드 없음 · 2 월 열 없음 (예전 설정의 월 → 현재 재고)
    3 설정 (공정 · 품목군 · 행 · 열 · 범위 · 제목 · 재고 0 줄) → 저장 (다시 열어도 그대로) · 4 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히
    5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
-   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 7-2 위젯 ⚙ 품목군 여러 개 → 고른 것만 (1.13.6) · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 7-2 위젯 ⚙ 품목군 여러 개 → 고른 것만 (1.13.6)
+   7-3 생산 관리 일별 · 월별 · 일보 조회 · 종합 현황 일별 · 월별 위젯도 품목군 여러 개 (1.13.8) · 8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -271,6 +272,70 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await A.keyboard.press('Escape'); await settle();
     await ev(() => ERP.setLang('ko'));
     await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.render(); }); await settle();
+  });
+
+  await sec('7-3. 생산 관리 일별 · 월별 조립 생산량 · 일보 조회 · 종합 현황 일별 · 월별 위젯 (1.13.8, 사용자 "품목군을 내가 원하는거만 중복선택할수있게 … 현장재고처럼"): 품목군 여러 개 → 고른 것만', async () => {
+    await A.emulateMedia({ reducedMotion: 'reduce' });
+    // 같은 품목군이 대소문자만 다른 일보 (Dial · dial, Click pencil · Click Pencil) + 품목군 없는 줄 + 다른 공정 (사출: Mini · Bulk)
+    await ev(async () => { const DB = ERP.db; const r = (date, process, division, q) => ({ date, process, shift: 'D', division, ok_qty: q, source: 'test' });
+      DB.replace('prod_log', [r('2026-10-05', 'ASM', 'Dial', 100), r('2026-10-05', 'ASM', 'dial', 50), r('2026-10-06', 'ASM', 'Mini', 200), r('2026-10-06', 'ASM', 'Click pencil', 30),
+        r('2026-10-07', 'ASM', 'Click Pencil', 20), r('2026-10-07', 'ASM', '', 5), r('2026-09-10', 'ASM', 'Mini', 300), r('2026-10-05', 'INJ', 'Mini', 1000), r('2026-10-05', 'INJ', 'Bulk', 400)]);
+      delete DB.meta.prodDivs; await DB.saveMeta(); await DB.flush(); });
+    const prod = async (tab) => { await ev((t) => { ERP.state.prodTab = t; ERP.state.pan = null; ERP.state.pmon = null; ERP.goto('production'); ERP.render(); }, tab); await settle(); };
+    /** 생산 관리 탭: 품목군 체크 (전체 · [열쇠, 이름, 켜짐]) · 첫 표 [이름, 합계] · 첫 숫자 카드 · 예전 '품목군: 전체' 고르기가 남았는지 */
+    const pv = () => ev(() => { const row = document.querySelector('main .pdivs'); const t = document.querySelector('main table.tbl');
+      return { all: row ? row.querySelector('[data-all] input').checked : null, opts: row ? Array.from(row.querySelectorAll('[data-v]')).map(l => [l.dataset.v, l.innerText.trim(), l.querySelector('input').checked]) : null,
+        rows: t ? Array.from(t.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) : null,
+        kpi: (document.querySelector('main .kpis .kpi-val .v') || {}).textContent || '', oldSel: Array.from(document.querySelectorAll('main .toolbar select option')).some(o => /^품목군:/.test(o.textContent)) }; });
+    const tickP = async (sel) => { await A.click('main .pdivs ' + sel + ' input'); await settle(); };
+    const OPTS = [['click pencil', 'Click pencil'], ['dial', 'Dial'], ['mini', 'Mini'], ['–', '(품목군 없음)']];
+    const on = (keys) => OPTS.map(o => [o[0], o[1], keys.includes(o[0])]);
+    await prod('analysis');
+    eq('일별 조립 생산량: 품목군 = 체크 (전체 켜짐 + 조립 일보의 품목군 — 대소문자만 다른 것은 하나) · 예전 하나 고르기 없음', await pv(),
+      { all: true, opts: on([]), rows: [['Click pencil', '50'], ['Dial', '150'], ['Mini', '200'], ['(품목군 없음)', '5'], ['일 합계', '405']], kpi: '405', oldSel: false });
+    await tickP('[data-v="dial"]'); await tickP('[data-v="mini"]');
+    eq('Dial · Mini 를 고르면 그 줄만 · 합계 · 숫자 카드도 고른 것만 (Dial = Dial 100 + dial 50)', await pv(),
+      { all: false, opts: on(['dial', 'mini']), rows: [['Dial', '150'], ['Mini', '200'], ['일 합계', '350']], kpi: '350', oldSel: false });
+    eq('설정에 저장 (공정마다)', await ev(() => ERP.db.setting('prodDivs')), { ASM: ['dial', 'mini'] });
+    await prod('monthly');
+    eq('월별 조립 생산량에도 같은 품목군 (Mini = 9월 300 + 10월 200)', await pv(), { all: false, opts: on(['dial', 'mini']), rows: [['Dial', '150'], ['Mini', '500'], ['월 합계', '650']], kpi: '650', oldSel: false });
+    await A.reload(); await ready(); await prod('monthly');
+    eq('다시 열어도 그대로 (서버에 저장됨)', (await pv()).rows, [['Dial', '150'], ['Mini', '500'], ['월 합계', '650']]);
+    await A.selectOption('main .toolbar select:nth-of-type(2)', 'INJ'); await settle();
+    eq('공정을 사출로 바꾸면 사출 일보의 품목군 · 사출은 따로 (전체)', await pv(), { all: true, opts: [['bulk', 'Bulk', false], ['mini', 'Mini', false]], rows: [['Bulk', '400'], ['Mini', '1,000'], ['월 합계', '1,400']], kpi: '1,400', oldSel: false });
+    await A.selectOption('main .toolbar select:nth-of-type(2)', 'ASM'); await settle();
+    eq('조립으로 돌아오면 고른 것 그대로', (await pv()).opts, on(['dial', 'mini']));
+    await tickP('[data-all]');
+    eq('전체를 켜면 모두 · 저장된 것은 비움', [await pv(), await ev(() => ERP.db.setting('prodDivs'))],
+      [{ all: true, opts: on([]), rows: [['Click pencil', '50'], ['Dial', '150'], ['Mini', '500'], ['(품목군 없음)', '5'], ['월 합계', '705']], kpi: '705', oldSel: false }, {}]);
+    await tickP('[data-v="–"]'); await tickP('[data-v="–"]');
+    eq('하나 골랐다가 끄면 다시 전체', [(await pv()).all, (await pv()).rows.length], [true, 5]);
+    // 일보 조회: 품목군 고르기 — 대소문자만 다른 것은 하나, 고르면 둘 다
+    await prod('log');
+    eq('일보 조회 품목군: 대소문자만 다른 것은 하나 (Dial · dial → Dial) + 품목군 없음', await ev(() => Array.from(document.querySelector('main select[aria-label="품목군"]').options).map(o => [o.value, o.textContent])),
+      [['', '품목군: 전체'], ['bulk', 'Bulk'], ['click pencil', 'Click pencil'], ['dial', 'Dial'], ['mini', 'Mini'], ['–', '(품목군 없음)']]);
+    await A.selectOption('main select[aria-label="품목군"]', 'dial'); await settle();
+    eq('Dial 을 고르면 Dial · dial 일보 둘 다', await ev(() => Array.from(document.querySelectorAll('main table.tbl tbody tr')).map(tr => tr.innerText).filter(t => /dial/i.test(t)).length), 2);
+    // 종합 현황 일별 · 월별 조립 생산량 위젯: ⚙ 품목군 여러 개 (조립 재고 위젯 1.13.6 과 같은 모양)
+    await ev(() => { ERP.db.setSetting('dash', [{ k: 'v17-ad', id: 'asm_daily', w: 4, o: { proc: 'ASM', view: 'table' } }, { k: 'v17-am', id: 'asm_monthly', w: 4, o: { proc: 'ASM', view: 'table' } }]); ERP.state.dashEdit = true; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    const wv = (id) => ev((i) => { const el = document.querySelector('.wgrid .w[data-id=' + i + ']'); return { title: el.querySelector('h2').textContent, rows: Array.from(el.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) }; }, id);
+    const dlg = () => ev(() => { const f = document.querySelector('.modal [data-k="divs"]'); return f ? { all: f.querySelector('[data-all] input').checked, opts: Array.from(f.querySelectorAll('[data-v]')).map(l => [l.dataset.v, l.innerText.trim(), l.querySelector('input').checked]) } : null; });
+    const gear = async (id) => { await A.click('.wgrid .w[data-id=' + id + '] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal [data-k="divs"]'); };
+    const tickD = async (sel) => { await A.click('.modal [data-k="divs"] ' + sel + ' input'); await A.waitForTimeout(100); };
+    const d0 = await wv('asm_daily'), m0 = await wv('asm_monthly');
+    eq('위젯 처음: 모든 품목군 (많은 순)', [d0.rows, m0.rows], [[['Mini', '200'], ['Dial', '150'], ['Click pencil', '50'], ['(품목군 없음)', '5'], ['일 합계', '405']], [['Mini', '500'], ['Dial', '150'], ['Click pencil', '50'], ['(품목군 없음)', '5'], ['월 합계', '705']]]);
+    await gear('asm_daily');
+    eq('일별 위젯 ⚙: 공정 · 품목군 (전체 켜짐 + 조립 일보의 품목군)', [await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent)), await dlg()], [['공정 (기본 조립)', '품목군'], { all: true, opts: on([]) }]);
+    await tickD('[data-v="dial"]'); await A.click('.modal .modal-foot button.primary'); await settle();
+    eq('일별 위젯: Dial 만 · 제목 그대로 · 저장', [await wv('asm_daily'), await ev(() => ERP.dashLayout().find(x => x.id === 'asm_daily').o.divs)], [{ title: d0.title, rows: [['Dial', '150'], ['일 합계', '150']] }, ['dial']]);
+    await gear('asm_monthly'); await tickD('[data-v="mini"]'); await tickD('[data-v="dial"]'); await A.click('.modal .modal-foot button.primary'); await settle();
+    eq('월별 위젯: Mini · Dial 만 · 제목 그대로', await wv('asm_monthly'), { title: m0.title, rows: [['Mini', '500'], ['Dial', '150'], ['월 합계', '650']] });
+    await ev(() => { ERP.state.dashEdit = false; ERP.render(); }); await settle();
+    eq('편집을 끝내도 고른 것만', [(await wv('asm_daily')).rows.length, (await wv('asm_monthly')).rows.length], [2, 3]);
+    await ev(() => ERP.setLang('vi')); await prod('analysis');
+    const vt = await ev(() => document.querySelector('main .pdivs').innerText.replace(/\s+/g, ' '));
+    ok('베트남어: Nhóm · Tất cả · (không nhóm) · 한글 없음', /Nhóm/.test(vt) && /Tất cả/.test(vt) && /không nhóm/.test(vt) && !/[가-힣]/.test(vt), vt);
+    await ev(async () => { ERP.setLang('ko'); delete ERP.db.meta.prodDivs; await ERP.db.saveMeta(); ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.render(); }); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

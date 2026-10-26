@@ -25,7 +25,8 @@
       defaults: () => ({ date: st.to, shift: 'D' }),
       filters: [
         { id: 'p', label: L('공정', 'Công đoạn'), key: 'process', options: () => ERP.PROC.map(p => ({ v: p.id, label: L(p.ko, p.vi) })) },
-        { id: 'd', label: L('품목군', 'Nhóm'), key: 'division', options: () => Array.from(new Set(DB.rows('prod_log').map(r => r.division).filter(Boolean))).sort().map(v => ({ v, label: v })) },
+        // 1.13.8: 대소문자만 다른 품목군 (Dial · dial) 은 하나 — 고르면 둘 다
+        { id: 'd', label: L('품목군', 'Nhóm'), key: 'division', options: () => C.prodDivs('').map(([v, label]) => ({ v, label })), test: (r, v) => C.divKey(r) === v },
         { id: 's', label: L('주/야', 'Ca'), key: 'shift', options: () => [{ v: 'D', label: L('주간', 'Ca ngày') }, { v: 'N', label: L('야간', 'Ca đêm') }] }],
       toolbar: (s, render) => [h('label', { class: 'muted' }, L('기간 ', 'Từ '), h('input', { class: 'inp', type: 'date', value: st.from, onchange: (e) => { st.from = e.target.value || st.from; render(); } }), ' ~ ', h('input', { class: 'inp', type: 'date', value: st.to, onchange: (e) => { st.to = e.target.value || st.to; render(); } }))],
       // 1.11.4: 포장 일보의 PO 번호 (수주 관리와 이어짐) — 누르면 수주 관리에서 그 PO
@@ -113,15 +114,22 @@
     host.appendChild(wrap); draw();
   }
 
+  /** 1.13.8: 품목군 여러 개 고르기 (전체 + 그 공정 일보에 있는 품목군, 비면 전체) — 현장 재고 표 설정 · 종합 현황 위젯 ⚙ 과 같은 체크 */
+  function divChecks(proc, cur, set) {
+    const list = C.prodDivs(proc, cur);
+    const chk = (on, label, fn, attrs) => h('label', Object.assign({ class: 'fpiv-chk' + (on ? ' on' : '') }, attrs), h('input', { type: 'checkbox', checked: on, onchange: (e) => fn(e.target.checked) }), ' ', label);
+    return h('div', { class: 'fpiv-row pdivs', style: { margin: '0 0 12px' } }, h('b', L('품목군', 'Nhóm')), chk(!cur.length, L('전체', 'Tất cả'), (on) => set(on ? [] : list.slice(0, 1).map(o => o[0])), { 'data-all': '1' }),
+      list.map(o => chk(cur.includes(o[0]), o[1], (on) => set(on ? cur.concat([o[0]]) : cur.filter(x => x !== o[0])), { 'data-v': o[0] })));
+  }
+
   // ------------ tab: analysis (daily quantity table per month) ------------
   function analysisTab(host) {
     const ref = C.latestProdDate();
     const st = ERP.state.pan = ERP.state.pan || {};
     // 7차: 기본은 "조립만 · 품목군별" (공장 엑셀 Assembly Sum 과 같은 보기). 다른 공정은 위에서 고른다.
-    if (!st.month) st.month = ref.slice(0, 7); if (!st.by) st.by = 'division'; if (st.proc === undefined) st.proc = 'ASM'; if (st.div === undefined) st.div = '';
-    const addM = (ym, k) => { const d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + k, 1)); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); };
+    if (!st.month) st.month = ref.slice(0, 7); if (!st.by) st.by = 'division'; if (st.proc === undefined) st.proc = 'ASM';    const addM = (ym, k) => { const d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + k, 1)); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); };
     const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } });
-    const divs = Array.from(new Set(DB.rows('prod_log').map(r => r.division).filter(Boolean))).sort();
+    const divBox = h('div');
     const bar = h('div', { class: 'toolbar' }); 
     function drawBar() {
       bar.replaceChildren(
@@ -129,15 +137,15 @@
         h('input', { class: 'inp', type: 'month', value: st.month, onchange: (e) => { if (e.target.value) { st.month = e.target.value; draw(); } } }),
         h('button', { class: 'btn', onclick: () => { st.month = addM(st.month, 1); draw(); } }, '›'),
         h('select', { class: 'inp', onchange: (e) => { st.by = e.target.value; draw(); } }, [['process', L('행: 공정별', 'Hàng: theo công đoạn')], ['division', L('행: 품목군별', 'Hàng: theo nhóm hàng')]].map(o => h('option', { value: o[0], selected: st.by === o[0] }, o[1]))),
-        h('select', { class: 'inp', onchange: (e) => { st.proc = e.target.value; draw(); } }, h('option', { value: '' }, L('공정: 전체', 'Công đoạn: tất cả')), ERP.PROC.map(p => h('option', { value: p.id, selected: st.proc === p.id }, L(p.ko, p.vi)))),
-        h('select', { class: 'inp', onchange: (e) => { st.div = e.target.value; draw(); } }, h('option', { value: '' }, L('품목군: 전체', 'Nhóm: tất cả')), divs.map(d => h('option', { value: d, selected: st.div === d }, d))));
+        h('select', { class: 'inp', onchange: (e) => { st.proc = e.target.value; draw(); } }, h('option', { value: '' }, L('공정: 전체', 'Công đoạn: tất cả')), ERP.PROC.map(p => h('option', { value: p.id, selected: st.proc === p.id }, L(p.ko, p.vi)))));
+      divBox.replaceChildren(divChecks(st.proc, C.prodDivsShown(st.proc), (a) => { C.setProdDivsShown(st.proc, a); draw(); }));
     }
     let _drawing = false;
     function draw() { if (_drawing) return; _drawing = true; try { drawInner(); } finally { _drawing = false; } }
     function drawInner() {
       drawBar();
       const from = st.month + '-01'; const nextM = addM(st.month, 1) + '-01'; const to = F.addDays(nextM, -1);
-      const rows = C.rowsBetween(from, to, st.proc).filter(r => !st.div || r.division === st.div);
+      const sel = C.prodDivsShown(st.proc); const rows = C.rowsBetween(from, to, st.proc).filter(r => !sel.length || sel.includes(C.divKey(r)));
       const lastIn = rows.reduce((a, r) => (r.date > a ? r.date : a), '');
       // 품목군: 대소문자·공백 차이는 한 묶음 (종합 현황 '일별 조립 생산량'과 같은 규칙)
       const canon = new Map(); const dk = (r) => { const raw = String(r.division || '').trim(); const k = raw.toLowerCase() || '–'; if (!canon.has(k)) canon.set(k, raw || L('(품목군 없음)', '(không nhóm)')); return k; };
@@ -175,16 +183,15 @@
             ERP.simpleTable([{ label: L('품목군', 'Nhóm'), render: d => canon.get(d) || d }].concat(ERP.PROC.map(p => ({ label: L(p.ko, p.vi), num: 1, render: d => F.n(dp[d][p.id]) }))), dpRows, { maxH: '300px' }),
             Object.keys(raw).length ? h('div', h('h3', { style: { marginTop: '14px' } }, L('원료 사용량 (kg)', 'NL sử dụng (kg)')), h('div', { class: 'list' }, Object.entries(raw).sort((x, y) => y[1] - x[1]).map(([k, v]) => h('div', h('span', k), h('b', F.n(v, 1)))))) : null)));
     }
-    host.append(bar, body); draw();
+    host.append(bar, divBox, body); draw();
   }
 
   // ------------ tab: monthly (1.10.1 — 월별 조립 생산량: 일별 탭과 같은 고르기 · 1.13.7 부터 열 = 1~12월, 행 = 품목군) ------------
   function monthlyTab(host) {
     const ref = C.latestProdDate();
     const st = ERP.state.pmon = ERP.state.pmon || {};
-    if (!st.year) st.year = +ref.slice(0, 4); if (!st.by) st.by = 'division'; if (st.proc === undefined) st.proc = 'ASM'; if (st.div === undefined) st.div = '';
-    const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } });
-    const divs = Array.from(new Set(DB.rows('prod_log').map(r => r.division).filter(Boolean))).sort();
+    if (!st.year) st.year = +ref.slice(0, 4); if (!st.by) st.by = 'division'; if (st.proc === undefined) st.proc = 'ASM';    const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } });
+    const divBox = h('div');
     const bar = h('div', { class: 'toolbar' });
     const mLabel = (i) => L((i + 1) + '월', 'T' + (i + 1));
     function drawBar() {
@@ -193,14 +200,14 @@
         h('input', { class: 'inp', type: 'number', min: '2000', max: '2100', value: st.year, style: { width: '96px' }, onchange: (e) => { const y = Math.floor(Number(e.target.value)); if (y >= 2000 && y <= 2100) { st.year = y; draw(); } } }),
         h('button', { class: 'btn', onclick: () => { st.year++; draw(); } }, '›'),
         h('select', { class: 'inp', onchange: (e) => { st.by = e.target.value; draw(); } }, [['process', L('행: 공정별', 'Hàng: theo công đoạn')], ['division', L('행: 품목군별', 'Hàng: theo nhóm hàng')]].map(o => h('option', { value: o[0], selected: st.by === o[0] }, o[1]))),
-        h('select', { class: 'inp', onchange: (e) => { st.proc = e.target.value; ERP.render(); } }, h('option', { value: '' }, L('공정: 전체', 'Công đoạn: tất cả')), ERP.PROC.map(p => h('option', { value: p.id, selected: st.proc === p.id }, L(p.ko, p.vi)))),
-        h('select', { class: 'inp', onchange: (e) => { st.div = e.target.value; draw(); } }, h('option', { value: '' }, L('품목군: 전체', 'Nhóm: tất cả')), divs.map(d => h('option', { value: d, selected: st.div === d }, d))));
+        h('select', { class: 'inp', onchange: (e) => { st.proc = e.target.value; ERP.render(); } }, h('option', { value: '' }, L('공정: 전체', 'Công đoạn: tất cả')), ERP.PROC.map(p => h('option', { value: p.id, selected: st.proc === p.id }, L(p.ko, p.vi)))));
+      divBox.replaceChildren(divChecks(st.proc, C.prodDivsShown(st.proc), (a) => { C.setProdDivsShown(st.proc, a); draw(); }));
     }
     let _drawing = false;
     function draw() { if (_drawing) return; _drawing = true; try { drawInner(); } finally { _drawing = false; } }
     function drawInner() {
       drawBar(); ERP.destroyCharts && ERP.destroyCharts();
-      const rows = C.rowsBetween(st.year + '-01-01', st.year + '-12-31', st.proc).filter(r => !st.div || r.division === st.div);
+      const sel = C.prodDivsShown(st.proc); const rows = C.rowsBetween(st.year + '-01-01', st.year + '-12-31', st.proc).filter(r => !sel.length || sel.includes(C.divKey(r)));
       // 품목군: 대소문자 · 공백 차이는 한 묶음 (일별 탭 · 종합 현황과 같은 규칙), 수량 = 양품 pcs (일별 탭과 같음)
       const canon = new Map(); const dk = (r) => { const raw = String(r.division || '').trim(); const k = raw.toLowerCase() || '–'; if (!canon.has(k)) canon.set(k, raw || L('(품목군 없음)', '(không nhóm)')); return k; };
       const keys = st.by === 'process' ? (st.proc ? ERP.PROC.filter(p => p.id === st.proc) : ERP.PROC).map(p => ({ k: p.id, label: L(p.ko, p.vi) })) : Array.from(new Set(rows.map(dk))).sort().map(d => ({ k: d, label: canon.get(d) }));
@@ -229,7 +236,7 @@
           h('p', { class: 'help', style: { margin: '8px 0 0' } }, L('생산일보 양품 기준 (pcs). 그 달의 날짜별 수량은 일별 생산량 탭에서 봅니다.', 'Theo SL đạt của báo cáo (pcs). Xem từng ngày ở tab sản lượng theo ngày.'))),
         chart ? h('section', { class: 'card' }, h('h2', L('달별 막대', 'Biểu đồ theo tháng')), chart) : null);
     }
-    host.append(bar, body); draw();
+    host.append(bar, divBox, body); draw();
   }
 
   // ------------ tab: process settings (customizable processes) ------------

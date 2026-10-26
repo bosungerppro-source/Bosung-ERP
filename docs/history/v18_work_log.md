@@ -243,3 +243,38 @@
 - 설치 파일 `ColorPencil-ERP-Setup-1.13.7.exe`: 114,182,303 bytes, SHA-256 `40218c398f622532cb7b1bd031bb367c00384c22e3a08677643705a8187abbd5` (electron-builder `--win dir` + NSIS 3.12). app.asar 에 새 p_production.js · 버전 1.13.7 확인.
 - 데모 `ERP_Demo.html`: 7,885,850 bytes, SHA-256 `d0043d710337b9c9fb93e78580590ebbc49cabda328d3f3b22c75fe9453d530f`.
 - Release 1.13.7 = 모든 PC 자동 업데이트 (Claude 가 Actions 에서 실행 — 2026-10-26 부터 묻지 않고).
+
+## 1.13.8 (2026-10-26) — 품목군 여러 개 골라 보기: 생산 관리 일별 · 월별 · 종합 현황 일별 · 월별 위젯
+- 사용자 (2026-10-26, 생산 관리 "품목군: 전체" 고르기 사진 — Dial · dial 처럼 두 번씩 나옴): "품목군을 내가 원하는거만 중복선택할수있게해서 표시할수있게 해야지. 현장재고처럼 하나말하면 다른거도 너가 생각하고 반영해서 해줄수없어? 내가 하나하나 여기도해달라 저기도 해달라 해야되?"
+
+### 살펴본 것 (품목군을 고르는 곳 모두)
+- 생산 관리 일별 · 월별 조립 생산량 탭: 하나만 고르는 select, 목록은 일보 품목군 글자 그대로 (모든 공정 · 대소문자만 다른 것도 따로 — Dial · dial, Click Pencil · Click pencil …) 이고, 고르면 글자가 똑같은 줄만 (dial 줄은 빠짐) — 표는 대소문자를 한 묶음으로 세는데 고르기만 달랐다.
+- 생산 관리 일보 조회: 같은 목록 · 같은 문제 (목록 거르기).
+- 종합 현황 일별 · 월별 조립 생산량 위젯: 품목군 고르기 없음 (모두). 조립 재고 위젯은 1.13.6 에 ⚙ 품목군 여러 개.
+- 이미 여러 개: 현장 재고 피벗 표 (17차) · 조립 재고 위젯 (1.13.6) · 수주 관리 · 월별 수주량 위젯 (품목군 칩). 수주 품목군에는 대소문자만 다른 이름이 없음.
+- 실제 자료 (이 PC, 2026-10-26): 조립 일보 품목군 = Dial · Mini · Pencil · Click pencil · CPCL · CP Lead · (없음) — 겹침 없음. 사출 = Pencil · pencil · Mini · mini · Dial · dial · CLICK · click · Regular · regular (대소문자만 다름).
+
+### 정한 것
+- 생산 관리 일별 · 월별: select 대신 표 위에 체크 줄 (전체 + 그 공정 일보에 있는 품목군 — 현장 재고 표 설정 · 위젯 ⚙ 과 같은 `.fpiv-chk`). 고른 것만 표 · 합계 · 숫자 카드 · 아래 표 (예전 하나 고르기와 같은 범위). 두 탭이 같이 쓰고 저장 (`prodDivs` = {공정: [열쇠]}, 모든 PC 같음 — 현장 재고 표 설정처럼). 비면 전체.
+- 종합 현황 `asm_daily` · `asm_monthly`: ⚙ 에 품목군 (`multi`, 1.13.6 `optDialog` 그대로) — 위젯 `o.divs`. 제목 · 공정 · 표/차트는 그대로.
+- 품목군 열쇠 = 소문자 · 앞뒤 공백 없앰 (`C.divKey`, 표가 쓰던 규칙 그대로). 이름은 처음 나온 글자. 일보 조회의 고르기도 이 목록 (하나 고르기 그대로, 고르면 대소문자만 다른 줄 모두).
+- 휴대폰 요약은 바꾸지 않음 (모든 품목군).
+
+### 한 것
+- `app/js/calc.js`: `C.divKey` · `C.prodDivs(공정, 고른 것)` · `C.prodDivsShown` · `C.setProdDivsShown`.
+- `app/js/p_production.js`: `divChecks` (체크 줄), 일별 · 월별 탭의 품목군 select → 체크 줄 · 거르기, 일보 조회 품목군 고르기 (`test` = 열쇠).
+- `app/js/p_dashboard.js`: `asm_daily` · `asm_monthly` 의 ⚙ 품목군 · 거르기, `ERP.prodByMonth(p, y, divs)` (휴대폰은 divs 없이 — 그대로).
+- 버전 1.13.8.
+
+### 시험
+- 먼저 만든 시험 (v17 7-3장 17개): 고치기 전 (1.13.7 + 새 시험) 첫 확인 실패 (체크 없음 · '품목군: 전체' select 있음) 와 그 뒤 클릭 시간 초과. 다른 82개 통과.
+  - 시험 자료: 조립 Dial 100 · dial 50 · Mini 200 (+ 9월 300) · Click pencil 30 · Click Pencil 20 · 품목군 없음 5, 사출 Mini 1000 · Bulk 400.
+  - 확인: 체크 목록 (Click pencil · Dial · Mini · (품목군 없음) — 겹침 없음) · Dial + Mini → Dial 150 · Mini 200 · 일 합계 350 · 숫자 카드 350 · 설정 {ASM: [dial, mini]} · 월별도 같음 (Mini 500, 650) · 다시 열어도 · 사출로 바꾸면 사출 목록 (따로) · 전체 · 일보 조회 목록 · Dial 고르면 Dial · dial 둘 다 · 위젯 ⚙ (전체 + 같은 목록) → 일별 Dial 만 150 · 월별 Mini · Dial 650 · 제목 그대로 · 베트남어.
+  - 시험의 '예전 고르기 남음' 확인이 처음에 "행: 품목군별" 글자까지 잡아 고침 (`^품목군:` 만).
+- 고친 뒤: v17 99개 · v15 165개.
+- 화면 확인 (이 PC 실제 자료 사본, 구글 · 인터넷 막음): 체크 = 전체 · Click pencil · CP Lead · CPCL · Dial · Mini · Pencil · (품목군 없음). Click pencil · Dial · Mini · Pencil 을 고르면 2026-10 일별 = 3,871,075 (네 품목군), 월별 2026 = 132,594,970. 위젯 ⚙ 도 같은 목록. 화면 오류 0. 사진은 사용자에게 먼저 보냄.
+- 전체 (이 PC, Windows, 2026-10-26): v18 184 · v17 99 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.7 `1bb38bc` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음), 현장 엑셀 인식 (`bom 사용량.xlsx` 2,951행).
+
+### 설치 파일 · 데모 (이 PC 에서 만듦, 2026-10-26)
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.8.exe`: 114,222,240 bytes, SHA-256 `83fc7f45238a20d78eee2dd997950661d50faa52cd8c515db4804997720ce60f` (electron-builder `--win dir` + NSIS 3.12). app.asar 에 calc.js `C.prodDivs` · p_production `divChecks` · p_dashboard `divOpt` · 버전 1.13.8 확인.
+- 데모 `ERP_Demo.html`: 7,888,813 bytes, SHA-256 `8361731a35ce05b541ee04e010bb059c700cb7dee76dc14856be213619ad3182`.
