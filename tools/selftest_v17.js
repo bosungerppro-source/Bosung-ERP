@@ -5,7 +5,7 @@
    1 기본 표 = 조립 · 품목군 | 현재 재고 · 단계 카드 없음 · 2 월 열 없음 (예전 설정의 월 → 현재 재고)
    3 설정 (공정 · 품목군 · 행 · 열 · 범위 · 제목 · 재고 0 줄) → 저장 (다시 열어도 그대로) · 4 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히
    5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
-   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 7-2 위젯 ⚙ 품목군 여러 개 → 고른 것만 (1.13.6) · 8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -225,6 +225,52 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     const f = await ev(() => ({ hash: location.hash, proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort() }));
     eq('조립 위젯의 Mini 칸 → 현장 재고 · 조립 · Mini 품목', f, { hash: '#/floor', proc: 'ASM', line: 'MINI', codes: ['A-M1', 'A-M2'] });
     await ev(() => { ERP.db.setSetting('dash', null); ERP.state.stk_floor = null; }); await settle();
+  });
+
+  await sec('7-2. 종합 현황 조립 재고 위젯 (1.13.6, 사용자 "조립재고 품목군을 중복선택해서 표시하고 싶은거만 표시하게 해줘"): ⚙ 품목군 여러 개 → 고른 것만', async () => {
+    await A.emulateMedia({ reducedMotion: 'reduce' });
+    const show = async () => { await ev(() => { ERP.state.dashEdit = true; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); }); await settle(); };
+    await ev(() => ERP.db.setSetting('dash', [{ k: 'v17-fs', id: 'floor_stock', w: 1, o: { proc: 'ASM', rows: 'div', cols: 'none' } }])); await show();
+    const wOf = () => ev(() => { const el = document.querySelector('.wgrid .w[data-id=floor_stock]'); return { title: el.querySelector('h2').textContent, head: Array.from(el.querySelectorAll('thead th')).map(t => t.innerText.trim()), rows: Array.from(el.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())) }; });
+    /** ⚙ 의 품목군 칸: { label, all (전체 켜짐), opts: [[품목군 열쇠, 이름, 켜짐]] } */
+    const dlg = () => ev(() => { const f = document.querySelector('.modal [data-k="divs"]'); return f ? { label: f.closest('.field').querySelector(':scope > label').textContent, all: f.querySelector('[data-all] input').checked, opts: Array.from(f.querySelectorAll('[data-v]')).map(l => [l.dataset.v, l.innerText.trim(), l.querySelector('input').checked]) } : null; });
+    const tick = async (sel) => { await A.click('.modal [data-k="divs"] ' + sel + ' input'); await A.waitForTimeout(100); };
+    const openDlg = async () => { await A.click('.wgrid .w[data-id=floor_stock] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal select'); };
+    const procTo = async (p) => { await ev((x) => { const s = document.querySelector('.modal select'); s.value = x; s.dispatchEvent(new Event('change')); }, p); await A.waitForTimeout(100); };
+    const ALL = [['Mini', '120'], ['Dial', '40'], ['Pencil', '40'], ['기타', '5'], ['합계', '205']];
+    eq('처음: 조립 재고 = Mini · Dial · Pencil · 기타 · 합계 205', (await wOf()).rows, ALL);
+    await openDlg();
+    eq('⚙ 에 품목군: 전체 (켜짐) + 조립 재고에 있는 품목군 Mini · Dial · Pencil · 기타 (꺼짐)', await dlg(), { label: '품목군', all: true, opts: [['MINI', 'Mini', false], ['REG', 'Dial', false], ['PEN', 'Pencil', false], ['', '기타', false]] });
+    eq('공정 · 행 · 열 고르기는 그대로', await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent)), ['공정 (기본 조립)', '품목군', '행', '열']);
+    await tick('[data-v="MINI"]'); await tick('[data-v="PEN"]');
+    eq('Mini · Pencil 을 고르면 (여러 개) 전체는 꺼짐', await dlg(), { label: '품목군', all: false, opts: [['MINI', 'Mini', true], ['REG', 'Dial', false], ['PEN', 'Pencil', true], ['', '기타', false]] });
+    await A.click('.modal .modal-foot button.primary'); await settle();
+    eq('저장 → 고른 품목군만: Mini 120 · Pencil 40 · 합계 160 (제목 · 머리 그대로)', await wOf(), { title: '조립 재고', head: ['품목군', '현재 재고'], rows: [['Mini', '120'], ['Pencil', '40'], ['합계', '160']] });
+    eq('위젯 설정에 저장 (공정 · 행 · 열 그대로)', await ev(() => ERP.dashLayout().find(x => x.id === 'floor_stock').o), { proc: 'ASM', rows: 'div', cols: 'none', divs: ['MINI', 'PEN'] });
+    await ev(() => { ERP.state.dashEdit = false; ERP.render(); }); await settle();
+    eq('편집을 끝내도 고른 것만', (await wOf()).rows, [['Mini', '120'], ['Pencil', '40'], ['합계', '160']]);
+    await A.reload(); await ready(); await show();
+    eq('다시 열어도 그대로 (서버에 저장됨)', (await wOf()).rows, [['Mini', '120'], ['Pencil', '40'], ['합계', '160']]);
+    await openDlg();
+    eq('⚙ 을 다시 열면 Mini · Pencil 켜짐', [(await dlg()).all, (await dlg()).opts.map(x => x[2])], [false, [true, false, true, false]]);
+    await procTo('INJ');
+    eq('공정을 사출로 바꾸면 사출에 있는 품목군 (Mini) + 고른 Pencil (끌 수 있게)', (await dlg()).opts, [['MINI', 'Mini', true], ['PEN', 'Pencil', true]]);
+    await procTo('ASM');
+    await tick('[data-v="MINI"]'); await tick('[data-v="PEN"]');
+    eq('고른 것을 다 끄면 전체', [(await dlg()).all, (await dlg()).opts.some(x => x[2])], [true, false]);
+    await tick('[data-v="REG"]'); await tick('[data-all]');
+    eq('전체를 켜면 고른 것이 모두 꺼짐', [(await dlg()).all, (await dlg()).opts.some(x => x[2])], [true, false]);
+    await A.click('.modal .modal-foot button.primary'); await settle();
+    eq('전체로 저장 → 예전처럼 모두 (합계 205) · 저장된 품목군은 비움', [(await wOf()).rows, await ev(() => ERP.dashLayout().find(x => x.id === 'floor_stock').o.divs)], [ALL, []]);
+    await openDlg(); await tick('[data-v="REG"]'); await A.click('.modal .modal-foot button:not(.primary)'); await settle();
+    eq('고르고 취소 → 바뀌지 않음', (await wOf()).rows, ALL);
+    await ev(() => ERP.setLang('vi')); await show();
+    await openDlg();
+    const v = await ev(() => document.querySelector('.modal [data-k="divs"]').closest('.field').innerText.replace(/\s+/g, ' '));
+    ok('베트남어: Nhóm · Tất cả · Khác · 한글 없음', /Nhóm/.test(v) && /Tất cả/.test(v) && /Khác/.test(v) && !/[가-힣]/.test(v), v);
+    await A.keyboard.press('Escape'); await settle();
+    await ev(() => ERP.setLang('ko'));
+    await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.render(); }); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

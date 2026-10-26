@@ -43,8 +43,11 @@
     scope: ['all', 'WH', 'FAC'].includes(c.scope) ? c.scope : 'all', zero: !!c.zero });
   /** 저장된 표 목록 (없으면 기본: 조립 · 품목군 | 현재 재고). 모두 지우면 빈 목록 */
   P.list = () => { const v = DB.setting(KEY, null); return Array.isArray(v) ? v.map(clean) : P.DEFAULT(); };
-  /** 1.12.2: 종합 현황 위젯 설정 { proc ('' = 모든 공정), rows, cols } → 표 하나 */
-  P.fromWidget = (o) => clean({ id: 'w', procs: o.proc ? [String(o.proc)] : [], divs: [], rows: o.rows || 'div', cols: o.cols || 'none', scope: 'all' });
+  /** 1.12.2: 종합 현황 위젯 설정 { proc ('' = 모든 공정), divs (품목군 — 비면 모두, 1.13.6), rows, cols } → 표 하나 */
+  P.fromWidget = (o) => clean({ id: 'w', procs: o.proc ? [String(o.proc)] : [], divs: o.divs, rows: o.rows || 'div', cols: o.cols || 'none', scope: 'all' });
+  /** 1.13.6: 위젯 ⚙ 품목군 고르기 — 그 공정('' = 모든 공정) 현장 재고에 있는 품목군 + 이미 고른 것 (표 설정의 품목군과 같은 순서) */
+  P.linesOf = (proc, keep) => Array.from(new Set(INV.rows().filter(s => INV.groupOf(s) === 'floor' && (!proc || procOf(s) === proc)).map(s => s.line || '').concat(keep || [])))
+    .sort((a, b) => lineOrder(a) - lineOrder(b) || a.localeCompare(b));
   const save = (list) => { DB.setSetting(KEY, list.map(c => { const o = clean(c); if (!o.title) delete o.title; if (!o.zero) delete o.zero; return o; })); ERP.render(); };
   const patch = (id, p) => { const l = P.list(); const c = l.find(x => x.id === id); if (!c) return; Object.assign(c, p); if (c.cols === c.rows) c.cols = 'none'; save(l); };
   P.autoTitle = (c) => (c.procs.length ? c.procs.map(P.procLabel).join(' · ') : L('모든 공정', 'Mọi công đoạn')) + L(' 재고', ' — tồn') + (c.divs.length ? ' (' + c.divs.map(k => INV.lineDivName(k)).join(' · ') + ')' : '');

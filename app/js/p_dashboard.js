@@ -277,14 +277,17 @@
         ERP.simpleTable([{ label: L('공정', 'Công đoạn'), render: p => h('b', { style: { color: p.color } }, L(p.ko, p.vi)) }].concat(days7.map(dd => ({ label: F.md(dd), num: 1, render: p => { const o = cell[p.id + '|' + dd]; return o ? h('span', { title: L('입고 ', 'Nhập ') + o.in + L(' · 차감 ', ' · trừ ') + o.use }, ERP.chip('ok', '+' + o.in), o.use ? ' ' : '', o.use ? ERP.chip('warn', '−' + o.use) : '') : h('span', { class: 'muted' }, '–'); } }))), ERP.PROC, {}),
         h('p', { class: 'help' }, L('+ = 생산 입고 건수, − = 현장 부품 차감 건수 (원부자재 제외) · 기준일 ', '+ = số dòng nhập, − = số dòng trừ linh kiện (không trừ NVL) · ngày chốt ') + (d.open || '–') + (issues ? L(' · 해결할 항목 ' + issues + '종', ' · cần xử lý ' + issues) : ''))); } });
   // 1.12.2 (사용자 2026-10-22, 현장 재고 위 '조립 재고' 표 캡처와 함께): "종합 현황에 이거 추가할수있게 해줘"
-  // — 현장 재고 피벗 표와 같은 계산 · 모양 (ERP.pivot). 기본 배치에는 넣지 않고 "+ 위젯 추가" 에서 고른다 (여러 개, ⚙ 공정 · 행 · 열)
-  reg('floor_stock', { ko: '현장 재고 (공정별 현재 재고)', vi: 'Tồn hiện trường (theo công đoạn)', dko: '현장 재고 위의 표와 같은 품목군별 현재 재고 (기본 조립). ⚙ 에서 공정 · 행 · 열을 고르고, 공정마다 하나씩 넣을 수 있습니다', dvi: 'Tồn hiện tại theo nhóm như bảng ở trang Tồn hiện trường (mặc định lắp ráp). ⚙ chọn công đoạn · hàng · cột', cat: 'stock', w: 1, sizes: [1, 2, 3, 4], multi: true,
+  // — 현장 재고 피벗 표와 같은 계산 · 모양 (ERP.pivot). 기본 배치에는 넣지 않고 "+ 위젯 추가" 에서 고른다 (여러 개, ⚙ 공정 · 품목군 · 행 · 열)
+  // 1.13.6 (사용자 2026-10-26): "종합현황의 조립재고 품목군을 중복선택해서 표시하고 싶은거만 표시하게 해줘 너 맘대로하지말고 제발"
+  // — ⚙ 품목군을 여러 개 고르면 고른 품목군만 표에 (합계도 그 품목군만). 안 고르면 (전체) 예전처럼 모두. 제목은 그대로
+  reg('floor_stock', { ko: '현장 재고 (공정별 현재 재고)', vi: 'Tồn hiện trường (theo công đoạn)', dko: '현장 재고 위의 표와 같은 품목군별 현재 재고 (기본 조립). ⚙ 에서 공정 · 품목군 · 행 · 열을 고르고, 공정마다 하나씩 넣을 수 있습니다', dvi: 'Tồn hiện tại theo nhóm như bảng ở trang Tồn hiện trường (mặc định lắp ráp). ⚙ chọn công đoạn · nhóm · hàng · cột', cat: 'stock', w: 1, sizes: [1, 2, 3, 4], multi: true,
     defaults: { proc: 'ASM', rows: 'div', cols: 'none' },
     opts: [{ k: 'proc', ko: '공정 (기본 조립)', vi: 'Công đoạn (mặc định lắp ráp)', options: () => [['', L('모든 공정', 'Mọi công đoạn')]].concat(procOpts(), [['ETC', L('기타', 'Khác')]]) },
+      { k: 'divs', ko: '품목군', vi: 'Nhóm', multi: true, options: (v, keep) => ERP.pivot.linesOf((v || {}).proc, keep).map(k => [k, ERP.inv.lineDivName(k)]) },
       { k: 'rows', ko: '행', vi: 'Hàng', options: () => ERP.pivot.ROW_OPTS() }, { k: 'cols', ko: '열', vi: 'Cột', options: () => ERP.pivot.COL_OPTS() }],
     render(ctx, inst) {
       const P = ERP.pivot; const c = P.fromWidget(inst.o || {}); const d = P.build(c);
-      return box(P.autoTitle(c), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('floor'); } }, L('현장 재고 →', 'Tồn hiện trường →')),
+      return box(P.autoTitle(Object.assign({}, c, { divs: [] })), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('floor'); } }, L('현장 재고 →', 'Tồn hiện trường →')),
         d.rows.length ? P.tableEl(c, d) : h('div', { class: 'empty' }, L('재고가 없습니다.', 'Không có tồn.')),
         h('p', { class: 'help', style: { margin: '6px 0 0' } }, [d.units.length === 1 ? L('단위 ', 'Đơn vị ') + d.units[0] : null, L('현재 재고', 'Tồn hiện tại')].filter(Boolean).join(' · ')));
     } });
@@ -348,8 +351,21 @@
   }
   function optDialog(inst, def) {
     const vals = Object.assign({}, inst.o || {});
+    // 1.13.6: multi = 체크로 여러 개 고르기 (비면 전체) — 현장 재고 표 설정의 품목군과 같은 모양. 목록은 이 창에서 고른 공정에 따라 다시 그림
+    const redraw = [];
+    const checks = (op) => {
+      const el = h('div', { class: 'fpiv-row', 'data-k': op.k });
+      const chk = (on, label, fn, attrs) => h('label', Object.assign({ class: 'fpiv-chk' + (on ? ' on' : '') }, attrs), h('input', { type: 'checkbox', checked: on, onchange: (e) => fn(e.target.checked) }), ' ', label);
+      const draw = () => {
+        const cur = Array.isArray(vals[op.k]) ? vals[op.k].map(String) : []; const list = op.options(vals, cur);
+        const set = (a) => { vals[op.k] = a; draw(); };
+        el.replaceChildren(chk(!cur.length, L('전체', 'Tất cả'), (on) => set(on ? [] : list.slice(0, 1).map(o => o[0])), { 'data-all': '1' }),
+          ...list.map(o => chk(cur.includes(o[0]), o[1], (on) => set(on ? cur.concat([o[0]]) : cur.filter(x => x !== o[0])), { 'data-v': o[0] })));
+      };
+      redraw.push(draw); draw(); return el;
+    };
     const body = h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr' } }, (def.opts || []).map(op => h('div', { class: 'field' }, h('label', L(op.ko, op.vi)),
-      h('select', { class: 'inp', onchange: (e) => { vals[op.k] = e.target.value; } }, op.options().map(o => h('option', { value: o[0], selected: String(vals[op.k] || '') === String(o[0]) }, o[1]))))));
+      op.multi ? checks(op) : h('select', { class: 'inp', onchange: (e) => { vals[op.k] = e.target.value; redraw.forEach(f => f()); } }, op.options().map(o => h('option', { value: o[0], selected: String(vals[op.k] || '') === String(o[0]) }, o[1]))))));
     ERP.modal({ title: L('위젯 설정 · ', 'Cài đặt ô · ') + L(def.ko, def.vi), width: '420px', body, buttons: [{ label: L('취소', 'Hủy') }, { label: L('저장', 'Lưu'), kind: 'primary', onClick: () => { setOpt(inst.k, vals); } }] });
   }
 
