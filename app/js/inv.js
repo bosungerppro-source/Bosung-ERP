@@ -456,7 +456,7 @@
     opt = opt || {};
     const mode = opt.mode || INV.prodMode(); const od = INV.opening().date; const IT = INV.items(); const rmBy = INV.rmByName(); const MAP = INV.codeMap();
     const diag = { mode, open: od.FAC || od.WH || od.FLOOR || null, openFloor: od.FLOOR || null, considered: 0, before: 0, beforeFloor: 0, prod: 0, use: 0, mapped: 0, resin: 0,
-      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), matProd: new Map(), setPass: new Map(), similar: new Map(), bomSrc: {} };
+      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), matProd: new Map(), setPass: new Map(), sgNoBom: new Map(), similar: new Map(), bomSrc: {} };
     // 원료 이름 → RM 품목: 사용자가 연결한 것(code_map raw)이 먼저, 그다음 이름이 같은 RM (차감하지 않고 진단에 이름만 쓴다)
     const rawItem = (name) => { const c = MAP.raw(name); const a = c ? IT.get(c) : null; return a || rmBy.get(normName(name)) || null; };
     const out = [];
@@ -499,27 +499,46 @@
       else if (unit === 'SET') mainQ = sets;
       else if (unit === 'kg') mainQ = num(r.weight_kg) || null;
       else mainQ = pcs;
-      if (mainQ === null || !isFinite(mainQ)) { if (!matIt) bump(diag.noConv, item.code, setProc ? num(r.ok_qty) : pcs); resin(); return; }
-      if (!mainQ) { resin(); return; }   // 양품 0 (전부 불량 · 시험 사출)
+      // 1.13.10: 포장 (set 공정) 은 박스 수를 몰라도 (CT당 set · 일보 CT 없음) 포장 set 으로 셀 수 있는 BOM 차감 (세트 안 조립품 · 세트 구성) 은 한다 — 박스 입고만 못 함 (noConv)
+      const noMain = mainQ === null || !isFinite(mainQ);
+      if (noMain) { if (!matIt) bump(diag.noConv, item.code, setProc ? num(r.ok_qty) : pcs); if (!(setProc && sets > 0)) { resin(); return; } }
+      else if (!mainQ) { resin(); return; }   // 양품 0 (전부 불량 · 시험 사출)
       const base = base0;
-      if (matIt) { /* 입고하지 않음 (위 matProd) */ }
+      if (matIt || noMain) { /* 입고하지 않음 (위 matProd · noConv) */ }
       else if (after(r.date, item)) { out.push(Object.assign({ kind: 'PROD', to_scope: 'FAC', code: item.code, name: item.name, qty: r4(mainQ), unit: INV.unitShow(item.unit) }, base)); diag.prod++; }
       else diag.beforeFloor++;   // 현장 실사일 이전 생산 — 실사 수량에 이미 들어 있다
       if (mode !== 'in_bom') return;
       if (r.process === 'INJ' && !bomIndex().lines.get(item.code)) { resin(); return; }
       const bm = bomOf(item, r.process, diag);
-      if (!bm || !bm.kids.length) { if (!matIt) bump(diag.noBom, item.code, mainQ); return; }
+      if (!bm || !bm.kids.length) { if (!matIt && !noMain) bump(diag.noBom, item.code, mainQ); return; }
       diag.bomSrc[bm.src] = (diag.bomSrc[bm.src] || 0) + 1;
+      // 1.13.9 · 1.13.10: 포장 일보에는 박스(완제품) 코드만 적힌다 — 박스 BOM 의 세트(SG · 마니라)는 같은 포장에서 만들어 바로 박스에 들어가므로 세트는 빼지 않고
+      //   (세트를 만든 일보가 없어 빼면 마이너스만 쌓인다 · 카톤 코드 줄은 pcs × 박스당 세트로 커진다), 세트 BOM 안의 현장 부품 (조립품) 을 포장 set 만큼 뺀다
+      //   (사용자 "포장한 만큼 조립 재고가 줄도록"). 세트가 여러 가지면 박스 BOM 수량 비율로 나눈다. 일보가 직접 만든 세트는 예전처럼 세트를 뺀다
+      const openSG = (k) => { if (!setProc || k.raw) return null; const x = IT.get(k.code); return x && !isMatItem(x) && INV.info(x).stage === 'SG' && !madeSG.has(x.code) ? x : null; };
+      const sgPer = bm.kids.reduce((a, k) => a + (openSG(k) ? k.per : 0), 0);
+      const passSG = (sg, q) => {
+        if (diag.openFloor && r.date <= diag.openFloor) return;   // 현장 실사일까지의 포장 — 세트 안 조립품은 실사 수량에 이미 빠져 있다
+        bump(diag.setPass, sg.code, q);
+        const b2 = bomOf(sg, 'PCK', diag);
+        if (!b2 || !b2.kids.length) { bump(diag.sgNoBom, sg.code, q); return; }
+        b2.kids.forEach(k2 => {
+          if (k2.basis === 'pcs') return;   // 세트 BOM 은 set 기준 (조립품 색상 BOM 은 해당 없음)
+          const q2 = q * k2.per; if (!q2) return;
+          if (k2.raw) { const rk = rawItem(k2.raw); bump(diag.matSkip, rk ? rk.code : k2.raw, q2); return; }
+          const kid = IT.get(k2.code); if (!kid) { bump(diag.missingPart, k2.code, q2); return; }
+          if (isMatItem(kid)) { bump(diag.matSkip, kid.code, q2); return; }   // 마니라 · 카드 등 원부자재는 빼지 않는다 (11차)
+          if (INV.info(kid).stage === 'SG' || !after(r.date, kid)) return;   // 세트 안의 세트는 펼치지 않음
+          out.push(Object.assign({ kind: 'USE', from_scope: 'FAC', code: kid.code, name: kid.name, qty: r4(q2), unit: INV.unitShow(kid.unit), parent: item.code, via: sg.code }, base)); diag.use++;
+        }); };
       bm.kids.forEach(k => {
+        const sg = openSG(k); if (sg) { if (sets > 0 && sgPer > 0) passSG(sg, sets * k.per / sgPer); return; }
         const basisQ = k.basis === 'main' ? mainQ : k.basis === 'set' ? (sets !== null ? sets : (pps ? pcs / pps : null)) : (pcs || (sets !== null && pps ? sets * pps : 0));
         if (!basisQ) return;
         // 11차: 배합표 원료(g/개)는 원재료 — 차감하지 않는다 (소요량 · 신고서 계산용)
         if (k.raw) { const rk = rawItem(k.raw); bump(diag.matSkip, rk ? rk.code : k.raw, basisQ * k.per); return; }
         const kid = IT.get(k.code); if (!kid) { bump(diag.missingPart, k.code, basisQ * k.per); return; }
         if (isMatItem(kid)) { bump(diag.matSkip, kid.code, basisQ * k.per); return; }   // 11차: BOM 에 원부자재가 있어도 차감하지 않는다
-        // 1.13.9: 포장 일보에는 박스(완제품) 코드만 적힌다 — 박스 BOM 의 SG(마니라 세트)는 같은 포장에서 만들어 바로 박스에 들어가므로 차감하지 않는다
-        //         (SG 를 만든 일보가 없어 빼면 마이너스만 쌓인다 · 카톤 코드 줄은 pcs × 박스당 세트로 커진다). 일보가 직접 만든 SG 는 예전처럼 차감. 진단엔 포장 set
-        if (setProc && INV.info(kid).stage === 'SG' && !madeSG.has(kid.code)) { bump(diag.setPass, kid.code, sets || 0); return; }
         if (!after(r.date, kid)) return;   // 현장 실사일 이전 소모 — 실사 수량에 이미 빠져 있다
         out.push(Object.assign({ kind: 'USE', from_scope: 'FAC', code: kid.code, name: kid.name, qty: r4(basisQ * k.per), unit: INV.unitShow(kid.unit), parent: item.code }, base)); diag.use++;
       });

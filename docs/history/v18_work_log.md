@@ -320,3 +320,31 @@
 - 전체 (이 PC, Windows, 2026-10-27, 박스 포장 SG 포함): v18 184 · v17 122 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.8 `d212a0d` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
 - 설치 파일 `ColorPencil-ERP-Setup-1.13.9.exe`: 114,214,101 bytes, SHA-256 `0d497738ccc045c18c227a6c759f29bebd2532f3e450cd9e4063f8f63807b747` (electron-builder `--win dir` + NSIS 3.12). 2026-10-26 에 만들던 것은 정전으로 끊겨 58,718,753 bytes 로 깨져 있어 다시 만듦. app.asar 의 inv.js · p_stock.js · pivot.js · p_bom.js · p_dashboard.js · core.js · app.css · server.js = 소스와 같음 (package.json 은 electron-builder 가 줄여 씀, 버전 1.13.9).
 - 데모 `ERP_Demo.html`: 7,901,952 bytes, SHA-256 `400018ca3833bb20dc013a78d878dbb2dfcf5b3c525173868dad97939eb5d533`.
+- Release v1.13.9: Claude 가 실행 (2026-10-27, Actions #8 성공, `47ac3ac`, `releases/latest` = v1.13.9 — 이 PC 내장 브라우저의 깃허브 로그인이 풀려 있어 사용자가 다시 로그인). `ColorPencil-ERP-Setup-1.13.9.exe` 114,184,922 bytes · SHA-256 `275d3185ab0fdc2994daffa88672d5187c2b7a890d52ed366c05d54a138edf19` (GitHub 에서 빌드) · `ERP_Demo.html` (이 PC 데모와 같음) · `latest.json` (1.13.9, 크기 · 지문이 Release 설치 파일과 같음). 이 PC 의 ERP 는 11:08 에 1.13.7 → 1.13.9 (1.13.8 은 건너뜀), 11:10 에 ERP CODE 품목 1,081개를 넣음 (저장소 밖 `08_erp_code`, 품목 960 → 2,041, 바뀐 표 = 품목 · 업로드 이력뿐, 구글 = 이 PC 43,360행).
+
+## 1.13.10 (2026-10-27) — 포장한 만큼 조립 재고가 줄어듦
+- 사용자 (2026-10-27, 1.13.9 를 이 PC 에 넣은 뒤 "포장 일보는 지금도 조립 재고를 빼지 않는다" 는 보고에): "포장한 만큼 조립 재고가 줄도록 고쳐줘. 먼저 어떻게 바뀌는지 숫자로 보여줘" → 숫자를 본 뒤 "이대로 1.13.10 으로 올려줘 (Release 까지)".
+
+### 까닭
+- 포장 일보에는 박스 코드만 적힌다. ECOUNT BOM 은 박스 → 세트 (SG) ×12 · 24 · 144 → 조립품 (색 연필 ×1) + 마니라 (부자재) 두 단계인데, 생산 반영은 한 단계만 본다. 1.13.9 까지: 세트가 품목에 없으면 `missingPart`, 1.13.9 부터는 세트를 빼지 않음 (`setPass`) — 어느 쪽이든 조립품은 하나도 빠지지 않았다. 10-26 의 ECOUNT BOM (`bom_lines`) 이 세트 구성 BOM 보다 먼저 쓰인다.
+- 박스 수: 일보 CT 칸이 대부분 0 이고 완제품에 CT당 set 이 없어 박스 (CT) 단위로 셀 수 없는 줄은 BOM 차감까지 가지 않고 `noConv` 로 끝났다.
+
+### 정한 것
+- 세트 (일보가 만든 적 없는 SG) 는 빼지 않고 그 세트 BOM 안의 현장 부품을 포장 set × BOM 수량 만큼 뺀다. 포장 set = 일보 set (박스 수 × 박스당 세트가 아니라 — 사용자 "포장한 만큼", 일보 pcs 와 맞음). 박스에 세트가 여러 가지면 박스 BOM 의 세트 수량 비율로 나눔.
+- 박스 수를 몰라도 (CT당 set · 일보 CT 없음) set 으로 셀 수 있는 차감은 한다. 박스 입고는 예전처럼 CT당 set 이 있어야 함 (넣지 않음 — 완제품은 ECOUNT 기준일 2026-01-01 부터 세므로 올해 포장한 박스가 모두 쌓임).
+- 현장 실사일까지의 포장은 세지 않음 (조립품 차감과 같은 기간 — 진단 `setPass` 도). 원부자재 · 없는 코드 · 세트 안의 세트는 빼지 않음.
+
+### 한 것
+- `app/js/inv.js` `postRows`: `noMain` (박스 수 모름) 이어도 set 공정이고 set > 0 이면 BOM 차감으로 감 (입고 · `noBom` 은 안 함), `openSG` · `sgPer` · `passSG` (세트 BOM `bomOf(sg, 'PCK')` 을 펼쳐 USE — `via` = 세트, `parent` = 박스), `diag.sgNoBom`.
+- `app/js/p_stock.js` 생산 반영 탭 3-2 카드: 제목 "박스 포장: 세트(SG) 대신 세트 안의 조립품을 뺌 (규칙)", 설명, 칸 "뺀 조립품 (pcs)" (USE `via` 합, 세트 BOM 없으면 "– (세트 BOM 없음)"), 한국어 · 베트남어.
+- 버전 1.13.10 (두 자리 — 자동 업데이트 `cmpVer` 는 숫자 비교, 파일 이름 규칙 `\d+\.\d+\.\d+`, Windows 업데이트 시험은 +100 이라 문제없음).
+
+### 시험
+- 먼저 만든 시험 (v17 7-7장): 고치기 전 7개 실패 — 조립품 차감 0 (A-M1 120 그대로), `setPass` 는 카톤 코드 줄 하나, 카드 제목 예전 것 (7-6장의 새 제목 확인 포함). 고친 뒤 처음: A-M2 시작 재고를 20 으로 잘못 기대 (3장에서 0 으로 맞춘 것) · 접힌 칸을 innerText 로 읽음 → 시험만 고침. v17 130개.
+  - 자료: 박스 K-B2 (FG · CT · CT당 set 없음) = 세트 K-S2 ×12, 카톤 코드 K-C2 (부자재) = K-S2 ×12, 박스 K-B3 = K-S2 ×6 + K-S3 ×6, 세트 K-S2 = A-M1 + A-M2 + RM-1 0.01, K-S3 = A-D1. 포장 10-20 K-B2 60 · 10-21 K-C2 30 · 10-22 K-B3 24 · 08-20 (실사 08-31 전) K-B2 500 → A-M1 · A-M2 각 60 + 30 + 12 = 102, A-D1 12, 세트 · 원료 안 뺌, 입고 없음 (`noConv`), `setPass` K-S2 102 · K-S3 12, 카드 줄 (204 · 12 pcs), 베트남어.
+- 이 PC 자료 사본 (구글 · 인터넷 막음, `08_erp_code/scripts/compare_apps.js` — 같은 자료를 1.13.9 · 고친 화면 파일로 띄워 비교): 10-21 ~ 10-23 포장 10줄 52,800 set (041L Marlin 9줄 49,700 set → ML01 ~ ML12 각 49,700 · 68-7418-L-002 1줄 3,100 set → BP 18색 각 3,100) → 조립 13,996,827 → 13,344,627 (−652,200 = 일보 pcs 합). 품목군: Dial 1,629,801 → 1,033,401 · Pencil 2,571,751 → 2,515,951 · Mini · Click pencil 그대로. 마이너스 38 → 49 (ML 9개 — 10-20 실사에 없던 코드라 10-21 부터의 조립 일보보다 많이 포장, BP028 · BP023). 리필 · 사출 · 포장 CT · SET 그대로, 세트 BOM 없음 0, 화면 오류 0.
+
+### 시험 · 설치 파일 · 데모 (이 PC 에서 만듦, 2026-10-27)
+- 전체 (이 PC, Windows, 2026-10-27): v18 184 · v17 130 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.9 `47ac3ac` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.10.exe`: 114,215,567 bytes, SHA-256 `47593cb577c9f33dd147abc209702c25930ac227c8b2acd2ca1815ca1f8d4d7f` (electron-builder `--win dir` + NSIS 3.12). app.asar 의 inv.js · p_stock.js · pivot.js · p_bom.js · p_dashboard.js · core.js · app.css · server.js = 소스와 같음, 버전 1.13.10.
+- 데모 `ERP_Demo.html`: 7,905,036 bytes, SHA-256 `d99a7a36a0c6eb915be4e662b825a8f59581189a34abc3632dace5c37d22e6a0`.

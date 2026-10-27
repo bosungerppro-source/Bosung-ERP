@@ -7,7 +7,8 @@
    5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
    7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 7-2 위젯 ⚙ 품목군 여러 개 → 고른 것만 (1.13.6)
    7-3 생산 관리 일별 · 월별 · 일보 조회 · 종합 현황 일별 · 월별 위젯도 품목군 여러 개 (1.13.8)
-   7-4 현장 재고 → 원재료 환산 표 (조립 재고 옆 · 공정별 · 위젯) · 7-5 MRP 수주 가져오기: 전체 선택 · 진행 상태 · 범위 · 7-6 박스 포장의 SG 는 차감 안 함 (1.13.9) · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7-4 현장 재고 → 원재료 환산 표 (조립 재고 옆 · 공정별 · 위젯) · 7-5 MRP 수주 가져오기: 전체 선택 · 진행 상태 · 범위 · 7-6 박스 포장의 SG 는 차감 안 함 (1.13.9)
+   7-7 포장한 만큼 조립 재고가 줄어듦 — 박스 → 세트 → 조립품 (1.13.10) · 8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -429,9 +430,43 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await ev(() => ERP.goStock('post'));
     await A.waitForFunction(() => /생산일보 → 재고 자동 반영/.test(document.querySelector('main').innerText), null, { timeout: 15000 }).catch(() => {});
     const t = await ev(() => document.querySelector('main').textContent);   // 접힌 칸(details) 안의 표도 본다
-    ok('생산 반영 탭: "박스 포장의 세트(SG)는 차감하지 않음 (규칙)" · K-S1 · 360 set', /박스 포장의 세트\(SG\)는 차감하지 않음 \(규칙\)/.test(t) && /K-S1/.test(t) && /360/.test(t), t.slice(0, 300));
+    ok('생산 반영 탭: "박스 포장: 세트(SG) 대신 세트 안의 조립품을 뺌 (규칙)" (1.13.10 제목) · K-S1 · 360 set', /박스 포장: 세트\(SG\) 대신 세트 안의 조립품을 뺌 \(규칙\)/.test(t) && /K-S1/.test(t) && /360/.test(t), t.slice(0, 300));
     await ev(() => ERP.setLang('vi')); await ev(() => ERP.goStock('post')); await settle();
     ok('베트남어: 카드 제목 · 설명 · 표에 한글 없음', await ev(() => { const d = Array.from(document.querySelectorAll('main details')).find(x => /SG/.test(x.querySelector('summary').textContent) && /thùng/.test(x.textContent)); return !!d && !/[가-힣]/.test(d.textContent); }));
+    await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('items', k.items); DB.replace('bom_lines', k.bom_lines); DB.replace('prod_log', k.prod_log); await DB.flush(); ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-7. 포장한 만큼 조립 재고가 줄어듦 (1.13.10, 사용자 "포장한 만큼 조립 재고가 줄도록 고쳐줘"): 박스 → 세트(SG) → 조립품, 포장 set 만큼', async () => {
+    const keep = await ev(() => ({ items: ERP.db.rows('items').map(r => Object.assign({}, r)), bom_lines: ERP.db.rows('bom_lines').map(r => Object.assign({}, r)), prod_log: ERP.db.rows('prod_log').map(r => Object.assign({}, r)) }));
+    // 박스 K-B2 (FG · CT, CT당 set 없음) = SG K-S2 ×12 · 카톤 코드 K-C2 (부자재) = K-S2 ×12 · 박스 K-B3 = K-S2 ×6 + K-S3 ×6
+    // 세트 K-S2 = 조립 A-M1 ×1 + A-M2 ×1 + 원료 RM-1 0.01 (원부자재 — 빼지 않음) · 세트 K-S3 = 조립 A-D1 ×1
+    await ev(async () => { const DB = ERP.db;
+      DB.replace('items', DB.rows('items').concat([{ code: 'K-B2', name: 'MINI 2CT BOX', stage: 'FG', line: 'MINI', unit: 'CT', src: 'test' }, { code: 'K-C2', name: 'CARTON - MINI 2CT', stage: 'SM', unit: 'PCS', src: 'test' },
+        { code: 'K-B3', name: 'MIX BOX', stage: 'FG', line: 'MINI', unit: 'CT', src: 'test' }, { code: 'K-S2', name: 'MINI 2CT MANILA', stage: 'SG', line: 'MINI', unit: 'SET', src: 'test' }, { code: 'K-S3', name: 'DIAL 1CT MANILA', stage: 'SG', line: 'REG', unit: 'SET', src: 'test' }]));
+      const b = (parent, child, qty) => ({ parent, child, qty, src: 'test' });
+      DB.replace('bom_lines', [b('K-B2', 'K-S2', 12), b('K-C2', 'K-S2', 12), b('K-B3', 'K-S2', 6), b('K-B3', 'K-S3', 6), b('K-S2', 'A-M1', 1), b('K-S2', 'A-M2', 1), b('K-S2', 'RM-1', 0.01), b('K-S3', 'A-D1', 1)]);
+      const pk = (date, code, sets, ct, ea) => ({ date, process: 'PCK', code, ok_qty: sets, ok_ct: ct, ok_ea: ea, unit: 'set', shift: 'D', source: 'test' });
+      DB.replace('prod_log', [pk('2026-10-20', 'K-B2', 60, 0, 120), pk('2026-10-21', 'K-C2', 30, 0, 60), pk('2026-10-22', 'K-B3', 24, 0, 36), pk('2026-08-20', 'K-B2', 500, 0, 1000)]); await DB.flush(); });
+    const r = await ev(() => { const I = ERP.inv; const pp = I.prodPost(); const bal = (c) => { const s = I.rows().find(x => x.code === c); return s ? s.bal : 0; };
+      const use = (c) => pp.rows.filter(t => t.kind === 'USE' && t.code === c).map(t => [t.parent, t.via || '', t.qty]);
+      return { m1: use('A-M1'), m2: use('A-M2'), d1: use('A-D1'), sg: [use('K-S2'), use('K-S3')], rm: use('RM-1'), bal: ['A-M1', 'A-M2', 'A-D1', 'K-S2'].map(bal),
+        prod: pp.rows.filter(t => t.kind === 'PROD').map(t => t.code), nc: ['K-B2', 'K-B3'].map(c => pp.diag.noConv.has(c)), pass: Array.from(pp.diag.setPass.entries()).sort(),
+        ms: pp.diag.matSkip.has('RM-1') }; });
+    // 현장 실사 2026-08-31 뒤 줄만 (08-20 의 500 set 은 실사 수량에 이미 있음). K-B3 24 set = K-S2 12 + K-S3 12 (BOM 6 : 6)
+    eq('A-M1: 박스 K-B2 60 (CT당 set 없어도) · 카톤 코드 K-C2 30 · 섞인 박스 K-B3 12 — 세트 K-S2 를 거쳐', r.m1, [['K-B2', 'K-S2', 60], ['K-C2', 'K-S2', 30], ['K-B3', 'K-S2', 12]]);
+    eq('A-M2 도 같음 · A-D1 = K-B3 의 K-S3 12', [r.m2, r.d1], [[['K-B2', 'K-S2', 60], ['K-C2', 'K-S2', 30], ['K-B3', 'K-S2', 12]], [['K-B3', 'K-S3', 12]]]);
+    eq('세트(SG) 자체 · 원료 (원부자재) 는 빼지 않음', [r.sg, r.rm, r.ms], [[[], []], [], true]);
+    eq('현장 재고: A-M1 120 − 102 = 18 · A-M2 0 (3장에서 0 으로 맞춤) − 102 = −102 · A-D1 40 − 12 = 28 · K-S2 0', r.bal, [18, -102, 28, 0]);
+    eq('박스 수를 모르는 박스 (CT당 set · 일보 CT 없음) 는 입고하지 않고 "CT · SET 환산 정보 없음" 그대로', [r.prod, r.nc], [[], [true, true]]);
+    eq('진단 setPass: K-S2 60 + 30 + 12 = 102 set · K-S3 12 set', r.pass, [['K-S2', { n: 3, qty: 102 }], ['K-S3', { n: 1, qty: 12 }]]);
+    await ev(() => ERP.goStock('post'));
+    await A.waitForFunction(() => /생산일보 → 재고 자동 반영/.test(document.querySelector('main').innerText), null, { timeout: 15000 }).catch(() => {});
+    const card = await ev(() => { const d = Array.from(document.querySelectorAll('main details')).find(x => /세트\(SG\)/.test(x.querySelector('summary').textContent)); if (!d) return null;
+      return { title: d.querySelector('summary').innerText.replace(/\s+/g, ' ').trim(), head: Array.from(d.querySelectorAll('thead th')).map(t => t.textContent.trim()), rows: Array.from(d.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.textContent.trim())) }; });   // 접힌 칸이라 textContent
+    eq('생산 반영 탭 카드: 세트 대신 세트 안 조립품을 뺌 · 줄마다 뺀 조립품 pcs (실사일 08-31 까지의 500 set 은 세지 않음)', card, { title: '2 박스 포장: 세트(SG) 대신 세트 안의 조립품을 뺌 (규칙)포장 일보에는 박스 코드만 적힘 — 세트는 거쳐 감', head: ['세트 (SG)', '품명', '일보 줄', '포장 set', '뺀 조립품 (pcs)'],
+      rows: [['K-S2', 'MINI 2CT MANILA', '3', '102', '204'], ['K-S3', 'DIAL 1CT MANILA', '1', '12', '12']] });
+    await ev(() => ERP.setLang('vi')); await ev(() => ERP.goStock('post')); await settle();
+    ok('베트남어: 카드에 한글 없음', await ev(() => { const d = Array.from(document.querySelectorAll('main details')).find(x => /SG/.test(x.querySelector('summary').textContent) && /thùng/.test(x.textContent)); return !!d && !/[가-힣]/.test(d.textContent); }));
     await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('items', k.items); DB.replace('bom_lines', k.bom_lines); DB.replace('prod_log', k.prod_log); await DB.flush(); ERP.render(); }, keep); await settle();
   });
 
