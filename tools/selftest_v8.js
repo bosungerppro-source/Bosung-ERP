@@ -123,7 +123,8 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
     const j = await upload([F_HOSO], "j => j.table === 'po'");
     const r = await ev(() => { const po = ERP.db.rows('po'); const m = ERP.calc.monthlyPO('due'); const y26 = Object.keys(m).filter(k => k.startsWith('2026')).reduce((a, k) => a + Object.values(m[k]).reduce((s, v) => s + v, 0), 0);
       return { n: po.length, p6008: po.filter(p => String(p.po_no) === '5003306008').length, bulk04: (m['2026-04'] || {}).Bulk || 0, y26, l004: po.filter(p => p.item_no === '68-7409-L-004').length }; });
-    eq('PO 시트 521줄 모두 저장', [j[0] && j[0].rows, r.n], [521, 521]); eq('PO 5003306008 = 3줄', r.p6008, 3);
+    // 1.13.11: PO 번호가 있는 줄 (PO 번호 + 품번 기준) · 없는 줄 (예전 키) 두 묶음
+    eq('PO 시트 521줄 모두 저장 (PO 번호 있는 줄 · 없는 줄 두 묶음)', [j.length, j.reduce((a, x) => a + x.rows, 0), r.n], [2, 521, 521]); eq('PO 5003306008 = 3줄', r.p6008, 3);
     near('2026-04 Bulk = 공장 PO Sum 244,499.996', r.bulk04, 244499.996, 0.01); near('2026년 합계 = 공장 PO Sum 133,848,305.996', r.y26, 133848305.996, 0.01);
     ok('68-7409-L-004 줄들(Po No2 다름)이 합쳐지지 않음', r.l004 > 1, r.l004);
     await upload([F_HOSO], "j => j.table === 'po'");

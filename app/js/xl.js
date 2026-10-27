@@ -243,6 +243,9 @@
   });
 
   // PO
+  // 1.13.11: PO 번호가 있는 수주 줄은 PO 번호 + PO 번호2 + 품번으로 같은 줄을 찾는다 — 수주서로 먼저 넣은 줄과 생산관리 파일의 줄이
+  //          구분2 · 색상수 · 수주일 표기가 달라도 두 줄이 되지 않게 (같은 PO · 품번이 여러 줄이면 예전처럼 순번으로 맞춤). PO 번호 없는 줄은 예전 키 (TABLES.po.nat)
+  const PO_KEYS = ['po_no', 'po_no2', 'item_no'];
   D('po', (n, M) => findRow(M, r => hasCell(r, /^Po No$/i) && hasCell(r, /^kind goods$/i), 0, 6) >= 0, (M) => {
     const hi = findRow(M, r => hasCell(r, /^Po No$/i), 0, 6); const rows = [];
     for (let i = hi + 1; i < M.length; i++) {
@@ -250,7 +253,76 @@
       rows.push(pick({ date: S(r, 0), condition: T(S(r, 1)), customer: T(S(r, 2)), country: T(S(r, 3)), market: T(S(r, 4)), po_no: T(S(r, 5)), po_no2: T(S(r, 6)), item_no: T(S(r, 7)), manila_no: T(S(r, 8)), kind: T(S(r, 9)), color: T(S(r, 10)),
         rfid: T(S(r, 11)), kind2: T(S(r, 12)), color2: T(S(r, 13)), pcs: N(S(r, 14)) || 0, sets: N(S(r, 15)) || 0, cs: N(S(r, 16)) || 0, due: T(S(r, 17)), rate: N(S(r, 18)), packed: N(S(r, 19)) || 0, diff: N(S(r, 20)), yn: T(S(r, 21)), mark: T(S(r, 22)) }));
     }
-    return [{ table: 'po', rows, mode: 'upsert', label: L('수주 (PO) 목록', 'Danh sách PO') }];
+    const noPo = rows.filter(r => !String(r.po_no || '').trim());
+    const out = [{ table: 'po', rows: rows.filter(r => String(r.po_no || '').trim()), mode: 'upsert', keys: PO_KEYS, label: L('수주 (PO) 목록', 'Danh sách PO') }];
+    if (noPo.length) out.push({ table: 'po', rows: noPo, mode: 'upsert', label: L('수주 (PO) 목록 — PO 번호 없는 줄', 'Danh sách PO — dòng không có số PO') });
+    return out;
+  });
+
+  // 1.13.11: 고객 수주서 (Binney & Smith 양식 — 시트 하나 = PO 하나). 사용자 "이런 형태로 수주를 받는다. 이파일 그대로 업로드해도 erp 수주등록에 반영할수있게"
+  //   첫 줄 = 수입자 · 주문일자, 앞쪽에 PO 줄 (P.O. # · O/No. · SAP PO NO. · 크레욜라 P.O. # / Walmart · Target P.O. = PO 번호2), 품목 = ':' 칸 · 수량 · 단위 (set) 줄 +
+  //   그 아래 박스 줄 (ct · cs) + Item No. 줄, 끝에 수출지 · 상검일. 날짜 칸은 '월 일' 서식이고 연도는 옆 칸 (날짜 칸의 숨은 연도는 틀린 때가 있음).
+  //   pcs = set × 색상수 (수주서의 TOTAL pcs 수식은 첫 품목만 센다). 이미 있는 줄은 PO 번호 + 품번으로 찾아 세트 · 카톤 · pcs · 납기만 바꾼다.
+  //   Item No. 가 없거나 pcs 단위인 품목 (벌크) 은 읽지 않고 알린다.
+  const PO_KEEP = ['date', 'customer', 'country', 'market', 'kind', 'kind2', 'color', 'rfid'];
+  const PO_LANDS = { 멕시코: 'Mexico', mexico: 'Mexico', 미국: 'USA', usa: 'USA', 영국: 'UK', uk: 'UK', 호주: 'AUS', australia: 'AUS', australlia: 'AUS', aus: 'AUS', 캐나다: 'Canada', canada: 'Canada' };
+  const PO_KINDS = [[/미니\s*다이알|mini\s*dial/i, 'Mini'], [/다이알|dial/i, 'Dial'], [/펜슬|pencil/i, 'Pencil'], [/미니|mini/i, 'Mini'], [/유리|glass/i, 'Glass']];
+  const PO_ITEM = /Item\s*No\.?\s*[:;：]?\s*([0-9A-Z][0-9A-Z.-]*[0-9A-Z])/i;
+  const poLine = (s) => { const t = String(s || '').trim(); let m;
+    if ((m = t.match(/^(Walmart|Target)\s*P\.?\s*O\.?\s*#?\s*[:：]?\s*([0-9][\w-]*)/i))) return { po2: m[2], shop: m[1] };
+    if ((m = t.match(/^(?:크레욜라\s*|SAP\s*)?P\.?\s*O\.?\s*(?:#|NO\.?)?\s*[:：]?\s*([0-9][\w-]*)/i))) return { po: m[1] };
+    if ((m = t.match(/^O\s*\/\s*No\.?\s*[:：]?\s*([0-9][\w-]*)/i))) return { po: m[1] };
+    return null; };
+  const poUnit = (v) => String(v === null || v === undefined ? '' : v).trim().toLowerCase();
+  const poItemStart = (r) => !!r && String(S(r, 1) || '').trim() === ':' && /^(set|pcs|ct|cs|ea)$/.test(poUnit(S(r, 5))) && N(S(r, 4)) !== null;
+  const poStop = (r) => !!r && r.some(v => typeof v === 'string' && (/^\s*total\s*[:：]?\s*$/i.test(v) || v.trim() === '수출지'));
+  /** 날짜 줄 (주문일자 · 상검일): 레이블 오른쪽의 날짜 칸 (월 일 서식 → YYYY-MM-DD) 월일 + 연도 칸 (숫자). 연도 칸이 없으면 날짜 그대로 */
+  const poDate = (M, re) => { for (let i = 0; i < M.length; i++) { const r = M[i]; if (!r) continue; const c = r.findIndex(v => typeof v === 'string' && re.test(v.trim())); if (c < 0) continue;
+    let y = null, d = null; for (let k = c + 1; k < r.length; k++) { const v = r[k]; if (d === null && typeof v === 'string' && isoRe.test(v)) d = v; else if (y === null && typeof v === 'number' && Number.isInteger(v) && v >= 1990 && v <= 2100) y = v; }
+    if (d) return y ? (ERP.fmt.parseDate(y + d.slice(4)) || d) : d; } return null; };
+  /** 지금 ERP 수주에 있는 이름 표기 (거래처 · 국가 · 시장) 로 맞춤 — 없으면 파일 글자 그대로 */
+  const poSame = (raw, field) => { const n0 = norm(raw); if (!n0 || !ERP.db || !ERP.db.rows) return raw; const hit = ERP.db.rows('po').find(r => r[field] && norm(r[field]) === n0); return hit ? String(hit[field]) : raw; };
+  function poPreview(j) {
+    const r = ERP.db.upsert('po', j.rows, j.keys, { keep: j.keep, defaults: j.defaults, dry: true });
+    const lab = (k) => { const c = ERP.TABLES.po.cols.find(x => x.k === k); return c ? ERP.colLabel(c) : k; };
+    const fv = (v) => (typeof v === 'number' ? ERP.fmt.n(v) : (v === undefined || v === null || v === '' ? '–' : String(v)));
+    return { parts: [[L('추가', 'Thêm'), r.added, r.added ? 'info' : 'neutral'], [L('갱신', 'Cập nhật'), r.updated, 'neutral']],
+      detail: r.changes.map(c => c.row.po_no + ': ' + c.diff.map(x => lab(x[0]) + ' ' + fv(x[1]) + ' → ' + fv(x[2])).join(' · ')).join(' / ') };
+  }
+  D('po-sheet', (n, M) => /^수입자$/.test(String(S(M[0], 0) || '').trim()) && hasCell(M[0], /^주문일자$/) && findRow(M, r => !!poLine(S(r, 0)), 0, 12) >= 0, (M) => {
+    let po = null, po2 = null, shop = null; for (let i = 0; i < 12 && i < M.length; i++) { const x = poLine(S(M[i], 0)); if (!x) continue; if (x.po2) { po2 = x.po2; shop = x.shop; } else if (!po) po = x.po; }
+    M.some(r => (r || []).some(v => { const m = typeof v === 'string' && v.match(/Vivid\s*PO\s*No\.?\s*[:：]?\s*([\w-]+)/i); if (m && !po2) po2 = m[1]; return !!m; }));
+    if (!po) { po = po2; po2 = null; }
+    const notes = [];
+    const who = T(S(M[0], 1)) || ''; const wm = who.match(/^([^(（]+?)\s*[(（]\s*([^)）]*)/); const custRaw = (wm ? wm[1] : who).trim(); const custLand = wm ? wm[2].trim() : '';
+    const customer = poSame(custRaw, 'customer'); if (custRaw && customer === custRaw && !(ERP.db && ERP.db.rows('po').some(r => r.customer === custRaw))) notes.push(L('처음 보는 거래처: ', 'Khách hàng mới: ') + custRaw);
+    const ex = M.find(r => r && String(S(r, 0) || '').trim() === '수출지'); const landRaw = ex ? String(S(ex, 1) || '').trim() : ''; const land = landRaw.replace(/\s*[(（].*$/, '').trim();
+    let country = null, market = null;
+    if (/^(target|walmart)$/i.test(land) || shop) { market = poSame(/^(target|walmart)$/i.test(land) ? land : shop, 'market'); country = PO_LANDS[norm(custLand)] || PO_LANDS[norm(land)] || null; }
+    else if (land) { country = PO_LANDS[norm(land)] || poSame(land, 'country'); if (!PO_LANDS[norm(land)] && !(ERP.db && ERP.db.rows('po').some(r => r.country === country))) notes.push(L('처음 보는 수출지: ', 'Nơi xuất mới: ') + landRaw); }
+    const date = poDate(M, /^주문일자$/); let due = poDate(M, /^상검일자?$/);
+    if (!due) { due = poDate(M, /^선적일자?$/); notes.push(due ? L('상검일 없음 — 납기 = 선적일자', 'Không có ngày kiểm — ngày giao = ngày xuất') : L('상검일 없음 — 납기는 비워 둠', 'Không có ngày kiểm — để trống ngày giao')); }
+    const items = [];
+    for (let i = 0; i < M.length; i++) {
+      const r = M[i]; if (!r) continue; if (r.some(v => typeof v === 'string' && v.trim() === '수출지')) break; if (!poItemStart(r)) continue;
+      const blk = [r]; let j = i + 1; for (; j < M.length; j++) { if (poItemStart(M[j]) || poStop(M[j])) break; blk.push(M[j] || []); }
+      let cs = null, item = null; blk.forEach((x, bi) => { if (bi && cs === null && /^(ct|cs)$/.test(poUnit(S(x, 5)))) cs = N(S(x, 4)); if (!item) x.some(v => { const m = typeof v === 'string' && v.match(PO_ITEM); if (m) item = m[1]; return !!m; }); });
+      items.push({ code: T(S(r, 0)) || '', desc: T(S(r, 2)) || '', unit: poUnit(S(r, 5)), q: N(S(r, 4)), cs, item }); i = j - 1;
+    }
+    const rows = [], skipped = [], noKind = [], noColor = [];
+    items.forEach((it, idx) => {
+      if (!it.item || it.unit === 'pcs' || it.unit === 'ea') { skipped.push(it); return; }
+      const color = (it.desc.match(/(\d+)\s*색/) || [])[1] || null; const k = PO_KINDS.find(x => x[0].test(it.desc)); if (!k) noKind.push(it.desc); if (!color) noColor.push(it.desc);
+      const sets = it.unit === 'set' ? it.q : null; const cs = it.unit === 'set' ? it.cs : it.q;
+      rows.push(pick({ date, customer, country, market, po_no: po + (items.length > 1 ? '-' + (idx + 1) : ''), po_no2: po2, item_no: it.item, kind: k ? k[1] : null, color,
+        sets, cs, pcs: sets !== null && color ? sets * Number(color) : null, due }));
+    });
+    if (skipped.length) notes.unshift(L('못 읽은 품목 ' + skipped.length + '개: ', 'Không đọc được ' + skipped.length + ' mục: ') + skipped.map(x => [x.code, x.desc, ERP.fmt.n(x.q), x.unit].filter(Boolean).join(' ') + ' (' + (!x.item ? L('Item No. 없음', 'không có Item No.') : L('벌크 · pcs 단위', 'hàng rời · đơn vị pcs')) + ')').join(', '));
+    if (!items.length) notes.unshift(L('품목 줄을 찾지 못했습니다 (수주서 모양이 다름)', 'Không tìm thấy dòng hàng (mẫu đơn khác)'));
+    if (noKind.length) notes.push(L('품목군을 모르는 설명 (비워 둠): ', 'Không rõ nhóm hàng (để trống): ') + noKind.join(', '));
+    if (noColor.length) notes.push(L('색상수를 모르는 설명 (pcs 비워 둠): ', 'Không rõ số màu (để trống pcs): ') + noColor.join(', '));
+    return [{ table: 'po', rows, mode: 'upsert', keys: PO_KEYS, keep: PO_KEEP, defaults: { kind2: '0', rfid: '0' }, preview: poPreview, label: L('수주서 PO ', 'Đơn hàng PO ') + (po || ''), note: notes.join(' · '),
+      modes: () => ({ upsert: L('PO · 품번 기준 갱신 · 추가', 'Cập nhật · thêm theo PO · mã') }) }];   // 이미 있는 줄은 세트 · 카톤 · pcs · 납기만 (keep)
   });
 
   // history sheets of the production workbook (header row is found within the first 4 rows)
@@ -537,7 +609,7 @@
       const idx = new Map(DB.rows(t).map(r => [String(r.code), r])); let u = 0;
       rows.forEach(r => { const e = idx.get(String(r.code)); if (e) { Object.assign(e, r); u++; } }); DB.touch(t); res.updated = u; res.skipped = rows.length - u;
     }
-    else { const r2 = DB.upsert(t, rows); res.added = r2.added; res.updated = r2.updated; }
+    else { const r2 = DB.upsert(t, rows, job.keys, { keep: job.keep, defaults: job.defaults }); res.added = r2.added; res.updated = r2.updated; }   // 1.13.11: 묶음마다 기준 칸 · 그대로 둘 칸
     return res;
   }
 })();

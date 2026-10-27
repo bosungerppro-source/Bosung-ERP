@@ -183,11 +183,17 @@
     update(n, id, patch) { const r = DB.rows(n).find(x => x._id === id); if (r) { Object.assign(r, patch); delete r._ex; DB.touch(n); } return r; },
     remove(n, ids) { const s = new Set(Array.isArray(ids) ? ids : [ids]); DB.t[n] = DB.rows(n).filter(r => !s.has(r._id)); DB.touch(n); },
     replace(n, rows) { DB.t[n] = rows.map(r => r._id ? r : Object.assign({ _id: uid() }, r)); DB.touch(n); },
-    /** upsert by natural key columns; returns {added, updated} */
-    upsert(n, rows, keys) {
-      keys = keys && keys.length ? keys : (ERP.TABLES[n].nat || []);
-      const cur = DB.rows(n); let added = 0, updated = 0;
-      if (!keys.length) { DB.addMany(n, rows); return { added: rows.length, updated: 0 }; }
+    /** upsert by natural key columns; returns {added, updated, changes}
+        1.13.11: opt.keep = 이미 있는 줄에서 바꾸지 않을 칸, opt.defaults = 새 줄에만 채울 값, opt.dry = 아무것도 바꾸지 않고 셈만 (미리보기)
+        changes = 갱신 줄 중 값이 바뀌는 것 [{ row, diff: [[칸, 전, 뒤]] }] */
+    upsert(n, rows, keys, opt) {
+      opt = opt || {}; keys = keys && keys.length ? keys : (ERP.TABLES[n].nat || []);
+      const cur = DB.rows(n); let added = 0, updated = 0; const changes = []; const keep = new Set(opt.keep || []);
+      const put = (e, r) => { const diff = [];
+        Object.keys(r).forEach(k => { if (keep.has(k)) return; if (String(e[k] === undefined ? '' : e[k]) !== String(r[k] === undefined ? '' : r[k])) diff.push([k, e[k], r[k]]); if (!opt.dry) e[k] = r[k]; });
+        if (!opt.dry) delete e._ex; if (diff.length) changes.push({ row: r, diff }); updated++; };
+      const fresh = (r) => Object.assign({ _id: uid() }, opt.defaults || {}, r);
+      if (!keys.length) { if (!opt.dry) DB.addMany(n, rows); return { added: rows.length, updated: 0, changes }; }
       const kf = (r) => keys.map(k => String(r[k] === undefined || r[k] === null ? '' : r[k]).trim().toLowerCase()).join('\u0001');
       if (ERP.TABLES[n] && ERP.TABLES[n].multi) {
         // 같은 키가 반복될 수 있는 표(PO 줄): 파일 안의 n번째 같은 키 줄 ↔ 기존의 n번째 같은 키 줄. 합치지 않고, 다시 올려도 늘지 않는다
@@ -195,17 +201,17 @@
         const seen = new Map();
         rows.forEach(r => {
           const k = kf(r); const i = seen.get(k) || 0; seen.set(k, i + 1); const e = (lists.get(k) || [])[i];
-          if (e) { Object.assign(e, r); delete e._ex; updated++; } else { cur.push(Object.assign({ _id: uid() }, r)); added++; }
+          if (e) put(e, r); else { if (!opt.dry) cur.push(fresh(r)); added++; }
         });
-        DB.touch(n); return { added, updated };
+        if (!opt.dry) DB.touch(n); return { added, updated, changes };
       }
       const idx = new Map(); cur.forEach(r => idx.set(kf(r), r));
       rows.forEach(r => {
         const e = idx.get(kf(r));
-        if (e) { Object.assign(e, r); delete e._ex; updated++; }
-        else { const nr = Object.assign({ _id: uid() }, r); cur.push(nr); idx.set(kf(nr), nr); added++; }
+        if (e) put(e, r);
+        else { const nr = fresh(r); if (!opt.dry) cur.push(nr); idx.set(kf(nr), nr); added++; }
       });
-      DB.touch(n); return { added, updated };
+      if (!opt.dry) DB.touch(n); return { added, updated, changes };
     },
 
     // ---------- persistence ----------
