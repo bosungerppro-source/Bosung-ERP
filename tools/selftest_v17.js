@@ -8,7 +8,8 @@
    7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 7-2 위젯 ⚙ 품목군 여러 개 → 고른 것만 (1.13.6)
    7-3 생산 관리 일별 · 월별 · 일보 조회 · 종합 현황 일별 · 월별 위젯도 품목군 여러 개 (1.13.8)
    7-4 현장 재고 → 원재료 환산 표 (조립 재고 옆 · 공정별 · 위젯) · 7-5 MRP 수주 가져오기: 전체 선택 · 진행 상태 · 범위 · 7-6 박스 포장의 SG 는 차감 안 함 (1.13.9)
-   7-7 포장한 만큼 조립 재고가 줄어듦 — 박스 → 세트 → 조립품 (1.13.10) · 7-8 수주서 그대로 올리기 (1.13.11) · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7-7 포장한 만큼 조립 재고가 줄어듦 — 박스 → 세트 → 조립품 (1.13.10) · 7-8 수주서 그대로 올리기 (1.13.11)
+   7-9 수주 목록 품번 수 → 품목군 · 납기는 늦은 날짜부터 (수주 목록 · 종합 현황 · 휴대폰 · MRP · 품목 상세, 1.13.12) · 8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -386,10 +387,11 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
         sum: (m.querySelector('[data-act="sum"]') || {}).textContent || '' }; });
     const clickIn = async (sel) => { await A.click('.modal ' + sel); await A.waitForTimeout(150); };
     await open();
+    // 1.13.12 부터 줄 순서는 늦은 납기부터 (P-3 11-10 · P-2 11-05 · P-1 11-01)
     eq('처음: 전체 선택 (꺼짐) · 범위 = 진행 중 포함 · 줄마다 진행 상태 · 진행률 (포장 set ÷ 주문 set) · 다 포장한 P-4 없음', await md(),
-      { all: false, scope: [['wait', '진행 전만 (2)', false], ['all', '진행 중 포함 (3)', true]], rows: [['P-1', false, '진행 전', '0% · 0/100'], ['P-2', false, '진행 중', '25% · 50/200'], ['P-3', false, '진행 전', '0% · 0/80']], sum: '고른 수주 0건' });
+      { all: false, scope: [['wait', '진행 전만 (2)', false], ['all', '진행 중 포함 (3)', true]], rows: [['P-3', false, '진행 전', '0% · 0/80'], ['P-2', false, '진행 중', '25% · 50/200'], ['P-1', false, '진행 전', '0% · 0/100']], sum: '고른 수주 0건' });
     await clickIn('[data-act="all"] input');
-    eq('전체 선택 → 모두 (남은 set 100 + 150 + 80)', await md(), { all: true, scope: [['wait', '진행 전만 (2)', false], ['all', '진행 중 포함 (3)', true]], rows: [['P-1', true, '진행 전', '0% · 0/100'], ['P-2', true, '진행 중', '25% · 50/200'], ['P-3', true, '진행 전', '0% · 0/80']], sum: '고른 수주 3건 · 330 set' });
+    eq('전체 선택 → 모두 (남은 set 100 + 150 + 80)', await md(), { all: true, scope: [['wait', '진행 전만 (2)', false], ['all', '진행 중 포함 (3)', true]], rows: [['P-3', true, '진행 전', '0% · 0/80'], ['P-2', true, '진행 중', '25% · 50/200'], ['P-1', true, '진행 전', '0% · 0/100']], sum: '고른 수주 3건 · 330 set' });
     await clickIn('[data-scope="wait"]');
     eq('범위를 진행 전만으로 → 진행 중 (P-2) 은 빠짐', [(await md()).all, (await md()).rows.map(r => r[1]), (await md()).sum], [true, [true, false, true], '고른 수주 2건 · 180 set']);
     await clickIn('[data-act="all"] input');
@@ -399,7 +401,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await clickIn('[data-act="all"] input');
     eq('전체 선택 (진행 전만) → P-1 · P-3', [(await md()).all, (await md()).rows.map(r => r[1])], [true, [true, false, true]]);
     await A.click('.modal .modal-foot button.primary'); await settle();
-    eq('선택 추가 → MRP 줄 (남은 set) · 범위 기억', [await ev(() => ERP.db.setting('mrpLines', []).map(l => [l.code, l.qty, l.unit, l.ref])), await ev(() => ERP.db.setting('mrpPoScope'))], [[['K-P1', 100, 'set', 'P-1'], ['A-M1', 80, 'set', 'P-3']], 'wait']);
+    eq('선택 추가 → MRP 줄 (남은 set, 목록 순서) · 범위 기억', [await ev(() => ERP.db.setting('mrpLines', []).map(l => [l.code, l.qty, l.unit, l.ref])), await ev(() => ERP.db.setting('mrpPoScope'))], [[['A-M1', 80, 'set', 'P-3'], ['K-P1', 100, 'set', 'P-1']], 'wait']);
     await open();
     eq('다시 열면 범위 = 진행 전만 (전체 선택은 꺼짐)', [(await md()).scope.map(s => s[2]), (await md()).all], [[true, false], false]);
     await ev(() => ERP.setLang('vi')); await open();
@@ -541,6 +543,47 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     const vt = await ev(() => Array.from(document.querySelectorAll('main tbody tr')).map(tr => tr.children[2].innerText).join(' | '));
     ok('베트남어: 수주서 이름 · 알림 · 미리보기에 한글 없음 (파일 글자 제외)', !/[가-힣]/.test(vt.replace(/BW3-1[^|]*|크레욜라|다이알|벌크/g, '')), vt.slice(0, 400));
     await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('po', k.po); DB.replace('uploads', k.uploads); await DB.flush(); ERP.state.imp = { jobs: [] }; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-9. 수주 목록 품번 수 → 품목군 · 납기는 늦은 날짜부터 (1.13.12, 사용자 "수주 목록에 품번 수 없애고 품목군으로 바꿔줘" · "납기 날짜보는건 항상 날짜 높은 순서로 보여준다")', async () => {
+    const keep = await ev(() => ({ po: ERP.db.rows('po').map(r => Object.assign({}, r)), prod_log: ERP.db.rows('prod_log').map(r => Object.assign({}, r)), dash: ERP.db.setting('dash', null) }));
+    // 납기는 오늘 기준 (지연 · 임박이 오늘에 따름). 저장 순서는 이른 납기가 먼저 — 정렬 없는 목록이 우연히 맞지 않게
+    const D = await ev(async () => { const DB = ERP.db, F = ERP.fmt; const d = (n) => F.addDays(F.today(), n);
+      const po = (po_no, item_no, kind, due) => ({ date: d(-40), customer: 'TEST', po_no, item_no, kind, sets: 100, pcs: 1200, due });
+      DB.replace('po', [po('PO-K3', 'T-K1', '', d(-5)), po('PO-K1', 'T-K1', 'Dial', d(20)), po('PO-K1', 'T-K2', 'Pencil', d(10)), po('PO-K2', 'T-K3', 'Mini', d(30)), po('PO-K2', 'T-K4', 'Mini ', d(30)), po('PO-K4', 'T-K5', 'Glass', '')]);
+      DB.replace('prod_log', []); await DB.flush();
+      ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.goto('orders'); ERP.render();
+      return { k1: F.d(d(10)), k2: F.d(d(30)), k3: F.d(d(-5)) }; });
+    await settle();
+    const list = () => ev(() => { const c = document.querySelector('main section.card.grow'); return { head: Array.from(c.querySelectorAll('thead th')).map(t => t.innerText.replace(/\s+/g, ' ').trim()),
+      rows: Array.from(c.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.replace(/\s+/g, ' ').trim())) }; });
+    const pk = (r) => { const t = r.join(' '); return (t.match(/PO-K\d/) || [''])[0] + ' ' + (t.match(/T-K\d/) || [''])[0]; };
+    let g = await list();
+    eq('PO별 보기 머리글: 품번 수 없음 → 그 자리에 품목군 · 납기 ▼', g.head, ['PO 번호', '거래처', '품번', '품목군', '세트', '납기 ▼', '상태', '진행', '납기']);
+    eq('PO별 보기: 늦은 납기부터 · 납기 없는 PO 는 맨 뒤 · 품목군 = 줄들의 품목군 (같은 것은 하나, 앞뒤 공백 무시, 여러 개면 " · ")', g.rows.map(r => r.slice(0, 6)),
+      [['PO-K2', 'TEST', 'T-K3 …', 'Mini', '200', D.k2], ['PO-K1', 'TEST', 'T-K1 …', 'Dial · Pencil', '200', D.k1], ['PO-K3', 'TEST', 'T-K1', '', '100', D.k3], ['PO-K4', 'TEST', 'T-K5', 'Glass', '100', '']]);
+    await A.fill('main section.card.grow .search input', 'Pencil'); await A.waitForTimeout(600);
+    eq('검색에 품목군도 걸림 (Pencil → PO-K1)', (await list()).rows.map(r => r[0]), ['PO-K1']);
+    await A.fill('main section.card.grow .search input', ''); await A.waitForTimeout(600);
+    await A.click('main section.card.grow th.sortable:has-text("납기")'); await settle();
+    const up = await list(); await ev(() => ERP.render()); await settle(); const again = await list();
+    eq('납기를 눌러 ▲ 로 바꿔도 화면을 다시 열면 늦은 날짜부터 (▼)', [up.head[5], up.rows[0][0], again.head[5], again.rows[0][0]], ['납기 ▲', 'PO-K3', '납기 ▼', 'PO-K2']);
+    await ev(() => { ERP.state.ord.view = 'line'; ERP.render(); }); await settle();
+    g = await list();
+    eq('품번 라인별 보기도 납기 ▼ · 늦은 줄부터 · 납기 없는 줄은 맨 뒤', [g.head.filter(t => /[▲▼]/.test(t)), g.rows.map(pk)], [['납기 ▼'], ['PO-K2 T-K3', 'PO-K2 T-K4', 'PO-K1 T-K1', 'PO-K1 T-K2', 'PO-K3 T-K1', 'PO-K4 T-K5']]);
+    await ev(() => { ERP.db.setSetting('dash', [{ k: 'v17-due', id: 'due_list', w: 2 }]); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    eq('종합 현황 "납기 임박 수주": 고르는 PO 는 그대로 (납기 있는 진행 중), 늦은 납기부터', await ev(() => Array.from(document.querySelectorAll('.wgrid .w[data-id=due_list] .list > div > div > b')).map(b => b.textContent)), ['PO-K2', 'PO-K1', 'PO-K3']);
+    eq('휴대폰 요약의 납기 목록도 같은 순서', await ev(() => ERP.mobileSummary().due.map(o => o.po)), ['PO-K2', 'PO-K1', 'PO-K3']);
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.state.bomTab = 'mrp'; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await settle();
+    await A.click('main [data-act="import-po"]'); await A.waitForSelector('.modal [data-po]');
+    eq('MRP 진행 중 수주에서 가져오기: 늦은 납기부터 · 납기 없는 줄은 맨 뒤', await ev(() => Array.from(document.querySelectorAll('.modal [data-po]')).map(r => r.dataset.po + ' ' + (r.textContent.match(/T-K\d/) || [''])[0])),
+      ['PO-K2 T-K3', 'PO-K2 T-K4', 'PO-K1 T-K1', 'PO-K1 T-K2', 'PO-K3 T-K1', 'PO-K4 T-K5']);
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.itemDetail('T-K1'); }); await A.waitForSelector('.modal h3');
+    eq('품목 상세 "진행 중 수주 (이 품번)": 늦은 납기부터', await ev(() => { const t = Array.from(document.querySelectorAll('.modal h3')).find(x => /진행 중 수주/.test(x.textContent)); return t ? Array.from(t.parentElement.querySelectorAll('tbody tr')).map(tr => tr.children[0].textContent) : null; }), ['PO-K1', 'PO-K3']);
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.setLang('vi'); ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.goto('orders'); ERP.render(); }); await settle();
+    g = await list();
+    eq('베트남어: 품목군 = Nhóm hàng · 머리글에 한글 없음', [g.head[3], g.head.filter(t => /[가-힣]/.test(t))], ['Nhóm hàng', []]);
+    await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('po', k.po); DB.replace('prod_log', k.prod_log); DB.setSetting('dash', k.dash); await DB.flush(); ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

@@ -149,6 +149,8 @@
       return out;
     });
   };
+  /** 1.13.12 (사용자 2026-10-27 "납기 날짜보는건 항상 날짜 높은 순서로 보여준다"): 납기 늦은 줄부터, 납기 없는 줄은 맨 뒤 — C.orders() · C.poGroups() 의 줄 */
+  C.byDueDesc = (a, b) => String(b.p.due || '').localeCompare(String(a.p.due || ''));
   // 13차: 강제 완료 — 포장 실적이 없어도 완료로 표시한다 (줄마다 done_at = 완료 처리일). 수주를 다시 올려도(upsert) 남는다
   /** 진행 중 줄(완료 · 취소 · 보류가 아닌 줄)을 완료로 표시 → 바꾼 줄 수 */
   C.closeLines = function (lines, day) { const t = day || F.today(); let n = 0; (lines || []).forEach(o => { if (!C.isOpen(o)) return; DB.update('po', o.p._id, { done_at: t }); n++; }); return n; };

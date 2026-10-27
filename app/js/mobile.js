@@ -40,7 +40,7 @@
       },
       procs: procs.map(p => { const a = ctx.byProc[p.id] || C.agg([]); const av = ctx.avg[p.id]; const r = ctx.machRun(p.id);
         return Object.assign(pinfo(p), { val: valOf(p, a), n: a.n, avgPct: av ? Math.round(a.ea / av * 100) : null, run: r, tot: Math.max(ctx.machTotal(p.id), r) }); }),
-      due: ctx.open.filter(o => o.p.due).sort((a, b) => a.p.due.localeCompare(b.p.due)).filter(o => o.dday >= -30).slice(0, 8)
+      due: ctx.open.filter(o => o.p.due).sort((a, b) => a.p.due.localeCompare(b.p.due)).filter(o => o.dday >= -30).slice(0, 8).sort(C.byDueDesc)   // 1.13.12: 늦은 납기부터
         .map(o => ({ po: o.p.po_no || '', customer: o.p.customer || '', item: o.p.item_no || '', kind: o.p.kind || '', packed: o.packed, sets: o.sets, due: o.p.due, dday: o.dday, st: o.st })),
       low: ctx.low.slice().sort((a, b) => (a.bal / (a.safety || 1)) - (b.bal / (b.safety || 1))).slice(0, 8)
         .map(s => ({ code: s.code, name: s.name || '', bal: Math.round(s.bal * 10) / 10, prim: s.prim || '', safety: s.safety || 0, neg: s.status === 'neg' })),

@@ -250,7 +250,7 @@
         h('p', { class: 'help', style: { margin: '8px 0 0' } }, L('Checking(납기) 일이 속한 달의 수주 pcs 합계 · ' + S.year + '년 ', 'Tổng pcs theo tháng của ngày Checking · năm ' + S.year + ': ') + F.n(grand) + ' pcs'));
     } });
   reg('due_list', { ko: '납기 임박 수주', vi: 'PO sắp đến hạn', dko: '납기가 가까운(또는 30일 이내 지난) 진행 중 PO 8건', dvi: '8 PO gần hạn nhất', cat: 'order', w: 2, sizes: [2, 3, 4],
-    render(ctx) { const list = ctx.open.filter(o => o.p.due).sort((a, b) => a.p.due.localeCompare(b.p.due)).filter(o => o.dday >= -30).slice(0, 8);
+    render(ctx) { const list = ctx.open.filter(o => o.p.due).sort((a, b) => a.p.due.localeCompare(b.p.due)).filter(o => o.dday >= -30).slice(0, 8).sort(C.byDueDesc);   // 1.13.12: 가까운 8건을 늦은 납기부터
       return box(L('납기 임박 수주', 'PO sắp đến hạn'), h('a', { href: '#/orders' }, L('전체 보기 →', 'Xem tất cả →')),
         h('div', { class: 'list' }, list.length ? list.map(o => h('div', h('div', h('b', o.p.po_no), h('div', { class: 'sub' }, [o.p.customer, o.p.item_no, o.p.kind].filter(Boolean).join(' · '))),
           h('div', { class: 'right' }, h('div', F.n(o.packed) + ' / ' + F.n(o.sets) + ' set'), h('div', { class: 'sub' }, F.d(o.p.due)), ERP.ddayChip(o.dday, o.st)))) : h('div', { class: 'empty' }, L('납기 임박 수주가 없습니다', 'Không có PO sắp đến hạn')))); } });

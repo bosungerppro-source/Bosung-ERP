@@ -455,7 +455,7 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     ok('요약 숫자 = 종합 현황 위젯 (이번 달 포장 누계 pcs, 1.12.3)', sm.pckM !== null && Number(sm.pckM.replace(/[^\d]/g, '')) === S1.kpi.pckMonth.ea, { widget: sm.pckM, sum: S1.kpi.pckMonth });
     await A.evaluate(() => { ERP.db.setSetting('dash', null); ERP.render(); });
     ok('요약 숫자 = 종합 현황 위젯 (납기 임박/경과 · 기준일 포장)', sm.due !== null && Number(sm.due.replace(/[^\d]/g, '')) === S1.kpi.due.soon + S1.kpi.due.late && Number(sm.pck.replace(/[^\d]/g, '')) === S1.kpi.pckDay.ok, { widget: [sm.due, sm.pck], sum: [S1.kpi.due, S1.kpi.pckDay.ok] });
-    ok('납기 임박 목록은 납기 순', S1.due.every((o, i) => !i || S1.due[i - 1].due <= o.due), S1.due.map(o => o.due));
+    ok('납기 임박 목록은 늦은 납기부터 (1.13.12)', S1.due.every((o, i) => !i || S1.due[i - 1].due >= o.due), S1.due.map(o => o.due));
     // 설정 카드 (이 PC)
     await A.evaluate(async (u) => { ERP.db.setSetting('gUrl', u); ERP.db.setSetting('gToken', 'T15'); await ERP.db.flush(); location.hash = '#/settings'; }, gUrl);
     await A.waitForSelector('#phoneCard h4', { timeout: 10000 });

@@ -103,7 +103,7 @@
     // 1.13.9 (사용자 2026-10-26): "하나하나 클릭하는게 힘들다. 한번에 전체클릭할수있는 버튼 엑셀처럼 … 지금 진행을 하고있는지 아직 진행 안하는중인지도 몇프로진행됬는지 표시해주고
     //   진행안된거만 전체다고를건지 진행중인것도 포함할건지 선택할수있는 버튼도" — 진행률 = 수주 관리와 같은 포장 진행률 (포장 set ÷ 주문 set), 진행 전 = 포장 0
     function importPO() {
-      const open = C.orders().filter(o => C.isOpen(o) && o.p.item_no && (o.sets - o.packed) > 0).sort((a, b) => (a.p.due || '9').localeCompare(b.p.due || '9')).slice(0, 150);
+      const open = C.orders().filter(o => C.isOpen(o) && o.p.item_no && (o.sets - o.packed) > 0).sort((a, b) => (a.p.due || '9').localeCompare(b.p.due || '9')).slice(0, 150).sort(C.byDueDesc);   // 1.13.12: 납기 이른 150줄을 늦은 납기부터
       const started = (o) => o.packed > 0;
       const sel = new Set(); const scope = () => (DB.setting('mrpPoScope', 'all') === 'wait' ? 'wait' : 'all');
       const inScope = (o) => scope() === 'all' || !started(o);

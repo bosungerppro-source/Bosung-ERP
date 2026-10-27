@@ -83,7 +83,7 @@
     DB.rows('bom_lines').forEach(l => { if (String(l.child) === key) used.push(L('BOM: ', 'BOM: ') + l.parent + ' (' + F.n(l.qty, 3) + ')'); });
     let bomParts = 0; DB.rows('bom').forEach(b => { if ([b.nose_code, b.refill_code, b.barrel_code, b.holder, b.spoon].some(x => String(x || '') === key)) bomParts++; });
     if (bomParts) used.push(L('예시 BOM(색상별) 부품으로 ', 'Linh kiện trong BOM mẫu: ') + bomParts + L('곳', ' chỗ'));
-    const po = C.orders().filter(o => String(o.p.item_no || '') === key && C.isOpen(o));
+    const po = C.orders().filter(o => String(o.p.item_no || '') === key && C.isOpen(o)).sort(C.byDueDesc);   // 1.13.12: 늦은 납기부터
     const poBox = po.length ? h('div', h('h3', L('진행 중 수주 (이 품번)', 'PO đang mở (mã này)')), ERP.simpleTable([{ label: 'PO', render: o => o.p.po_no }, { label: L('거래처', 'Khách'), render: o => o.p.customer || '' }, { label: L('주문 set', 'Đặt (set)'), num: 1, render: o => F.n(o.sets) }, { label: L('포장 set', 'Đã đóng'), num: 1, render: o => F.n(o.packed) }, { label: L('남은 set', 'Còn lại'), num: 1, render: o => h('b', F.n(Math.max(0, o.sets - o.packed))) }, { label: L('납기', 'Hạn'), render: o => F.d(o.p.due) }], po.slice(0, 20), { maxH: '200px' }),
       s && s.sets !== null && s.sets !== undefined ? h('p', { class: 'help' }, L('완제품 재고 ', 'Tồn thành phẩm ') + F.n(s.sets) + L(' set · 남은 수주 ', ' set · PO còn lại ') + F.n(po.reduce((a, o) => a + Math.max(0, o.sets - o.packed), 0)) + ' set') : null) : null;
     ERP.modal({ title: key + ' · ' + ((m && m.name) || (s && s.name) || ''), width: '1100px', body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } }, info, kpis,

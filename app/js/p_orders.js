@@ -165,14 +165,16 @@
       let g;
       if (st.view === 'po') {
         const mk = (k, ko, vi, t) => ({ k, ko, vi, t: t || 't' });
-        g = ERP.grid({ table: 'po', rows: () => all.filter(match).map(o => ({ _id: o.po_no, po_no: o.po_no, customer: o.p.customer, items: o.n, item_no: o.items.length > 1 ? o.items[0] + ' …' : (o.items[0] || ''), sets: o.sets, due: o.p.due })), pageSize: 25, sortKey: 'due', sortDir: 1, canAdd: false, canEdit: false, export: false, maxH: '60vh',
-          searchKeys: ['po_no', 'customer', 'item_no'],
-          cols: [mk('po_no', 'PO 번호', 'Số PO'), mk('customer', '거래처', 'Khách hàng'), mk('item_no', '품번', 'Mã hàng'), mk('items', '품번 수', 'Số mã', 'n'), mk('sets', '세트', 'Bộ', 'n'), mk('due', '납기', 'Hạn giao', 'd')],
+        // 1.13.12 (사용자 2026-10-27): 품번 수 → 품목군 (줄들의 품목군, 같은 것은 하나) · 납기는 늦은 날짜부터
+        const kindsOf = (o) => Array.from(new Set(o.lines.map(l => String(l.p.kind || '').trim()).filter(Boolean))).join(' · ');
+        g = ERP.grid({ table: 'po', rows: () => all.filter(match).map(o => ({ _id: o.po_no, po_no: o.po_no, customer: o.p.customer, item_no: o.items.length > 1 ? o.items[0] + ' …' : (o.items[0] || ''), kind: kindsOf(o), sets: o.sets, due: o.p.due })), pageSize: 25, sortKey: 'due', sortDir: -1, canAdd: false, canEdit: false, export: false, maxH: '60vh',
+          searchKeys: ['po_no', 'customer', 'item_no', 'kind'],
+          cols: [mk('po_no', 'PO 번호', 'Số PO'), mk('customer', '거래처', 'Khách hàng'), mk('item_no', '품번', 'Mã hàng'), mk('kind', '품목군', 'Nhóm hàng'), mk('sets', '세트', 'Bộ', 'n'), mk('due', '납기', 'Hạn giao', 'd')],
           // 13차: 상태 칸에 완료 버튼을 같이 둔다 (좁은 화면에서도 보이게 진행 칸 앞으로)
           extraCols: [{ label: () => L('상태', 'Trạng thái'), render: r => { const o = byPo.get(r._id); return h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', whiteSpace: 'nowrap' } }, ERP.statusChip(o.st), doneBtn(o)); } }, { label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }],
           onRowClick: (r) => { st.sel = r._id; drawAside(); } });
       } else {
-        g = ERP.grid({ table: 'po', rows: () => lineAll.filter(match).map(o => o.p), pageSize: 25, sortKey: 'due', sortDir: 1, canAdd: false, maxH: '60vh',
+        g = ERP.grid({ table: 'po', rows: () => lineAll.filter(match).map(o => o.p), pageSize: 25, sortKey: 'due', sortDir: -1, canAdd: false, maxH: '60vh',
           cols: ['po_no', 'customer', 'item_no', 'kind', 'sets', 'due'].map(POC),
           extraCols: [{ label: () => L('진행', 'Tiến độ'), render: p => progCell(byId.get(p._id)) }, { label: () => L('납기', 'Hạn'), render: p => { const o = byId.get(p._id); return ERP.ddayChip(o.dday, o.st); } }, { label: () => L('상태', 'Trạng thái'), render: p => ERP.statusChip(byId.get(p._id).st) }],
           onRowClick: (p) => { st.sel = String(p.po_no); drawAside(); } });
