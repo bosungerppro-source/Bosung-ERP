@@ -27,14 +27,14 @@
   const dlCodes = (id) => h('datalist', { id }, codeList().map(v => h('option', { value: v })));
 
   // ---------- MRP engine ----------
-  /** lines: [{code, qty, unit: 'set'|'pcs'|'ea'}] -> {rows:[component rows], info:[per line], kpi} */
+  /** lines: [{code, qty, unit: 'set'|'pcs'|'ea'}] -> {rows:[component rows], info:[per line], kpi}. opt.gross: 세미 · 부품 재고를 빼지 않는 총량 (1.13.9 현장 재고 원재료 환산) */
   function mrpCalc(lines, opt) {
     opt = opt || {};
     const st = C.stock(); const bi = bomIdx(); const rec = recipeByCode(); const lp = linesByParent(); const mats = matByName();
     const semiRows = new Map(DB.rows('semi_stock').map(r => [r.code, r]));
     const items = new Map(DB.rows('items').map(r => [r.code, r]));
     const avail = new Map();                       // netting pools for semi / parts
-    const poolOf = (code) => { if (avail.has(code)) return avail.get(code); let q = 0; if (semiRows.has(code)) q = C.num(semiRows.get(code).qty); else if (st.has(code)) q = Math.max(0, st.get(code).bal); const o = { q, init: q }; avail.set(code, o); return o; };
+    const poolOf = (code) => { if (avail.has(code)) return avail.get(code); let q = 0; if (opt.gross) q = 0; else if (semiRows.has(code)) q = C.num(semiRows.get(code).qty); else if (st.has(code)) q = Math.max(0, st.get(code).bal); const o = { q, init: q }; avail.set(code, o); return o; };
     const take = (code, need) => { const p = poolOf(code); const t = Math.min(p.q, need); p.q -= t; return t; };
     const agg = new Map();                          // key -> row
     const add = (kind, code, name, unit, need, extra) => { const k = kind + '|' + code; let r = agg.get(k); if (!r) agg.set(k, r = Object.assign({ kind, code, name, unit, need: 0, stock: null }, extra || {})); r.need += need; return r; };
@@ -100,13 +100,39 @@
     if (p && p.retail) { if (!lines.some(l => l.code === p.retail)) { if (lines.length === 1 && !lines[0].code) lines.length = 0; lines.push({ code: p.retail, qty: Math.round(p.qty || 0), unit: 'set' }); } ERP.state.params = {}; }
     const save = () => DB.setSetting('mrpLines', lines);
     const wrap = h('div');
+    // 1.13.9 (사용자 2026-10-26): "하나하나 클릭하는게 힘들다. 한번에 전체클릭할수있는 버튼 엑셀처럼 … 지금 진행을 하고있는지 아직 진행 안하는중인지도 몇프로진행됬는지 표시해주고
+    //   진행안된거만 전체다고를건지 진행중인것도 포함할건지 선택할수있는 버튼도" — 진행률 = 수주 관리와 같은 포장 진행률 (포장 set ÷ 주문 set), 진행 전 = 포장 0
     function importPO() {
       const open = C.orders().filter(o => C.isOpen(o) && o.p.item_no && (o.sets - o.packed) > 0).sort((a, b) => (a.p.due || '9').localeCompare(b.p.due || '9')).slice(0, 150);
-      const boxes = open.map(o => h('label', { style: { display: 'flex', gap: '8px', padding: '4px 0' } }, h('input', { type: 'checkbox' }), h('span', h('b', o.p.po_no), ' ' + [o.p.customer, o.p.item_no].join(' · ') + ' · ' + F.n(o.sets - o.packed) + ' set · ' + F.d(o.p.due))));
-      ERP.modal({ title: L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở'), width: '760px', body: h('div', { style: { maxHeight: '55vh', overflow: 'auto' } }, open.length ? boxes : h('div', { class: 'empty' }, L('미포장 수주가 없습니다', 'Không có PO chưa đóng gói'))),
+      const started = (o) => o.packed > 0;
+      const sel = new Set(); const scope = () => (DB.setting('mrpPoScope', 'all') === 'wait' ? 'wait' : 'all');
+      const inScope = (o) => scope() === 'all' || !started(o);
+      const allBox = h('input', { type: 'checkbox', onchange: (e) => { sel.clear(); if (e.target.checked) open.forEach((o, i) => { if (inScope(o)) sel.add(i); }); refresh(); } });
+      const segEl = h('div', { class: 'seg' }); const sumEl = h('span', { class: 'muted', 'data-act': 'sum' });
+      const rows = open.map((o, i) => {
+        const cb = h('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) sel.add(i); else sel.delete(i); refresh(); } });
+        return h('label', { 'data-po': o.p.po_no, style: { display: 'flex', gap: '8px', alignItems: 'center', padding: '4px 0' } }, cb,
+          h('span', { style: { flex: '1 1 auto', minWidth: 0 } }, h('b', o.p.po_no), ' ' + [o.p.customer, o.p.item_no].join(' · ') + ' · ' + F.n(o.sets - o.packed) + ' set · ' + F.d(o.p.due)),
+          started(o) ? ERP.chip('info', L('진행 중', 'Đang làm')) : ERP.chip('neutral', L('진행 전', 'Chưa làm')),
+          h('div', { class: 'poprog', style: { width: '120px', flex: '0 0 auto' } }, ERP.bar(o.prog * 100, o.st === 'late' ? 'bad' : 'info'), h('small', { class: 'muted' }, F.n(o.prog * 100, 0) + '% · ' + F.n(Math.min(o.packed, o.sets || o.packed)) + '/' + F.n(o.sets))));
+      });
+      function refresh() {
+        rows.forEach((r, i) => { r.querySelector('input').checked = sel.has(i); });
+        const inIdx = open.map((o, i) => i).filter(i => inScope(open[i])); const allOn = inIdx.length > 0 && sel.size === inIdx.length && inIdx.every(i => sel.has(i));
+        allBox.checked = allOn; allBox.indeterminate = !allOn && sel.size > 0;
+        const nWait = open.filter(o => !started(o)).length;
+        segEl.replaceChildren(...[['wait', L('진행 전만', 'Chỉ PO chưa làm') + ' (' + nWait + ')'], ['all', L('진행 중 포함', 'Gồm cả PO đang làm') + ' (' + open.length + ')']].map(o => h('button', { type: 'button', class: 'btn sm' + (scope() === o[0] ? ' primary' : ''), 'data-scope': o[0],
+          onclick: () => { const was = allBox.checked; DB.setSetting('mrpPoScope', o[0]); if (was) { sel.clear(); open.forEach((x, i) => { if (inScope(x)) sel.add(i); }); } refresh(); } }, o[1])));
+        const setSum = Array.from(sel).reduce((a, i) => a + Math.round(open[i].sets - open[i].packed), 0);
+        sumEl.textContent = L('고른 수주 ' + sel.size + '건', 'Đã chọn ' + sel.size + ' PO') + (sel.size ? ' · ' + F.n(setSum) + ' set' : '');
+      }
+      const head = h('div', { class: 'toolbar', style: { margin: '0 0 8px' } }, h('label', { class: 'nowrap', 'data-act': 'all' }, allBox, ' ', h('b', L('전체 선택', 'Chọn tất cả'))),
+        h('span', { class: 'muted' }, L('전체 선택 범위', 'Phạm vi chọn tất cả')), segEl, sumEl);
+      refresh();
+      ERP.modal({ title: L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở'), width: '860px', body: open.length ? h('div', head, h('div', { style: { maxHeight: '55vh', overflow: 'auto' } }, rows)) : h('div', { class: 'empty' }, L('미포장 수주가 없습니다', 'Không có PO chưa đóng gói')),
         buttons: [{ label: L('취소', 'Hủy') }, { label: L('선택 추가 (미포장 set)', 'Thêm mục đã chọn (set còn lại)'), kind: 'primary', onClick: () => {
           if (lines.length === 1 && !lines[0].code) lines.length = 0;
-          open.forEach((o, i) => { if (boxes[i].querySelector('input').checked) { const ex = lines.find(l => l.code === o.p.item_no && l.unit === 'set'); const q = Math.round(o.sets - o.packed); if (ex) ex.qty = C.num(ex.qty) + q; else lines.push({ code: o.p.item_no, qty: q, unit: 'set', ref: o.p.po_no }); } });
+          open.forEach((o, i) => { if (sel.has(i)) { const ex = lines.find(l => l.code === o.p.item_no && l.unit === 'set'); const q = Math.round(o.sets - o.packed); if (ex) ex.qty = C.num(ex.qty) + q; else lines.push({ code: o.p.item_no, qty: q, unit: 'set', ref: o.p.po_no }); } });
           save(); draw(); } }] });
     }
     function pasteBox() {
@@ -136,7 +162,7 @@
         { label: L('판정', 'KQ'), render: r => r.short === null ? ERP.chip('neutral', L('재고 매칭 없음', 'Chưa khớp kho')) : r.short > 0 ? ERP.chip('bad', L('부족', 'Thiếu')) : ERP.chip('ok', L('충분', 'Đủ')) }];
       const seg = (id, label) => h('button', { class: 'btn sm' + (view === id ? ' primary' : ''), onclick: () => { st.view = id; draw(); } }, label);
       wrap.replaceChildren(dlCodes('dl_mrp'),
-        h('div', { class: 'toolbar' }, h('button', { class: 'btn', onclick: importPO }, L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở')), h('button', { class: 'btn', onclick: pasteBox }, L('엑셀에서 붙여넣기', 'Dán từ Excel')),
+        h('div', { class: 'toolbar' }, h('button', { class: 'btn', 'data-act': 'import-po', onclick: importPO }, L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở')), h('button', { class: 'btn', onclick: pasteBox }, L('엑셀에서 붙여넣기', 'Dán từ Excel')),
           h('button', { class: 'btn', onclick: () => { lines.push({ code: '', qty: '', unit: (lines[lines.length - 1] || {}).unit || 'set' }); save(); draw(); const n = wrap.querySelector('input[data-r="' + (lines.length - 1) + '"][data-c="code"]'); if (n) n.focus(); } }, '+ ' + L('행 추가', 'Thêm dòng')),
           h('button', { class: 'btn', onclick: () => { lines.length = 0; lines.push({ code: '', qty: '', unit: 'set' }); save(); draw(); } }, L('모두 지우기', 'Xóa hết')), h('span', { class: 'sp' }),
           h('label', { class: 'muted nowrap', title: L('리필 재고가 있으면 그만큼 원료 소요를 줄입니다', 'Nếu có tồn refill thì giảm nhu cầu nguyên liệu tương ứng') }, h('input', { type: 'checkbox', checked: st.net, onchange: (e) => { st.net = e.target.checked; draw(); } }), ' ', L('세미(리필) 재고 차감 후 원료 계산', 'Trừ tồn bán TP (refill) khi tính NL'))),

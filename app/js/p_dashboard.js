@@ -294,6 +294,14 @@
         d.rows.length ? P.tableEl(c, d) : h('div', { class: 'empty' }, L('재고가 없습니다.', 'Không có tồn.')),
         h('p', { class: 'help', style: { margin: '6px 0 0' } }, [d.units.length === 1 ? L('단위 ', 'Đơn vị ') + d.units[0] : null, L('현재 재고', 'Tồn hiện tại')].filter(Boolean).join(' · ')));
     } });
+  // 1.13.9: 현장 재고 → 원재료 환산 (현장 재고 화면의 조립 재고 옆 표와 같은 것). 기본 배치에는 넣지 않고 "+ 위젯 추가" 에서
+  reg('floor_raw', { ko: '원재료 환산 (현장 재고)', vi: 'Quy đổi nguyên liệu (tồn hiện trường)', dko: '현장 재고 (창고+공장) 를 BOM 으로 원료까지 푼 원재료별 kg · 공정별 (현장 재고 화면의 조립 재고 옆 표와 같음)', dvi: 'Tồn hiện trường quy về nguyên liệu theo BOM (kg) · theo công đoạn', cat: 'stock', w: 2, sizes: [2, 3, 4],
+    render() {
+      const P = ERP.pivot; const d = P.rawBuild();
+      return box(L('원재료 환산 (현장 재고)', 'Quy đổi nguyên liệu (tồn hiện trường)'), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('floor'); } }, L('현장 재고 →', 'Tồn hiện trường →')),
+        d.rows.length ? P.rawTableEl(d) : h('div', { class: 'empty' }, L('BOM 으로 원료까지 풀 수 있는 현장 재고가 없습니다.', 'Không có tồn hiện trường quy đổi được theo BOM.')),
+        h('p', { class: 'help', style: { margin: '6px 0 0' } }, P.rawNote(d)));
+    } });
   reg('fresh', { ko: '자료 최신 여부', vi: 'Độ mới của dữ liệu', dko: '수불 · 생산일보 · ECOUNT · 수주 자료의 마지막 날짜', dvi: 'Ngày gần nhất của từng loại dữ liệu', cat: 'etc', w: 2, sizes: [2, 3, 4],
     render(ctx) { const meta = ERP.inv.meta();
       const fresh = [[L('수불 (입고·출고·이동)', 'Nhập xuất tồn'), meta.lastTx, 1], [L('생산일보', 'Báo cáo SX'), C.latestProdDate(), 1], [L('ECOUNT 품목등록', 'Danh mục ECOUNT'), (ERP.lastUpload ? ERP.lastUpload(['ecount_items']) : '').slice(0, 10), 0], [L('기초재고 (ECOUNT)', 'Tồn đầu (ECOUNT)'), meta.open.any, 0], [L('수주 (PO)', 'Đơn hàng'), DB.rows('po').reduce((a, p) => (/^\d{4}-\d\d-\d\d/.test(String(p.date || '')) && p.date > a ? p.date : a), ''), 0]];

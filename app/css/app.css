@@ -170,6 +170,7 @@ select.partsel{max-width:150px;min-width:96px;font-size:12px;font-weight:600;pad
 .fpiv{display:flex;flex-wrap:wrap;gap:12px;margin:2px 0 6px;align-items:flex-start}
 .fpiv .fpiv-card{margin:0;flex:1 1 100%;min-width:0}
 .fpiv .fpiv-card.narrow{flex:0 1 auto;max-width:100%}
+.fpiv .fraw-card{margin:0;flex:0 1 auto;max-width:100%;min-width:0}
 .fpiv .fpiv-foot{flex:1 1 100%}
 .fpiv-edit{display:flex;flex-direction:column;gap:8px;background:#FAFBFC;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
 .fpiv-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}

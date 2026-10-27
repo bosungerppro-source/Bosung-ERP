@@ -456,7 +456,7 @@
     opt = opt || {};
     const mode = opt.mode || INV.prodMode(); const od = INV.opening().date; const IT = INV.items(); const rmBy = INV.rmByName(); const MAP = INV.codeMap();
     const diag = { mode, open: od.FAC || od.WH || od.FLOOR || null, openFloor: od.FLOOR || null, considered: 0, before: 0, beforeFloor: 0, prod: 0, use: 0, mapped: 0, resin: 0,
-      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), matProd: new Map(), similar: new Map(), bomSrc: {} };
+      notItem: new Map(), noBom: new Map(), noConv: new Map(), missingPart: new Map(), rawUnmatched: new Map(), matSkip: new Map(), matProd: new Map(), setPass: new Map(), similar: new Map(), bomSrc: {} };
     // 원료 이름 → RM 품목: 사용자가 연결한 것(code_map raw)이 먼저, 그다음 이름이 같은 RM (차감하지 않고 진단에 이름만 쓴다)
     const rawItem = (name) => { const c = MAP.raw(name); const a = c ? IT.get(c) : null; return a || rmBy.get(normName(name)) || null; };
     const out = [];
@@ -467,14 +467,18 @@
     const procOf = (id) => ERP.PROC.find(x => x.id === id);
     /** 이 품목의 기준일 다음 날인가 (현장 실사 품목은 현장 실사일) */
     const after = (date, it) => counts(date, 'FAC', INV.openDateFor(it));
+    /** 재고 품목: 일보의 재고 품목코드(item, 예: 포장 일보의 완제품 코드) → 코드 → 코드 연결(code_map) */
+    const itemOf = (r) => { const code = str(r.code); let item = (str(r.item) && IT.get(r.item)) || (code ? IT.get(code) : null), mapped = false;
+      const src = code || str(r.part) || str(r.name);
+      if (!item && src) { const mc = MAP.daily(r.process, r.division, src); if (mc) { item = IT.get(mc); mapped = !!item; } }
+      return { item, src, mapped }; };
+    // 1.13.9: 일보가 직접 만든 SG(마니라 세트) — 이 SG 만 박스 포장에서 예전처럼 차감한다 (아래 setPass)
+    const madeSG = new Set(); (prodRows || []).forEach(r => { if (!r || !r.date || r.date <= openDate) return; const it = itemOf(r).item; if (it && INV.info(it).stage === 'SG') madeSG.add(it.code); });
     (prodRows || []).forEach(r => {
       if (!r || !r.date) return;
       if (r.date <= openDate) { diag.before++; return; }
       diag.considered++;
-      // 재고 품목: 일보의 재고 품목코드(item, 예: 포장 일보의 완제품 코드) → 코드 → 코드 연결(code_map)
-      const code = str(r.code); let item = (str(r.item) && IT.get(r.item)) || (code ? IT.get(code) : null);
-      const src = code || str(r.part) || str(r.name);
-      if (!item && src) { const mc = MAP.daily(r.process, r.division, src); if (mc) { item = IT.get(mc); if (item) diag.mapped++; } }
+      const { item, src, mapped } = itemOf(r); if (mapped) diag.mapped++;
       const pcs = C.qty(r); const P = procOf(r.process); const setProc = r.process === 'PCK' || (P && P.unit === 'set');
       const base0 = { date: r.date, scope: 'FAC', proc: r.process, ref: r._id, src: 'daily:' + (r.process || '') + ':' + r.date };
       // injection: the resin weight written on the report is NOT deducted (11차: 원재료는 생산 반영으로 건드리지 않는다) — only noted
@@ -513,6 +517,9 @@
         if (k.raw) { const rk = rawItem(k.raw); bump(diag.matSkip, rk ? rk.code : k.raw, basisQ * k.per); return; }
         const kid = IT.get(k.code); if (!kid) { bump(diag.missingPart, k.code, basisQ * k.per); return; }
         if (isMatItem(kid)) { bump(diag.matSkip, kid.code, basisQ * k.per); return; }   // 11차: BOM 에 원부자재가 있어도 차감하지 않는다
+        // 1.13.9: 포장 일보에는 박스(완제품) 코드만 적힌다 — 박스 BOM 의 SG(마니라 세트)는 같은 포장에서 만들어 바로 박스에 들어가므로 차감하지 않는다
+        //         (SG 를 만든 일보가 없어 빼면 마이너스만 쌓인다 · 카톤 코드 줄은 pcs × 박스당 세트로 커진다). 일보가 직접 만든 SG 는 예전처럼 차감. 진단엔 포장 set
+        if (setProc && INV.info(kid).stage === 'SG' && !madeSG.has(kid.code)) { bump(diag.setPass, kid.code, sets || 0); return; }
         if (!after(r.date, kid)) return;   // 현장 실사일 이전 소모 — 실사 수량에 이미 빠져 있다
         out.push(Object.assign({ kind: 'USE', from_scope: 'FAC', code: kid.code, name: kid.name, qty: r4(basisQ * k.per), unit: INV.unitShow(kid.unit), parent: item.code }, base)); diag.use++;
       });

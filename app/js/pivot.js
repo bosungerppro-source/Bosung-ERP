@@ -153,6 +153,51 @@
     ERP.xl.exportAoa('floor_pivot', hdr, d.rows.map(r => line(c.rows === 'item' ? r.title : r.label, r.cells, r.tot)).concat(d.tots.map(t => line(L('합계', 'Tổng') + (d.multi ? ' · ' + t.unit : ''), t.cells, t.tot))));
     ERP.toast(title + L(' — 엑셀로 저장', ' — đã xuất Excel'), 'ok');
   }
+  // ---------------------------------------------------------------- 1.13.9 원재료 환산
+  // 사용자 (2026-10-26, 현장 재고 '조립 재고' 표 사진과 함께): "현장재고를 원재료로 환산했을때 원재료별로 얼마인지 조립재고 오른쪽에 표시해서 볼수있게 해줘"
+  // — 현장 재고 (창고+공장 현재 재고, 모든 공정) 를 BOM 으로 원료 (RM) 까지 푼 양. MRP 소요량과 같은 계산 (ERP.mrp — 재고를 빼지 않는 총량 gross), 공정마다 따로 풀어 칸으로
+  /** { cols: [{k, label}] (원료가 나온 공정), rows: [{k 원료 코드, name, unit, cells: Map 공정 → 양, tot}] (많은 순), tots (단위별 합계), units, items, miss (BOM 없는 품목 수) } */
+  P.rawBuild = function () {
+    const items = INV.rows().filter(s => INV.groupOf(s) === 'floor' && s.bal > EPS);
+    const byProc = new Map(); items.forEach(s => { const p = procOf(s); let a = byProc.get(p); if (!a) byProc.set(p, a = []); a.push(s); });
+    const map = new Map(); const procs = []; let miss = 0;
+    Array.from(byProc.keys()).sort((a, b) => procOrder(a) - procOrder(b)).forEach(p => {
+      const res = ERP.mrp ? ERP.mrp(byProc.get(p).map(s => ({ code: s.code, qty: s.bal, unit: 'pcs' })), { gross: true }) : { rows: [], info: [] };
+      let any = false;
+      res.rows.forEach(r => { if (r.kind !== 'raw' || !(r.need > EPS)) return; any = true; let x = map.get(r.code); if (!x) map.set(r.code, x = { k: r.code, name: r.name || '', unit: r.unit || 'kg', cells: new Map(), tot: 0 }); x.cells.set(p, r4((x.cells.get(p) || 0) + r.need)); x.tot = r4(x.tot + r.need); });
+      if (any) procs.push(p);
+      miss += res.info.filter(i => i.route === 'unknown').length;
+    });
+    const rows = Array.from(map.values()).sort((a, b) => b.tot - a.tot || String(a.k).localeCompare(String(b.k)));
+    const units = Array.from(new Set(rows.map(r => r.unit))).sort();
+    const tots = units.map(u => { const cells = new Map(); rows.filter(r => r.unit === u).forEach(r => r.cells.forEach((v, k) => cells.set(k, r4((cells.get(k) || 0) + v)))); return { unit: u, cells, tot: r4(Array.from(cells.values()).reduce((a, v) => a + v, 0)) }; });
+    return { cols: procs.map(k => ({ k, label: P.procLabel(k) })), rows, tots, units, items: items.length, miss };
+  };
+  /** 원재료 환산 표 (현장 재고 위 · 종합 현황 위젯이 같이 씀) */
+  P.rawTableEl = function (d) {
+    const multi = d.units.length > 1; const cell = (v, u) => (v === undefined || Math.abs(v) <= EPS ? h('span', { class: 'muted' }, '·') : fv(v, u));
+    const head = h('tr', h('th', L('원재료', 'Nguyên liệu')), h('th', { class: 'num' }, L('합계', 'Tổng')), d.cols.map(x => h('th', { class: 'num' }, x.label)));
+    const body = d.rows.map(r => h('tr', { 'data-k': r.k }, h('td', { title: r.k + (r.name ? ' · ' + r.name : '') + ' (' + r.unit + ')' }, h('b', r.k), r.name ? ' ' + r.name : ''),
+      h('td', { class: 'num', style: { fontWeight: 700 } }, fv(r.tot, r.unit)), d.cols.map(x => h('td', { class: 'num' }, cell(r.cells.get(x.k), r.unit)))));
+    const foot = d.tots.map(t => h('tr', { class: 'tot' }, h('td', L('합계', 'Tổng') + (multi ? ' · ' + t.unit : '')), h('td', { class: 'num' }, fv(t.tot, t.unit)), d.cols.map(x => h('td', { class: 'num' }, cell(t.cells.get(x.k), t.unit)))));
+    return h('div', { class: 'tbl-wrap', style: { maxHeight: '420px' } }, h('table', { class: 'tbl dt wide1 fraw-t' }, h('thead', head), h('tbody', body, foot)));
+  };
+  P.rawNote = (d) => [L('현재 재고 (창고+공장) 를 BOM 으로 원료까지 푼 양 — MRP 소요량과 같은 계산', 'Tồn hiện tại (kho+xưởng) quy về nguyên liệu theo BOM — như nhu cầu MRP'), d.units.length === 1 ? L('단위 ', 'Đơn vị ') + d.units[0] : null,
+    d.miss ? L('환산 못 한 품목: BOM 없음 ' + d.miss + '개', 'Chưa quy đổi: không có BOM ' + d.miss + ' mã') : null].filter(Boolean).join(' · ');
+  P.rawExport = function (d) {
+    ERP.xl.exportAoa('floor_raw', [L('원재료', 'Nguyên liệu'), L('이름', 'Tên'), L('단위', 'Đơn vị'), L('합계', 'Tổng')].concat(d.cols.map(x => x.label)),
+      d.rows.map(r => [r.k, r.name, r.unit, r.tot].concat(d.cols.map(x => r.cells.get(x.k) || 0))).concat(d.tots.map(t => [L('합계', 'Tổng'), '', t.unit, t.tot].concat(d.cols.map(x => t.cells.get(x.k) || 0)))));
+    ERP.toast(L('원재료 환산 — 엑셀로 저장', 'Quy đổi nguyên liệu — đã xuất Excel'), 'ok');
+  };
+  function rawCard() {
+    const d = P.rawBuild();
+    return h('section', { class: 'card wcard fraw-card', 'data-id': 'raw' },
+      h('div', { class: 'card-head' }, h('h2', L('원재료 환산 (현장 재고)', 'Quy đổi nguyên liệu (tồn hiện trường)')),
+        h('div', { class: 'whead-r' }, h('button', { type: 'button', class: 'btn sm', 'data-act': 'xl', disabled: !d.rows.length, onclick: () => P.rawExport(d) }, L('엑셀', 'Excel')))),
+      d.rows.length ? P.rawTableEl(d) : h('div', { class: 'empty' }, L('BOM 으로 원료까지 풀 수 있는 현장 재고가 없습니다.', 'Không có tồn hiện trường quy đổi được theo BOM.')),
+      h('p', { class: 'help', style: { margin: '8px 0 0' } }, P.rawNote(d)));
+  }
+
   /** 현장 재고 위 영역: 표 목록 + [+ 표 추가] (p_stock.js stockTab 이 부름) */
   ERP.floorPivot = function (all) {
     const list = P.list(); const procsHere = new Set(all.map(procOf)); const linesHere = new Set(all.map(s => s.line || ''));
@@ -170,6 +215,7 @@
         V.edit ? editor(c, i, list.length, procsHere, linesHere) : null, body,
         note ? h('p', { class: 'help', style: { margin: '8px 0 0' } }, note) : null));
     });
+    wrap.appendChild(rawCard());   // 1.13.9: 표들 오른쪽 (기본 = 조립 재고 표 하나 → 바로 오른쪽) 에 원재료 환산 — 좁은 표들이 나란히 선 줄은 그대로
     const add = () => { const l = P.list(); const used = new Set(l.filter(c => c.procs.length === 1).map(c => c.procs[0])); const next = ERP.PROC.map(p => p.id).concat(['ETC']).find(p => procsHere.has(p) && !used.has(p));
       const c = { id: 'p' + Date.now().toString(36), procs: next ? [next] : [], divs: [], rows: 'div', cols: 'none', scope: 'all' }; vs(c.id).edit = true; l.push(c); save(l); };
     wrap.appendChild(h('div', { class: 'fpiv-foot' },
