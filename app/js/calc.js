@@ -199,4 +199,24 @@
   /** 생산 관리 일별 · 월별 탭에서 보는 품목군 (공정마다 — 여러 공정이면 그 묶음마다, 비면 전체) — 현장 재고 표 설정처럼 저장 (모든 PC 같음) */
   C.prodDivsShown = (proc) => { const a = (DB.setting('prodDivs', null) || {})[C.procKey(proc) || '*']; return Array.isArray(a) ? a.map(String) : []; };
   C.setProdDivsShown = (proc, keys) => { const k = C.procKey(proc) || '*'; const m = Object.assign({}, DB.setting('prodDivs', null) || {}); if (keys && keys.length) m[k] = keys.slice(); else delete m[k]; DB.setSetting('prodDivs', m); };
+
+  // 1.13.15 (사용자 2026-10-28 "ps/pp/hdpe/ldpe 일별 월별 년별 사용량만 따로 표시준다"): 사출 일보의 원료 kg — 사출 생산일보는 부품별 원료 (중량 칸),
+  //   예전 이력은 그 줄의 원료 (GPPS · HIPS 는 PS). 원부자재 재고와는 상관없음 (11차: 생산 반영으로 원부자재를 빼지 않음)
+  C.RAW_KEYS = ['PS', 'PP', 'HDPE', 'LDPE'];
+  C.rawKey = (m) => { const k = String(m || '').toUpperCase().replace(/[^A-Z]/g, ''); return /^(PS|GPPS|HIPS)$/.test(k) ? 'PS' : (C.RAW_KEYS.includes(k) ? k : ''); };
+  /** 날짜별 원료 kg { 'YYYY-MM-DD': { PS, PP, HDPE, LDPE } } */
+  C.rawUse = function () {
+    return DB.memo('rawUse', ['prod_log'], () => { const by = {}; DB.rows('prod_log').forEach(r => { if (r.process !== 'INJ') return; const k = C.rawKey(r.raw_material), kg = num(r.raw_kg), d = String(r.date || '').slice(0, 10);
+      if (!k || !(kg > 0) || !ISO.test(d)) return; (by[d] = by[d] || {})[k] = (by[d][k] || 0) + kg; }); return by; });
+  };
+  /** 원료 × 기간 표 — view 'day' (ref 'YYYY-MM' 의 1일 ~ 마지막 입력일) · 'month' (ref 'YYYY' 의 1 ~ 12월) · 'year' (자료가 있는 연도). 생산 관리 탭 · 종합 현황 위젯이 같이 쓴다 */
+  C.rawTable = function (view, ref) {
+    const by = C.rawUse(); const dates = Object.keys(by).sort(); const cols = []; let colOf;
+    if (view === 'year') { dates.forEach(d => { if (!cols.includes(d.slice(0, 4))) cols.push(d.slice(0, 4)); }); colOf = (d) => d.slice(0, 4); }
+    else if (view === 'month') { for (let i = 1; i <= 12; i++) cols.push(ref + '-' + String(i).padStart(2, '0')); colOf = (d) => (d.slice(0, 4) === String(ref) ? d.slice(0, 7) : null); }
+    else { const ds = dates.filter(d => d.slice(0, 7) === ref); const last = ds[ds.length - 1]; if (last) { let d = ref + '-01'; while (d <= last) { cols.push(d); d = F.addDays(d, 1); } } colOf = (d) => (d.slice(0, 7) === ref ? d : null); }
+    const cell = {}, tot = {}, colTot = {}; let grand = 0; C.RAW_KEYS.forEach(k => { cell[k] = {}; tot[k] = 0; });
+    dates.forEach(d => { const c = colOf(d); if (!c) return; C.RAW_KEYS.forEach(k => { const v = by[d][k] || 0; if (!v) return; cell[k][c] = (cell[k][c] || 0) + v; tot[k] += v; colTot[c] = (colTot[c] || 0) + v; grand += v; }); });
+    return { cols, cell, tot, colTot, grand, last: dates[dates.length - 1] || null };
+  };
 })();

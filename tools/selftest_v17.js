@@ -11,7 +11,9 @@
    7-7 포장한 만큼 조립 재고가 줄어듦 — 박스 → 세트 → 조립품 (1.13.10) · 7-8 수주서 그대로 올리기 (1.13.11)
    7-9 수주 목록 품번 수 → 품목군 · 납기는 늦은 날짜부터 (수주 목록 · 종합 현황 · 휴대폰 · MRP · 품목 상세, 1.13.12)
    7-10 종이 권취 일보의 품목군 = Glass (현장 일일 생산일보 · ERP 일보 양식 · 일보 입력, 1.13.13)
-   7-11 생산 관리 일별 · 월별 탭 · 종합 현황 일별 · 월별 위젯: 공정도 여러 개 골라 보기 (1.13.14) · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7-11 생산 관리 일별 · 월별 탭 · 종합 현황 일별 · 월별 위젯: 공정도 여러 개 골라 보기 (1.13.14)
+   7-12 사출 생산일보 그대로 올리기 · 품목 맞추기 · 재고 · 원재료 사용량 (PS · PP · HDPE · LDPE 일별 · 월별 · 년별) · 7-13 품목군 이름 Regular → Dial · Dial Mini → Mini (1.13.15)
+   8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -669,6 +671,81 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     const vt = await ev(() => document.querySelector('main .pprocs').innerText.replace(/\s+/g, ' '));
     ok('베트남어: 공정 줄 Công đoạn · Tất cả · 한글 없음', /Công đoạn/.test(vt) && /Tất cả/.test(vt) && !/[가-힣]/.test(vt), vt);
     await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('prod_log', k.prod_log); delete DB.meta.prodDivs; await DB.saveMeta(); DB.setSetting('dash', k.dash); await DB.flush(); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.state.pan = null; ERP.state.pmon = null; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-12. 사출 생산일보 그대로 올리기 · 원재료 사용량 (1.13.15, 사용자 "사출 생산일보이다. 생산 수량에 - 중량수량을 수량으로 잡고 … ps/pp/hdpe/ldpe 일별 월별 년별 사용량만 따로 표시준다")', async () => {
+    const keep = await ev(() => ({ items: ERP.db.rows('items').map(r => Object.assign({}, r)), prod_log: ERP.db.rows('prod_log').map(r => Object.assign({}, r)), dash: ERP.db.setting('dash', null) }));
+    // 사출 부품 품목 (ERP CODE = 단계-계열-세부-코드, 이름 = 색): Mini barrel SCARLET · Dial barrel BLUE 두 계열 (BR · FD) · Pencil spoon TAN · Pencil nose cone BLACK · 홀더 · 케이스 (색 없음)
+    await ev(async () => { const DB = ERP.db; const it = (code, name, erp) => ERP.inv.classify({ code, name, erp_code: erp, unit: 'PCS', src: 'test' });
+      DB.replace('items', DB.rows('items').concat([it('BM03', 'SCARLET', 'WIP01-MINI-BRR-BM03'), it('BR08', 'BLUE', 'WIP01-REG-BRR-BR08'), it('FD10', 'BLUE', 'WIP01-REG-BRR-FD10'), it('SP-T1', 'TAN', 'WIP04-PEN-SP-SP-T1'),
+        it('NP-B', 'BLACK', 'WIP02-PEN-NCONE-NP-B'), it('PH', 'PENCIL HOLDER', 'WIP03-PEN-HD-PH'), it('MH', 'MINI HOLDER', 'WIP03-MINI-HD-MH'), it('case', 'case', 'WIP03-PEN-HD-CASE')]));
+      DB.replace('prod_log', [{ date: '2026-06-20', process: 'INJ', shift: 'D', source: 'history', machine_no: '3', division: 'Pencil', part: 'Spoon', code: 'Spoon', ok_qty: 5000, raw_material: 'GPPS', raw_kg: 100 }]); await DB.flush(); });   // 예전 이력 (기초재고 기준일 06-30 전 — 재고 계산 밖)
+    // 사출 생산일보 (공장 양식): A1 날짜 · 4행 머리글 · 호기 × 주야 줄 · 합계 줄 · Q 칸 (무시) — 중량수량 = 생산 수량, 중량(kg) = 원료 사용량
+    const jobs = await ev(() => { const X = window.XLSX; const wb = X.utils.book_new();
+      const H = ['호기', null, '종류품명', '품명', '색상명', '가동시간', '캐비티', '캐비티2', '톤수', 'CT', '중량(kg)', '사출시간', 'Shot수', '수량', '수리현황', '중량수량'];
+      const r = (no, sh, div, part, col, kg, qty, rep) => [no, sh, div, part, col, kg ? 8 : null, 64, 60, 'F250', 20, kg, 47, kg ? 356 : null, kg ? 21360 : 0, rep || null, qty, null, 999];
+      const M = [[46322, null, null, null, null, '사 출 생 산 현 황'], [], [null, null, null, 'PHÂN LOẠI HÀNG', 'Tên màu sắc'], H.concat([null, 'Q 무시']),
+        r(1, 'DAY', 'Mini', 'Barrel', 'SCARLET', 53.4, 21106.7194), r(1, 'NIGHT', 'Mini', 'Barrel', null, null, 0),   // 중량수량은 수식 (중량 ÷ 개당 g) 이라 소수 → 반올림
+        r(2, 'DAY', 'dial', 'Barrel', 'BLUE', 87.4, 21010), r(3, 'DAY', 'regular', 'Barrel', 'BLACK', 156.2, 37548), r(4, 'DAY', 'pencil', 'Spoon', 'TAN', 49.6, 36471, '금형 수리'),
+        r(5, 'DAY', 'Mini', 'Spoon', 'PS', 90.9, 68864), r(6, 'DAY', 'Pencil', 'holder', 'HDPE', 14.7, 63913), r(7, 'NIGHT', 'Pencil', 'Nose cone', 'BLACK', 13.1, 27872),
+        r(8, 'DAY', 'Dial Mini', 'Barrel', 'SCARLET', 20, 8000), r(9, 'DAY', 'Pencil', 'case', null, 5, 1200), r(10, 'DAY', 'Pencil', 'core', 'RED', 3, 500),
+        [null, null, null, null, null, null, null, null, null, null, null, null, null, 2000000, null, 1000000], ['주간', null, 276638]];
+      const ws = X.utils.aoa_to_sheet(M); ws.A1.z = 'mm/dd/yyyy'; X.utils.book_append_sheet(wb, ws, '10- 27');
+      const back = X.read(X.write(wb, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false, cellNF: true });
+      ERP.state.injJobs = ERP.xl.analyze(back, {});
+      return ERP.state.injJobs.map(j => ({ id: j.id, table: j.table, proc: j.proc, date: j.date, mode: j.mode, note: j.note || '', rows: j.rows.map(o => [o.shift, o.machine_no, o.division, o.part, o.name || '', o.code || '', o.item || '', o.ok_qty, o.raw_material || '', o.raw_kg]) })); });
+    eq('인식: 사출 생산일보 하나 (사출 · 생산 일보 표 · 날짜 A1)', jobs.map(j => [j.id, j.table, j.proc, j.date, j.mode]), [['inj-daily', 'prod_log', 'INJ', '2026-10-27', 'range']]);
+    // 못 맞춘 줄은 코드를 비움 — 부품 이름의 일반 품목 (10-27 ERP CODE 의 'Barrel' 등) 으로 재고에 들어가지 않고 생산 반영의 '해결할 항목' 에 (사용자가 고른 "못 맞춘 줄은 해결할 항목")
+    eq('줄: 생산이 있는 줄만 · 수량 = 중량수량 (반올림) · 품목군 정리 (dial · regular → Dial, Dial Mini → Mini, pencil → Pencil) · 부품 + 품목군 + 색 → 품목 (Dial barrel 은 BR 계열, 못 맞추면 코드 비움) · 원료 = 부품별 · kg = 중량', jobs[0].rows, [
+      ['D', '1', 'Mini', 'Barrel', 'SCARLET', 'BM03', 'BM03', 21107, 'PP', 53.4], ['D', '2', 'Dial', 'Barrel', 'BLUE', 'BR08', 'BR08', 21010, 'PP', 87.4], ['D', '3', 'Dial', 'Barrel', 'BLACK', '', '', 37548, 'PP', 156.2],
+      ['D', '4', 'Pencil', 'Spoon', 'TAN', 'SP-T1', 'SP-T1', 36471, 'PS', 49.6], ['D', '5', 'Mini', 'Spoon', 'PS', '', '', 68864, 'PS', 90.9], ['D', '6', 'Pencil', 'Holder', 'HDPE', 'PH', 'PH', 63913, 'HDPE', 14.7],
+      ['N', '7', 'Pencil', 'Nose cone', 'BLACK', 'NP-B', 'NP-B', 27872, 'PP', 13.1], ['D', '8', 'Mini', 'Barrel', 'SCARLET', 'BM03', 'BM03', 8000, 'PP', 20], ['D', '9', 'Pencil', 'Case', '', 'case', 'case', 1200, 'PP', 5],
+      ['D', '10', 'Pencil', 'Core', 'RED', '', '', 500, 'LDPE', 3]]);
+    ok('알림: 품목을 못 맞춘 줄과 까닭 (품목에 없는 색 · 색 칸이 원료 이름 · 품목 단계를 모르는 부품)', /3호기 Barrel · Dial · BLACK \(품목에 없는 색\)/.test(jobs[0].note) && /5호기 Spoon · Mini · PS \(색 칸이 원료 이름\)/.test(jobs[0].note) && /10호기 Core/.test(jobs[0].note) && !/1호기|2호기|4호기|6호기|7호기|8호기|9호기/.test(jobs[0].note), jobs[0].note);
+    eq('나머지 칸도 기록 (분석용): 호기 · 기계 · 가동(분) · 캐비티 · 캐비티2 · CT · 사출시간 · Shot수 · 수량 · 수리현황 · 출처', await ev(() => { const o = ERP.state.injJobs[0].rows[3]; return [o.machine_no, o.machine, o.work_min, o.cavity, o.cavity2, o.ct, o.inj_time, o.shots, o.shot_qty, o.remark, o.weight_kg, o.source]; }),
+      ['4', 'F250', 480, 64, 60, 20, 47, 356, 21360, '금형 수리', 49.6, 'daily-report']);
+    // 반영 → 현장 재고: 맞춘 품목에 생산 입고 (현장 실사일 다음 날부터), 원료는 빼지 않음 (11차 규칙)
+    await ev(async () => { ERP.xl.apply(ERP.state.injJobs[0]); await ERP.db.flush(); });
+    eq('반영: 사출 일보 10줄 → 생산 일보 (모두 사출)', await ev(() => ERP.db.rows('prod_log').filter(r => r.date === '2026-10-27').map(r => r.process + ' ' + (r.item || '-')).join(',')), 'INJ BM03,INJ BR08,INJ -,INJ SP-T1,INJ -,INJ PH,INJ NP-B,INJ BM03,INJ case,INJ -');
+    // 부품 이름의 일반 품목이 있어도 (10-27 ERP CODE '일보만 → 새 품목' 의 Barrel 등) 못 맞춘 줄은 들어가지 않음
+    await ev(async () => { ERP.db.add('items', ERP.inv.classify({ code: 'Barrel', name: 'Barrel', erp_code: 'WIP01-BARREL', unit: 'PCS', src: 'test' })); await ERP.db.flush(); });
+    eq('현장 재고에 생산 입고 (맞춘 품목만, BM03 = 21,107 + 8,000) · 원료는 빼지 않음', await ev(() => ERP.inv.prodPost().rows.filter(t => t.kind === 'PROD' && t.date === '2026-10-27').reduce((a, t) => { a[t.code] = (a[t.code] || 0) + t.qty; return a; }, {})),
+      { BM03: 29107, BR08: 21010, 'SP-T1': 36471, PH: 63913, 'NP-B': 27872, case: 1200 });
+    eq('못 맞춘 줄은 생산 반영의 "해결할 항목" (사출 · 품목군 · 부품)', await ev(() => Array.from(ERP.inv.prodPost().diag.notItem.keys()).filter(k => /^INJ\|/.test(k)).sort()), ['INJ|Dial|Barrel', 'INJ|Mini|Spoon', 'INJ|Pencil|Core']);
+    // 원재료 사용량: 생산 관리 탭 (일별 · 월별 · 년별) — 사출 일보의 원료 kg, 예전 이력의 GPPS 는 PS
+    await ev(() => { ERP.state.prodTab = 'raw'; ERP.state.praw = null; ERP.goto('production'); ERP.render(); }); await settle();
+    const rawTab = () => ev(() => { const t = document.querySelector('main table.tbl'); return { tab: (document.querySelector('main .tabs .on') || {}).textContent || '', title: (document.querySelector('main section.card h2') || {}).textContent || '',
+      head: t ? Array.from(t.querySelectorAll('thead th')).map(th => th.innerText.replace(/\s+/g, ' ').trim()).slice(0, 4) : null, rows: t ? Array.from(t.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) : null }; });
+    eq('원재료 사용량 탭 (처음 = 일별, 기준 달 10월): 세로 PS · PP · HDPE · LDPE · 합계, 둘째 칸 = 달 합계 (kg)', await rawTab(),
+      { tab: '원재료 사용량', title: '원재료 사용량 (사출, kg) · 2026-10', head: ['원료', '월 합계', '1 목', '2 금'], rows: [['PS', '140.5'], ['PP', '335.1'], ['HDPE', '14.7'], ['LDPE', '3'], ['합계', '493.3']] });
+    await A.click('main [data-raw-view="month"]'); await settle();
+    eq('월별 (2026): 6월 이력 GPPS 100 kg = PS', (await rawTab()).rows, [['PS', '240.5'], ['PP', '335.1'], ['HDPE', '14.7'], ['LDPE', '3'], ['합계', '593.3']]);
+    await A.click('main [data-raw-view="year"]'); await settle();
+    eq('년별: 연도 칸', [(await rawTab()).head.slice(0, 3), (await rawTab()).rows[0]], [['원료', '합계', '2026'], ['PS', '240.5']]);
+    // 종합 현황 위젯 (원재료 사용량) — 생산 관리 탭과 같은 숫자
+    await ev(() => { ERP.db.setSetting('dash', [{ k: 'v17-raw', id: 'raw_use', w: 4 }]); ERP.state.dashEdit = false; ERP.state.dashDate = '2026-10-27'; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    eq('종합 현황 위젯 "원재료 사용량": 일별 (기준 달) 같은 숫자', await ev(() => { const el = document.querySelector('.wgrid .w[data-id=raw_use]'); return el ? Array.from(el.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) : null; }),
+      [['PS', '140.5'], ['PP', '335.1'], ['HDPE', '14.7'], ['LDPE', '3'], ['합계', '493.3']]);
+    ok('위젯 추가 목록에 있음 (생산 칸)', await ev(() => !!(ERP.widgets && ERP.widgets.raw_use && ERP.widgets.raw_use.cat === 'prod')));
+    await ev(() => { ERP.setLang('vi'); ERP.state.prodTab = 'raw'; ERP.goto('production'); ERP.render(); }); await settle();
+    ok('베트남어: 원재료 사용량 탭 · 표에 한글 없음', await ev(() => !/[가-힣]/.test(document.querySelector('main .card').innerText) && /NL|Nguyên liệu/.test(document.querySelector('main .card').innerText)));
+    await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('items', k.items); DB.replace('prod_log', k.prod_log); DB.setSetting('dash', k.dash); await DB.flush(); ERP.state.injJobs = null; ERP.state.dashDate = null; ERP.state.prodTab = null; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-13. 품목군 이름: Regular → Dial · Dial Mini → Mini (1.13.15, 사용자 "Regular 는 Dial 로 바꾼다. 명칭이 Dial Mini 이면Mini / Dial이나 Regular 이면 Dial 이다")', async () => {
+    eq('ERP.normDiv: Regular · regular · Dail · dial → Dial, Dial Mini · Mini Dial → Mini, 다른 이름은 그대로', await ev(() => ['Regular', 'regular', 'REGULAR', 'Dial', 'dial', 'Dail', 'Dial Mini', 'dial mini', 'Mini Dial', 'Mini', 'Pencil', 'Dial Mixed', 'Glass', ''].map(ERP.normDiv)),
+      ['Dial', 'Dial', 'Dial', 'Dial', 'Dial', 'Dial', 'Mini', 'Mini', 'Mini', 'Mini', 'Pencil', 'Dial Mixed', 'Glass', '']);
+    eq('품목군 고르기 목록 (생산 일보 · 수주) 에 Regular 없음', await ev(() => ['prod_log', 'po'].map(t => { const c = ERP.TABLES[t].cols.find(x => x.k === (t === 'po' ? 'kind' : 'division')); const o = typeof c.opts === 'function' ? c.opts() : (c.opts || []); return o.map(x => x.v || x).includes('Regular'); })), [false, false]);
+    // ERP 일보 양식 (사출 시트의 품목군 칸) · 생산관리 파일 (수주 kind goods) 도 같은 규칙
+    const r2 = await ev(() => { const X = window.XLSX; const wb = ERP.xl.dailyTemplateBook();
+      const n = wb.SheetNames.find(s => /INJ/.test(s)); const aoa = X.utils.sheet_to_json(wb.Sheets[n], { header: 1 }); const hdr = aoa.find(r => r.some(c => /생산일|Ngày SX/.test(String(c)))); const hi = aoa.indexOf(hdr);
+      const row = hdr.map(c => /생산일|Ngày SX/.test(String(c)) ? '2026-10-25' : /양품|SL đạt/.test(String(c)) ? 500 : /품목군|Nhóm/.test(String(c)) ? 'Regular' : /설비번호|Số máy/.test(String(c)) ? '1' : null);
+      const wb2 = X.utils.book_new(); X.utils.book_append_sheet(wb2, X.utils.aoa_to_sheet(aoa.slice(0, hi + 1).concat([row])), n);
+      const H = ['Date', 'Condition', 'Customer', 'Country', 'Market', 'Po No', 'Po No 2', 'Item No', 'Manila No', 'kind goods', 'color', 'RFID', 'kind 2', 'color 2', 'Pcs', 'Set', 'Cs', 'Due', 'Rate', 'Packed', 'Diff', 'Y/N', 'Mark'];
+      X.utils.book_append_sheet(wb2, X.utils.aoa_to_sheet([H, ['2026-10-21', '', 'TEST', 'USA', '', 'PO-R1', '', 'IT-R1', '0', 'Regular', '12', '0', '', '', 1200, 100, 5, '2026-12-01', '', 0, 0, '', ''], ['2026-10-21', '', 'TEST', 'USA', '', 'PO-R2', '', 'IT-R2', '0', 'Dial Mini', '24', '0', '', '', 2400, 100, 5, '2026-12-01', '', 0, 0, '', '']]), 'PO');
+      const back = X.read(X.write(wb2, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false });
+      const jobs = ERP.xl.analyze(back, {}); return { daily: (jobs.find(j => j.table === 'prod_log') || { rows: [] }).rows.map(o => o.division), po: jobs.filter(j => j.table === 'po').reduce((a, j) => a.concat(j.rows.map(o => o.kind)), []) }; });
+    eq('ERP 일보 양식의 품목군 Regular → Dial · 생산관리 파일의 수주 품목군 Regular → Dial · Dial Mini → Mini', r2, { daily: ['Dial'], po: ['Dial', 'Mini'] });
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

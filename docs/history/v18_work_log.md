@@ -470,8 +470,42 @@
 - 전체 (이 PC, Windows, 2026-10-28): v18 184 · v17 169 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.13 `dcde69b` 로 업그레이드 시험 포함, 기대값 고친 뒤) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
 - 설치 파일 `ColorPencil-ERP-Setup-1.13.14.exe`: 114,199,732 bytes, SHA-256 `b84361e20264ae924382e667e0caaa2b34e0683f8bab24f7af073b90ab7071c0` (electron-builder `--win dir` + NSIS 3.12). app.asar 의 calc.js · p_production.js · p_dashboard.js · core.js 등 = 소스와 같음, 버전 1.13.14.
 - 데모 `ERP_Demo.html`: 7,921,225 bytes, SHA-256 `b8858eb44b477d8baf32d1b12361abfb09c433b50b420bc55a49b532eb7b6478`.
+- Release v1.13.14: Claude 가 실행 (2026-10-28, Actions #13 성공, `71dafb2`, `releases/latest` = v1.13.14). `ColorPencil-ERP-Setup-1.13.14.exe` 114,283,630 bytes · SHA-256 `58c1333f31949990061ffd148d5496647732df39b2547265cd5248384ce0f4d2` (GitHub 에서 빌드) · `ERP_Demo.html` (이 PC 데모와 같음) · `latest.json` (1.13.14, 크기 · 지문이 Release 설치 파일과 같음). 이 PC 의 ERP 는 1.13.14 로 올리지 않고 1.13.15 로 한 번에 (ERP 를 두 번 켜지 않게).
 
 ### 같은 날 사용자 요청 (다음 버전 1.13.15): 사출 생산일보 그대로 올리기 · 원재료 사용량
 - 사용자: "@…\2026.10.27.xlsx 사출 생산일보이다. 생산 수량에 - 중량수량을 수량으로 잡고 호기는 기계 번호/ 종류품명은 품목명이고 품명은 barrel 은 wip01 spoon 은 wip04 erp code 와 매칭시키고 색상명은 barrel blue 이면 bom에서 검색해소 코드와 erp코드 매칭시켜라. pp/ps/hdpe는 무시한다. 기본적인 데이터 A4:p55 는 기록해두고 사출 자료분석에만 사용한다. q1:v58 의 자료는 무시. 중량(kg) 에 있는 데이터는 spoon-ps / nose cone-pp / case-pp / barrel-pp / holder-hdpe / core-ldpe 원재료 사용량이다. ps/pp/hdpe/ldpe 일별 월별 년별 사용량만 따로 표시준다."
 - 분석 (코드 변경 없음): 시트 '10- 27' — A1 날짜, 4행 한국어 머리글 (A 호기 · B 주야 · C 종류품명 · D 품명 · E 색상명 · F 가동시간 · G 캐비티 · H 캐비티2 · I 톤수 (기계 모델) · J CT · K 중량(kg) · L 사출시간 · M Shot수 · N 수량 = Shot × 캐비티2 · O 수리현황 · P 중량수량 = 중량 ÷ 개당 g), 5 ~ 55행 = 호기 1 ~ 25 × 주야, 56행 합계. 지금 ERP 는 unknown. ERP 품목: barrel = WIP01-<품목군>-BRR, spoon = WIP04-…-SP, nose cone = WIP02-…-NCONE, holder · case = WIP03-…-HD (품목 이름 = 색). 이 파일: Mini barrel MAHOGANY BM42 · SCARLET BM03 · YELLOW BM14, dial barrel YELLOW ORANGE BR15 · BLUEGREEN BR06 은 하나씩, dial · regular barrel BLUE · PINK · BLACK 은 BR · FD 두 계열, spoon AQUAGREEN · TAN · nose cone BLACK · BROWN 은 품목에 없음, 색 칸 PP · PS · HDPE 는 매칭 안 함. 예전 사출 이력 (1-02 ~ 10-19, 8,635줄) 은 색 없이 'Barrel' 같은 부품 이름 · 원료 PP · GPPS · HDPE · raw_kg.
 - 사용자 답 (질문 4개): 현장 재고에도 넣기 · dial · regular barrel 은 BR 계열 · 원재료 사용량은 생산 관리 + 종합 현황 · nose cone · holder · case 도 같이 맞추기.
+
+## 1.13.15 (2026-10-28) — 사출 생산일보 그대로 올리기 · 원재료 사용량 · 품목군 Regular → Dial
+- 사용자 요청과 질문 4개의 답은 위 (1.13.14 끝 '같은 날 사용자 요청'). 같은 날 이어서: "Regular 는 Dial 로 바꾼다. 명칭이 Dial Mini 이면Mini / Dial이나 Regular 이면 Dial 이다."
+
+### 정한 것
+- 사출 생산일보 = 새 양식 `inj-daily` → 생산 일보 표의 사출 줄 (출처 daily-report, 날짜 범위 바꾸기 — 같은 날을 다시 올리면 그날 사출 줄을 바꿈). 생산 수량 = 중량수량 (파일 칸이 '중량 ÷ 개당 g' 수식이라 소수 → 반올림). A4:P55 의 나머지 칸 (가동시간 · 캐비티 · 캐비티2 · 톤수 · CT · 사출시간 · Shot수 · 수량 · 수리현황) 은 기록만 (사출 분석용). Q 칸 ~ 오른쪽 요약은 읽지 않음.
+- 품목 맞추기: 품명 (부품) → 단계 (barrel WIP01 · nose cone WIP02 · holder · case WIP03 · spoon WIP04), 종류품명 (품목군) → 계열 (`INV.lineOfDiv`), 색상명 = 품목 이름. 같은 색이 BR · FD 두 계열인 Dial barrel 은 BR (사용자 답). 색 칸이 PP · PS · HDPE 같은 원료 이름이면 색으로 맞추지 않음 ("pp/ps/hdpe는 무시"), 색 없는 부품은 그 계열 품목 하나로 (Pencil holder → PH · Mini holder → MH · spoon MS · RSP · Pencil case → case).
+- 못 맞춘 줄은 생산 일보에만 들어가고 재고에는 안 들어감 → 생산 반영의 해결할 항목 (`INJ|품목군|부품`). 10-27 ERP CODE '일보만 → 새 품목' 으로 생긴 부품 이름의 일반 품목 (Barrel · Spoon · Nose cone · Holder) 으로 들어가지 않게 코드를 비움 (이 PC 사본에서 찾음).
+- 원재료 사용량: 사출 줄의 원료 kg (부품별 원료 — spoon PS · nose cone · case · barrel PP · holder HDPE · core LDPE, 예전 이력의 GPPS · HIPS 는 PS) 를 일별 (한 달) · 월별 (한 해) · 년별로. 생산 관리 탭 + 종합 현황 위젯 (사용자 답). 원부자재 재고에서는 빼지 않음 (11차 그대로).
+- 품목군 이름: Regular · regular · Dail · dial → Dial, Dial Mini · Mini Dial → Mini. 일보 · 수주를 읽을 때와 일보 입력 때 정리, 품목군 고르기 목록에서 Regular 뺌. 품목 이름의 REGULAR · ERP CODE 의 REG 는 품목군이 아니라 그대로.
+
+### 한 것
+- `app/js/xl.js` 인식기 `inj-daily` (머리글 칸 이름으로 칸 찾기, `RAW_OF_INJ`, 미리보기 알림에 못 맞춘 줄과 까닭), 생산관리 파일 수주 품목군 `fixDiv`.
+- `app/js/inv.js` `INV.injItem(부품, 품목군, 색)`, `PART_OF_INJ` 에 CASE → WIP03.
+- `app/js/schema.js` `ERP.normDiv`, `ERP.fillDiv` 가 품목군 정리도, 일보 칸 `cavity2` · `shot_qty` · `inj_time`, `DIVS` 에서 Regular 뺌.
+- `app/js/calc.js` `C.RAW_KEYS` · `C.rawKey` · `C.rawUse` · `C.rawTable`.
+- `app/js/p_production.js` 탭 '원재료 사용량' (`ERP.rawTableEl` · `ERP.rawViews`, 엑셀 내보내기), `app/js/p_dashboard.js` 위젯 `raw_use`.
+- 버전 1.13.15.
+
+### 시험
+- 먼저 만든 시험 (v17 7-12 · 7-13장): 고치기 전 5개 실패 (사출 일보 = unknown · 줄 없음 · 알림 없음 · 원재료 계산 없음, 품목군 정리 함수 없음), 169 통과. 고친 뒤 처음 184 / 185 — 시험 자료의 예전 이력 한 줄이 기초재고 기준일 뒤라 해결할 항목이 하나 더 (시험 자료 탓) → 그 줄을 06-20 으로 옮겨 185 통과.
+  - 자료: 품목 BM03 SCARLET · BR08 BLUE · FD10 BLUE · SP-T1 TAN · NP-B BLACK · PH · MH · case, 공장 양식 그대로의 사출 일보 (A1 날짜 · 4행 머리글 · 호기 1 ~ 10 · 합계 줄 · Q 칸) — Mini barrel (중량수량 소수) · dial / regular barrel · pencil spoon (수리현황) · 색 칸 PS · HDPE · nose cone · Dial Mini barrel · case (색 없음) · core (품목 단계 없음). 맞춘 품목만 생산 입고 (BM03 = 21,107 + 8,000), 부품 이름의 일반 품목 'Barrel' 을 더해도 못 맞춘 줄은 들어가지 않음, 원재료 탭 일별 · 월별 (6월 이력 GPPS 100 kg = PS) · 년별 · 위젯 · 베트남어. 7-13: 이름 정리 14가지 · 고르기 목록 · ERP 일보 양식 · 생산관리 파일 수주 품목군.
+- 이 PC 자료 사본 (구글 · 인터넷 막음) 에 10-27 사출 일보 (`D:\System\Download\2026.10.27.xlsx`, 저장소에는 넣지 않음): 26줄 · 맞춘 19줄 (BR08 · BR15 · BR12 · BR10 · BR06 · BM42 · BM03 · BM14 · MS · RSP · PH · MH) · 못 맞춘 7줄 (Pencil barrel 색 PP 3 · Pencil spoon AQUAGREEN · TAN · Pencil nose cone BLACK · BROWN). 처음에는 못 맞춘 barrel 줄이 일반 품목 'Barrel' 로 재고에 들어가 코드를 비우게 고침 (시험 7-12 에 더함). 현장 재고 사출 4,417,270 → 5,264,458 (+847,188), 마이너스 49 → 48. 원재료 2026-10: PS 4,651.1 · PP 12,258.8 · HDPE 823.2 kg, 2026 년: PS 202,877.8 · PP 497,749.6 · HDPE 21,769.6 kg.
+
+### 시험 · 설치 파일 · 데모 (이 PC 에서 만듦, 2026-10-28)
+- 전체 (이 PC, Windows, 2026-10-28): v18 184 · v17 185 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.14 `71dafb2` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.15.exe`: 114,204,560 bytes, SHA-256 `93f93ae808377703671ca40934cecb457e652bc6b5f4510611df9bd503e54fb6` (electron-builder `--win dir` + NSIS 3.12). app.asar 의 schema.js · xl.js · p_production.js · calc.js · p_dashboard.js · inv.js · core.js 등 = 소스와 같음, 버전 1.13.15.
+- 데모 `ERP_Demo.html`: 7,937,529 bytes, SHA-256 `a93ae493e61248557ddc0d6db10a9b6974bf1abbc638de0ae9f3b541a4a79447`.
+
+### 실제 ERP 자료: 품목군 Regular → Dial (사본 먼저, 2026-10-28)
+- 이 PC 자료 (읽기만): 품목군 이름 규칙 (`ERP.normDiv`) 이 바꾸는 줄 = 생산 일보 221줄, 모두 사출 누적 이력 (07-21 ~ 10-19) — Regular 87 · regular 24 · dial 110. 수주 · 설비 · 코드 연결 (0줄) · 설정 (고른 품목군) 에는 없음. 품목 이름 REGULAR (1) · 포장 설비 이름 REGULAR (11줄) · 반제품 분류 DIAL 은 품목군이 아니라 그대로. 소문자 mini 258 · pencil 668 · click 23 은 규칙 밖이라 그대로 (열쇠가 같아 화면에서는 이미 한 묶음).
+- 사본 (구글 · 인터넷 막음, `08_erp_code/scripts/div_dial.js --copy`): 221줄 → Dial, 바뀐 표 = 생산 일보 · 칸 = 품목군 221개뿐, 다르게 바뀐 줄 0. 생산 반영 (154 · 341) · 해결할 항목 75 (같은 열쇠) · 없는 부품 40 · 현장 재고 (조립 13,344,627 · 리필 8,938,903 · 사출 4,417,270 · 포장 CT 1,599 · SET 7,200) · 마이너스 49 · 원재료 (2026 PS 202,602.4 · PP 496,209.6 · HDPE 21,683.7 kg) 모두 그대로. 생산 관리 사출 2026 "Dial 57,800,856 · Regular 3,163,849" → "Dial 60,964,705" (합 460,451,316 그대로). 화면 오류 0.
+- 실제 ERP 에는 1.13.15 로 올린 뒤 (이름 규칙이 1.13.15 에 있음).

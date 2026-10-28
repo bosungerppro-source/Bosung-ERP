@@ -14,14 +14,17 @@
   ];
   ERP.procName = (id) => { const p = ERP.PROC.find(x => x.id === id); return p ? L(p.ko, p.vi) : (id || ''); };
   ERP.procColor = (id) => { const p = ERP.PROC.find(x => x.id === id); return p ? p.color : '#8A93A0'; };
+  // 1.13.15 (사용자 2026-10-28 "Regular 는 Dial 로 바꾼다. 명칭이 Dial Mini 이면 Mini / Dial이나 Regular 이면 Dial 이다"): 품목군 이름 — 대소문자 · 띄어쓰기 무시
+  ERP.normDiv = (d) => { const s = String(d === null || d === undefined ? '' : d).trim(); const k = s.toLowerCase().replace(/[\s_-]+/g, ' ');
+    if (/^(dial mini|mini dial)$/.test(k)) return 'Mini'; if (/^(dial|dail|regular|regullar)$/.test(k)) return 'Dial'; return s; };
   // 1.13.13 (사용자 2026-10-28 "생산 관리에 종이 권취 공정의 품목군은 Glass 이다"): 공정마다 정해진 품목군 — 일보 줄의 품목군이 비었을 때만 채운다
-  // (현장 일일 생산일보 · 누적 이력 · ERP 일보 양식 · 일보 입력 모두 여기로)
+  // (현장 일일 생산일보 · 사출 생산일보 · 누적 이력 · ERP 일보 양식 · 일보 입력 모두 여기로). 1.13.15: 품목군 이름도 여기서 정리 (normDiv)
   const PROC_DIV = { WRP: 'Glass' };
-  ERP.fillDiv = (r) => { if (r && !String(r.division || '').trim() && PROC_DIV[r.process]) r.division = PROC_DIV[r.process]; return r; };
+  ERP.fillDiv = (r) => { if (!r) return r; const d = ERP.normDiv(r.division); if (d) r.division = d; else if (PROC_DIV[r.process]) r.division = PROC_DIV[r.process]; return r; };
 
   const procOpts = () => ERP.PROC.map(p => ({ v: p.id, ko: p.ko, vi: p.vi }));
   const shiftOpts = [{ v: 'D', ko: '주간 (D)', vi: 'Ca ngày (D)' }, { v: 'N', ko: '야간 (N)', vi: 'Ca đêm (N)' }];
-  const DIVS = ['Dial', 'Mini', 'Pencil', 'Glass', 'Regular', 'Mixed', 'Lead', 'Peel', 'Bic', 'Freedom'];
+  const DIVS = ['Dial', 'Mini', 'Pencil', 'Glass', 'Mixed', 'Lead', 'Peel', 'Bic', 'Freedom'];   // 1.13.15: Regular 는 Dial (ERP.normDiv)
 
   const T = ERP.TABLES = {
     // multi: PO 시트에는 키가 같은 줄이 여러 개 있을 수 있다 → 합치지 않고 순번으로 맞춘다 (DB.upsert)
@@ -79,8 +82,11 @@
       { k: 'stop_min', ko: '정지(분)', vi: 'Dừng máy (phút)', t: 'n', list: 1 },
       { k: 'stop_reason', ko: '정지 사유', vi: 'Lý do dừng', t: 't' },
       { k: 'cavity', ko: '캐비티', vi: 'Cavity', t: 'n' },
+      { k: 'cavity2', ko: '캐비티2', vi: 'Số lượng con hàng 2', t: 'n' },   // 1.13.15: 사출 생산일보의 칸 (기록 · 분석용)
       { k: 'shots', ko: '샷수', vi: 'Số shot', t: 'n' },
+      { k: 'shot_qty', ko: '수량 (Shot × 캐비티2)', vi: 'Số lượng (shot × cavity 2)', t: 'n' },
       { k: 'ct', ko: 'CT(초)', vi: 'CT (giây)', t: 'n' },
+      { k: 'inj_time', ko: '사출시간', vi: 'Thời gian ép', t: 'n' },
       { k: 'weight_kg', ko: '중량(kg)', vi: 'Khối lượng (kg)', t: 'n' },
       { k: 'raw_material', ko: '원료', vi: 'Nguyên liệu', t: 't' },
       { k: 'raw_kg', ko: '원료사용(kg)', vi: 'NL sử dụng (kg)', t: 'n' },

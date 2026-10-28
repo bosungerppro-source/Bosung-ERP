@@ -58,7 +58,7 @@
   const hasCell = (r, re) => r.some(x => typeof x === 'string' && re.test(x));
   const isoRe = /^\d{4}-\d\d-\d\d$/;
   const pick = (o) => { const out = {}; Object.keys(o).forEach(k => { if (o[k] !== null && o[k] !== undefined && o[k] !== '') out[k] = o[k]; }); return out; };
-  const fixDiv = (d) => ({ Dail: 'Dial', regullar: 'Regular', Regullar: 'Regular' }[d] || d);
+  const fixDiv = (d) => (d === null || d === undefined ? d : ERP.normDiv(d));   // 1.13.15: 품목군 이름 규칙 (Dail · Regular → Dial, Dial Mini → Mini)
 
   // ---------------- generic table export ----------------
   XL.exportRows = function (table, rows, cols) {
@@ -250,7 +250,7 @@
     const hi = findRow(M, r => hasCell(r, /^Po No$/i), 0, 6); const rows = [];
     for (let i = hi + 1; i < M.length; i++) {
       const r = M[i]; if (!S(r, 0) || !isoRe.test(String(S(r, 0)))) continue;
-      rows.push(pick({ date: S(r, 0), condition: T(S(r, 1)), customer: T(S(r, 2)), country: T(S(r, 3)), market: T(S(r, 4)), po_no: T(S(r, 5)), po_no2: T(S(r, 6)), item_no: T(S(r, 7)), manila_no: T(S(r, 8)), kind: T(S(r, 9)), color: T(S(r, 10)),
+      rows.push(pick({ date: S(r, 0), condition: T(S(r, 1)), customer: T(S(r, 2)), country: T(S(r, 3)), market: T(S(r, 4)), po_no: T(S(r, 5)), po_no2: T(S(r, 6)), item_no: T(S(r, 7)), manila_no: T(S(r, 8)), kind: fixDiv(T(S(r, 9))), color: T(S(r, 10)),
         rfid: T(S(r, 11)), kind2: T(S(r, 12)), color2: T(S(r, 13)), pcs: N(S(r, 14)) || 0, sets: N(S(r, 15)) || 0, cs: N(S(r, 16)) || 0, due: T(S(r, 17)), rate: N(S(r, 18)), packed: N(S(r, 19)) || 0, diff: N(S(r, 20)), yn: T(S(r, 21)), mark: T(S(r, 22)) }));
     }
     const noPo = rows.filter(r => !String(r.po_no || '').trim());
@@ -503,6 +503,34 @@
     const label = L('생산 일보 · ', 'Báo cáo SX · ') + ERP.procName(kind) + ' ' + (date || L('(날짜 없음)', '(chưa có ngày)')) + (shift === 'N' ? L(' · 야간', ' · ca đêm') : '') + (workplace ? ' · ' + workplace : '');
     return [{ table: 'prod_log', rows, mode: 'range', proc: kind, label, hasShift: true, date, needDate: !date, include: rows.length > 0 && !!date, overlap: XL.overlapOf(rows),
       note: date ? '' : L('생산일자를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày sản xuất — hãy nhập ngày để áp dụng.') }];
+  });
+
+  // 1.13.15 (사용자 2026-10-28): 사출 생산일보 ('사 출 생 산 현 황' — 머리글 줄 호기 · 종류품명 · 품명 · 색상명 · 중량(kg) · 중량수량 …, 날짜 A1). 칸은 머리글 이름으로 찾고 오른쪽 요약 (Q 칸 ~) 은 읽지 않는다.
+  //   생산 수량 = 중량수량 · 호기 = 설비번호 · 종류품명 = 품목군 · 품명 + 품목군 + 색상명 → 재고 품목 (INV.injItem) · 중량(kg) = 부품별 원료 사용량 (원부자재 재고에서는 빼지 않음 — 11차)
+  const injHead = (r) => hasCell(r, /^호기$/) && hasCell(r, /^종류품명$/) && hasCell(r, /^중량수량$/);
+  const RAW_OF_INJ = { BARREL: 'PP', NOSECONE: 'PP', NOSE: 'PP', CASE: 'PP', SPOON: 'PS', HOLDER: 'HDPE', CORE: 'LDPE' };   // 사용자 "spoon-ps / nose cone-pp / case-pp / barrel-pp / holder-hdpe / core-ldpe"
+  const INJ_WHY = { part: ['품목 단계를 모르는 부품', 'chưa có công đoạn của chi tiết'], none: ['품목에 없는 색', 'không có mã màu này'], many: ['같은 색이 여러 개', 'nhiều mã cùng màu'], raw: ['색 칸이 원료 이름', 'ô màu là tên NL'], nocolor: ['색 없음', 'không có màu'] };
+  D('inj-daily', (n, M) => findRow(M, injHead, 0, 12) >= 0, (M) => {
+    const hi = findRow(M, injHead, 0, 12); const hd = M[hi]; const at = (re) => hd.findIndex(x => typeof x === 'string' && re.test(x.trim())); const V = (r, i) => (i >= 0 ? S(r, i) : null);
+    const c = { no: at(/^호기$/), div: at(/^종류품명$/), part: at(/^품명$/), color: at(/^색상명$/), run: at(/^가동시간$/), cav: at(/^캐비티$/), cav2: at(/^캐비티\s*2$/), ton: at(/^톤수$/), ct: at(/^CT$/i), kg: at(/^중량\s*\(kg\)$/i),
+      inj: at(/^사출시간$/), shots: at(/^Shot\s*수$/i), qty: at(/^수량$/), fix: at(/^수리현황$/), wq: at(/^중량수량$/) };
+    const date = ERP.fmt.parseDate(S(M[0], 0)) || dailyDate(M) || ''; const rows = [], miss = [], noRaw = new Set();
+    const cap = (s) => { const t = String(s === null || s === undefined ? '' : s).trim(); return t ? t.charAt(0).toUpperCase() + t.slice(1) : null; };
+    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; const no = N(V(r, c.no)); if (no === null) continue;   // 합계 · 주간 · 야간 줄은 호기가 없다
+      const wq = Math.round(N(V(r, c.wq)) || 0), kg = N(V(r, c.kg)) || 0; if (!wq && !kg) continue;   // 생산이 없는 줄. 중량수량은 수식 (중량 ÷ 개당 g) 이라 소수 → 엑셀에 보이는 대로 반올림
+      const part = cap(V(r, c.part)), div = ERP.normDiv(cap(V(r, c.div))), color = T(V(r, c.color)); const raw = RAW_OF_INJ[String(part || '').toUpperCase().replace(/[^A-Z0-9]/g, '')] || null;
+      const m = ERP.inv && ERP.inv.injItem ? ERP.inv.injItem(part, div, color) : {};
+      if (!m.item && INJ_WHY[m.why]) miss.push(no + L('호기 ', ' máy ') + [part, div, color].filter(Boolean).join(' · ') + ' (' + L(INJ_WHY[m.why][0], INJ_WHY[m.why][1]) + (m.cands ? ': ' + m.cands.join(' · ') : '') + ')');
+      if (kg && !raw && part) noRaw.add(part);
+      // 못 맞춘 줄은 코드를 비운다 — 부품 이름의 일반 품목 (10-27 ERP CODE 의 'Barrel' 등) 으로 재고에 들어가지 않고 생산 반영의 '해결할 항목' 에 (사용자가 고른 "못 맞춘 줄은 해결할 항목")
+      rows.push(pick({ date, process: 'INJ', shift: shiftCell(V(r, c.no + 1), 'D'), source: 'daily-report', machine_no: String(no), machine: T(V(r, c.ton)), division: div, part, name: color, code: m.item ? m.item.code : null, item: m.item ? m.item.code : null,
+        work_min: N(V(r, c.run)) !== null ? N(V(r, c.run)) * 60 : null, cavity: N(V(r, c.cav)), cavity2: N(V(r, c.cav2)), ct: N(V(r, c.ct)), inj_time: N(V(r, c.inj)), shots: N(V(r, c.shots)), shot_qty: N(V(r, c.qty)),
+        weight_kg: kg || null, ok_qty: wq, ok_ea: wq, ng_qty: 0, raw_material: kg ? raw : null, raw_kg: raw && kg ? kg : null, remark: T(V(r, c.fix)) }));
+    }
+    rows.forEach(o => ERP.fillDiv(o));
+    const note = [miss.length ? L('품목을 못 맞춘 줄 ' + miss.length + '개 (생산 일보에는 들어가고 재고에는 안 들어감): ', miss.length + ' dòng chưa khớp mã (vào báo cáo, không vào tồn): ') + miss.join(' / ') : '',
+      noRaw.size ? L('원료를 모르는 부품: ', 'Chi tiết chưa rõ NL: ') + Array.from(noRaw).join(' · ') : '', date ? '' : L('날짜 (A1) 를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày (A1) — hãy nhập ngày.')].filter(Boolean).join(' · ');
+    return [{ table: 'prod_log', rows, mode: 'range', proc: 'INJ', label: L('사출 생산일보 · ', 'Báo cáo ép nhựa · ') + (date || L('(날짜 없음)', '(chưa có ngày)')), hasShift: true, date, needDate: !date, include: rows.length > 0 && !!date, overlap: XL.overlapOf(rows), note }];
   });
 
   // ERP 일보 양식 ("일보 양식 받기"): 시트 이름 prod_<공정>, 머리글 = 생산일 · 주/야 · 그 공정의 입력 칸 (한국어/베트남어)

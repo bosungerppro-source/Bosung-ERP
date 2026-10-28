@@ -320,7 +320,27 @@
     return { code: '', name: '', conf: 'none', how: 'none', cands: sc.slice(0, 6).map(x => x[0].code) };
   }
   INV.pickPart = pickPart;
-  const PART_OF_INJ = { BARREL: 'WIP01', NOSECONE: 'WIP02', NOSE: 'WIP02', HOLDER: 'WIP03', PLUG: 'WIP03', SPOON: 'WIP04' };
+  const PART_OF_INJ = { BARREL: 'WIP01', NOSECONE: 'WIP02', NOSE: 'WIP02', HOLDER: 'WIP03', PLUG: 'WIP03', CASE: 'WIP03', SPOON: 'WIP04' };
+  /** 1.13.15 (사용자 2026-10-28 사출 생산일보 "품명은 barrel 은 wip01 spoon 은 wip04 erp code 와 매칭 … 색상명은 barrel blue 이면 bom에서 검색해서 코드와 erp코드 매칭"):
+   *  사출 부품 (품명) + 품목군 (종류품명) + 색상명 → 품목. 단계 = PART_OF_INJ, 계열 = 품목군, 품목 이름 = 색. 같은 색이 여럿이면 Dial barrel 은 BR 계열 (사용자 "BR 계열").
+   *  색 칸이 비었거나 원료 이름 (PP · PS · HDPE …, 사용자 "pp/ps/hdpe는 무시") 이면 색 없는 부품 (홀더 · 케이스) 만: 이름에 계열 · 부품이 든 품목 → 부품 이름 그대로인 품목 → 그 계열에 하나뿐인 품목.
+   *  → { item } 또는 { why: 'part' (단계 모르는 부품) · 'none' (품목에 없는 색) · 'many' (cands) · 'raw' (색 칸이 원료 이름) · 'nocolor' } */
+  const RAW_WORD = /^(PP|PS|GPPS|HIPS|HDPE|LDPE|ABS|PE|PVC|PET)$/;
+  INV.injItem = function (part, div, color) {
+    const stg = PART_OF_INJ[normName(part)]; if (!stg) return { why: 'part' };
+    const line = INV.lineOfDiv(div); const c = byStageLine().get(stg + '|' + line) || []; const col = normName(color);
+    if (col && !RAW_WORD.test(col)) {
+      const hit = c.filter(x => normName(x.name) === col);
+      if (hit.length === 1) return { item: hit[0] };
+      if (hit.length > 1) { const br = line === 'REG' && stg === 'WIP01' ? hit.filter(x => /^BR/i.test(String(x.code))) : []; return br.length === 1 ? { item: br[0] } : { why: 'many', cands: hit.map(x => x.code) }; }
+      return { why: 'none' };
+    }
+    const pn = normName(part); const w = LINE_WORD[line];
+    const named = w ? c.filter(x => toks(x.name).includes(w) && normName(x.name).includes(pn)) : []; if (named.length === 1) return { item: named[0] };
+    const own = c.filter(x => normName(x.name) === pn); if (own.length === 1) return { item: own[0] };
+    if (c.length === 1) return { item: c[0] };
+    return { why: col ? 'raw' : 'nocolor' };
+  };
   /** suggestions for a daily-report code that is not an item code */
   INV.suggestDaily = function (proc, div, src, name, remark) {
     const out = []; const add = (r, conf, how) => { if (r && r.code && !out.some(x => x.code === r.code)) out.push({ code: r.code, name: r.name, conf, how }); };

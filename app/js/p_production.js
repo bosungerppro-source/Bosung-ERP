@@ -302,6 +302,36 @@
     host.append(h('p', { class: 'help' }, L('설비 마스터는 일보 입력 시 설비번호 자동완성에 사용됩니다. 기록이 없는 설비는 "사용"을 해제하세요.', 'Danh mục máy dùng để gợi ý số máy khi nhập báo cáo. Bỏ chọn "Đang dùng" với máy không còn chạy.')), g.el);
   }
 
+  // ------------ tab: raw (1.13.15 — 원재료 사용량: 사출 일보의 PS · PP · HDPE · LDPE kg, 일별 · 월별 · 년별 — 사용자 "ps/pp/hdpe/ldpe 일별 월별 년별 사용량만 따로 표시준다") ------------
+  /** 원료 × 기간 표 (가로 = 날짜 · 달 · 연도, 세로 = 원료 + 합계 — 일별 · 월별 생산량 표와 같은 모양). 종합 현황 '원재료 사용량' 위젯도 이 표 */
+  ERP.rawTableEl = function (t, view, ref) {
+    const v1 = (x) => (x ? F.n(x, 1) : '–');
+    const colHead = (c) => (view === 'day' ? h('th', { class: 'num' }, String(+c.slice(8, 10)), h('small', F.dow(c))) : h('th', { class: 'num' }, view === 'month' ? L(+c.slice(5, 7) + '월', 'T' + (+c.slice(5, 7))) : c));
+    return h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl dt' },
+      h('thead', h('tr', h('th', L('원료', 'NL')), h('th', { class: 'num' }, view === 'day' ? L('월 합계', 'Tổng tháng') : view === 'month' ? ref + L(' 합계', ' tổng') : L('합계', 'Tổng')), t.cols.map(colHead))),
+      h('tbody', C.RAW_KEYS.map(k => h('tr', h('td', h('b', k)), h('td', { class: 'num' }, h('b', v1(t.tot[k]))), t.cols.map(c => h('td', { class: 'num' }, v1(t.cell[k][c]))))),
+        h('tr', { class: 'tot' }, h('td', L('합계', 'Tổng')), h('td', { class: 'num' }, v1(t.grand)), t.cols.map(c => h('td', { class: 'num' }, v1(t.colTot[c])))))));
+  };
+  ERP.rawViews = () => [['day', L('일별', 'Theo ngày')], ['month', L('월별', 'Theo tháng')], ['year', L('년별', 'Theo năm')]];
+  function rawTab(host) {
+    const ds = Object.keys(C.rawUse()).sort(); const last = ds[ds.length - 1] || C.latestProdDate();
+    const st = ERP.state.praw = ERP.state.praw || {}; if (!st.view) st.view = 'day'; if (!st.month) st.month = String(last).slice(0, 7); if (!st.year) st.year = String(last).slice(0, 4);
+    const addM = (ym, k) => { const d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + k, 1)); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); };
+    const ref = st.view === 'day' ? st.month : st.year; const t = C.rawTable(st.view, ref);
+    const move = (k) => { if (st.view === 'day') st.month = addM(st.month, k); else st.year = String(+st.year + k); ERP.render(); };
+    const bar = h('div', { class: 'toolbar' }, st.view === 'year' ? null : [h('button', { class: 'btn', onclick: () => move(-1) }, '‹'),
+      st.view === 'day' ? h('input', { class: 'inp', type: 'month', value: st.month, onchange: (e) => { if (e.target.value) { st.month = e.target.value; ERP.render(); } } }) : h('b', { style: { padding: '0 6px' } }, st.year),
+      h('button', { class: 'btn', onclick: () => move(1) }, '›')],
+      h('div', { class: 'seg' }, ERP.rawViews().map(o => h('button', { type: 'button', class: 'btn sm' + (st.view === o[0] ? ' primary' : ''), 'data-raw-view': o[0], onclick: () => { st.view = o[0]; ERP.render(); } }, o[1]))));
+    const title = L('원재료 사용량 (사출, kg) · ', 'NL sử dụng (ép, kg) · ') + (st.view === 'year' ? L('연도별', 'theo năm') : ref);
+    const colName = (c) => (st.view === 'month' ? +c.slice(5, 7) + L('월', '') : c);
+    host.append(bar, h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', title),
+      h('button', { class: 'btn sm', onclick: () => ERP.xl.exportAoa('raw_use_' + (st.view === 'year' ? 'years' : ref), [L('원료', 'NL'), L('합계', 'Tổng')].concat(t.cols.map(colName)), C.RAW_KEYS.map(k => [k, t.tot[k]].concat(t.cols.map(c => t.cell[k][c] || 0))).concat([[L('합계', 'Tổng'), t.grand].concat(t.cols.map(c => t.colTot[c] || 0))])) }, L('엑셀', 'Excel'))),
+      t.grand ? ERP.rawTableEl(t, st.view, ref) : h('div', { class: 'empty' }, L('이 기간에 사출 원료 사용량이 없습니다.', 'Không có NL sử dụng (ép) trong kỳ này.')),
+      h('p', { class: 'help', style: { margin: '8px 0 0' } }, L('사출 생산일보의 중량(kg) — 부품별 원료 (spoon PS · nose cone · case · barrel PP · holder HDPE · core LDPE), 예전 이력은 그 줄의 원료 (GPPS 는 PS). 원부자재 재고에서는 빼지 않습니다.',
+        'Khối lượng (kg) của báo cáo ép — NL theo chi tiết (spoon PS · nose cone · case · barrel PP · holder HDPE · core LDPE), lịch sử cũ theo NL của dòng (GPPS = PS). Không trừ tồn NVL.'))));
+  }
+
   ERP.pages.production = { ko: '생산 관리', vi: 'Quản lý sản xuất', render(root) {
     const st = ERP.state.prodTab = ERP.state.prodTab || 'log';
     root.appendChild(ERP.pageHead([L('생산 관리', 'Quản lý sản xuất'), ERP.sampleChip ? ERP.sampleChip('prod_log') : null], L('공정별 생산일보 조회 · 입력 · 일별 · 월별 생산량 · 공정 설정', 'Báo cáo ngày theo công đoạn: xem · nhập · sản lượng theo ngày · cài đặt công đoạn'),
@@ -310,10 +340,10 @@
     const pnOf = (s) => { const a = s ? procsOf(s) : ['ASM']; return a.length === 1 ? ERP.procName(a[0]) + ' ' : ''; };   // 1.13.14: 공정이 여럿이면 이름 없이
     const tabs = [{ id: 'log', label: L('일보 조회/관리', 'Danh sách báo cáo') }, { id: 'entry', label: L('일보 입력', 'Nhập báo cáo') },
       { id: 'analysis', label: L('일별 ' + pnOf(ERP.state.pan) + '생산량', 'Sản lượng ' + pnOf(ERP.state.pan) + 'theo ngày') }, { id: 'monthly', label: L('월별 ' + pnOf(ERP.state.pmon) + '생산량', 'Sản lượng ' + pnOf(ERP.state.pmon) + 'theo tháng') },
-      { id: 'machines', label: L('설비', 'Máy móc') }, { id: 'procs', label: L('공정 설정', 'Cài đặt công đoạn') }];
+      { id: 'raw', label: L('원재료 사용량', 'NL sử dụng') }, { id: 'machines', label: L('설비', 'Máy móc') }, { id: 'procs', label: L('공정 설정', 'Cài đặt công đoạn') }];
     const host = h('div', { class: 'card' });
     root.append(ERP.tabs(tabs, st, (id) => { ERP.state.prodTab = id; ERP.render(); }), host);
-    ({ log: logTab, entry: entryTab, analysis: analysisTab, monthly: monthlyTab, machines: machinesTab, procs: procTab })[st](host);
+    ({ log: logTab, entry: entryTab, analysis: analysisTab, monthly: monthlyTab, raw: rawTab, machines: machinesTab, procs: procTab })[st](host);
   } };
 
 })();

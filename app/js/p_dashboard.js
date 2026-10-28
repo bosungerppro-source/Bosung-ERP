@@ -221,6 +221,16 @@
       return box((p ? L('월별 ' + p.ko + ' 생산량 · ', 'Sản lượng ' + p.vi + ' theo tháng · ') : L('월별 생산량' + (procs.length ? ' (' + pnames(procs, 'ko') + ')' : '') + ' · ', 'Sản lượng theo tháng' + (procs.length ? ' (' + pnames(procs, 'vi') + ')' : '') + ' · ')) + y, right, body,
         h('p', { class: 'help', style: { margin: '8px 0 0' } }, y + L('년 합계 ', ' tổng ') + F.n(d.grand) + ' ' + u + ' · ' + L('입력된 달 ', 'Số tháng có dữ liệu ') + act + L('개 · 월 평균 ', ' · TB/tháng ') + F.n(act ? d.grand / act : 0) + ' ' + u + ' · ' + L('생산일보 양품 기준', 'theo SL đạt của báo cáo')));
     } });
+  // 1.13.15 (사용자 2026-10-28 "ps/pp/hdpe/ldpe 일별 월별 년별 사용량만 따로 표시준다" — 생산 관리 + 종합 현황): 생산 관리 '원재료 사용량' 탭과 같은 표, 일별 (기준일의 달) · 월별 · 년별
+  reg('raw_use', { ko: '원재료 사용량 (사출)', vi: 'NL sử dụng (ép)', dko: 'PS · PP · HDPE · LDPE 사용량 (kg) — 일별 · 월별 · 년별 (사출 생산일보의 중량)', dvi: 'PS · PP · HDPE · LDPE (kg) theo ngày · tháng · năm', cat: 'prod', w: 4, sizes: [2, 3, 4], multi: true, defaults: { view: 'day' },
+    render(ctx, inst) {
+      const o = inst.o || {}; const view = o.view || 'day';
+      const S = wstate(inst.k, { month: ctx.ref.slice(0, 7), year: ctx.ref.slice(0, 4) }); const ref = view === 'day' ? S.month : S.year; const t = C.rawTable(view, ref);
+      const right = [view === 'year' ? null : nav(ref, () => { if (view === 'day') S.month = addM(S.month, -1); else S.year = String(+S.year - 1); ERP.render(); }, () => { if (view === 'day') S.month = addM(S.month, 1); else S.year = String(+S.year + 1); ERP.render(); }),
+        seg(ERP.rawViews(), view, (v) => { setOpt(inst.k, { view: v }); })];
+      return box(L('원재료 사용량 (사출, kg) · ', 'NL sử dụng (ép, kg) · ') + (view === 'year' ? L('연도별', 'theo năm') : ref), right,
+        t.grand ? ERP.rawTableEl(t, view, ref) : h('div', { class: 'empty' }, L('이 기간에 사출 원료 사용량이 없습니다', 'Không có NL sử dụng (ép) trong kỳ này')));
+    } });
   reg('trend30', { ko: '공정별 생산 추이 (30일)', vi: 'Xu hướng sản lượng (30 ngày)', dko: '최근 30일 공정별 일 생산량 (pcs 환산) 선 그래프', dvi: 'Biểu đồ 30 ngày theo công đoạn', cat: 'prod', w: 2, sizes: [2, 3, 4],
     render(ctx) { const ds = C.dailySeries(F.addDays(ctx.ref, -29), ctx.ref);
       return box(L('공정별 생산 추이 (최근 30일, pcs 환산)', 'Sản lượng 30 ngày (quy đổi pcs)'), null, ERP.chart({ type: 'line', data: { labels: ds.days.map(d => F.md(d)), datasets: ERP.PROC.map(p => ({ label: L(p.ko, p.vi), data: ds.series[p.id], borderColor: p.color, backgroundColor: p.color, borderWidth: 1.8, pointRadius: 0, tension: .25 })) }, options: { scales: { y: { ticks: { callback: short } }, x: { ticks: { maxTicksLimit: 10 } } } } }, true)); } });
