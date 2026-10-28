@@ -476,6 +476,9 @@
   const okRow = (r, i) => S(r, i) !== null && String(S(r, i)) !== '0';
   D('daily', (n, M) => !!dailyKind(M), (M, ctx) => {
     const kind = dailyKind(M); const date = dailyDate(M) || ''; const shift = ctx.shift || shiftOfName(ctx.sheet) || 'D'; const workplace = dailyPlace(M); const rows = [];
+    // 1.13.16 (사용자 2026-10-28 "생산관리에서 핫포일 스탬핑 전부 삭제 생산 품목에 넣지 않는다"): 핫포일 스탬핑 일보는 올리지 않는다 (까닭만 보임)
+    if (kind === 'STP') return [{ table: null, rows: [], proc: kind, include: false, label: L('핫포일 스탬핑 일보 ', 'Báo cáo in chuyển (Hot foil) ') + date,
+      skip: L('핫포일 스탬핑은 생산 관리에서 뺀 공정이라 올리지 않습니다 — 핫포일은 원부자재 (소모품) 재고에서 입출고로만 관리합니다.', 'Không tải: in chuyển (Hot foil) không còn là công đoạn sản xuất — giấy nhũ quản lý ở tồn NVL (vật tư tiêu hao) bằng nhập / xuất.') }];
     const base = (o) => rows.push(Object.assign({ date, process: kind, shift, source: 'daily-report', workplace: workplace || undefined }, pick(o)));
     if (kind === 'PCK') {
       // 열: 0 제품명/고객 품번 · 1 완제품(FG, CT) 코드 · 2 마니라(SG, SET) 코드 · 3 PO · … · 9 실적 set · 10 실적 CT · 11 실적 ea

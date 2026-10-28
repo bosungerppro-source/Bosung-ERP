@@ -285,7 +285,7 @@
           if (ERP.PROC.find(p => p.id === id)) { ERP.toast(L('이미 있는 코드입니다', 'Mã đã tồn tại'), 'warn'); return; }
           ERP.PROC.push({ id, ko: nko.value.trim(), vi: nvi.value.trim() || nko.value.trim(), en: id, color: ERP.palette[ERP.PROC.length % ERP.palette.length], unit: 'pcs', dash: true }); ERP.saveProcs(); draw(); ERP.toast(L('공정을 추가했습니다', 'Đã thêm công đoạn'), 'ok');
         } }, '+ ' + L('공정 추가', 'Thêm công đoạn')),
-          h('button', { class: 'btn', onclick: async () => { if (await ERP.confirm(L('공정 설정을 기본값(6개 공정)으로 되돌릴까요?', 'Khôi phục công đoạn mặc định?'))) { DB.setSetting('procs', null); location.reload(); } } }, L('기본값으로 되돌리기', 'Khôi phục mặc định'))));
+          h('button', { class: 'btn', onclick: async () => { if (await ERP.confirm(L('공정 설정을 기본값(5개 공정)으로 되돌릴까요?', 'Khôi phục công đoạn mặc định?'))) { DB.setSetting('procs', null); location.reload(); } } }, L('기본값으로 되돌리기', 'Khôi phục mặc định'))));
     }
     host.appendChild(wrap); draw();
   }

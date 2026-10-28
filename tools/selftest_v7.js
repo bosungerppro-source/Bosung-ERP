@@ -75,7 +75,6 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     for (const t of ['mat', 'entry', 'ledger', 'reorder', 'buy', 'outsource', 'floor', 'post', 'fentry', 'fledger', 'master', 'codes', 'check', 'legacy']) { await ev((x) => { ERP.goStock(x); ERP.render(); }, t); await page.waitForTimeout(250); }
     for (const t of ['stock', 'compare', 'post', 'codes', 'mat']) { await ev((x) => { ERP.state.matTab = x; ERP.goto('materials'); ERP.render(); }, t); await page.waitForTimeout(250); }
     for (const t of ['mrp', 'struct', 'asm', 'semi_stock', 'bom', 'recipes']) { await ev((x) => { ERP.state.bomTab = x; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }, t); await page.waitForTimeout(250); }
-    await ev(() => { ERP.state.asm = Object.assign(ERP.state.asm || {}, { kind: 'stp' }); ERP.render(); ERP.state.asm.kind = 'asm'; });
     for (const t of ['log', 'entry', 'analysis', 'monthly', 'machines', 'procs']) { await ev((x) => { ERP.state.prodTab = x; ERP.goto('production'); ERP.render(); }, t); await page.waitForTimeout(200); }
     await ev(() => { ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); ERP.state.dashEdit = false; ERP.render(); });
     for (const t of ['items', 'warehouses', 'partners', 'stock_open', 'uploads']) await ev((x) => { ERP.state.mst = { t: x }; ERP.goStock('master'); ERP.render(); }, t);
@@ -235,16 +234,16 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     ok('연결한 원료 R-102 도 차감하지 않음 (진단에 30 kg) · 원료 연결 목록 없음', (!m.r102 || !m.r102.use) && m.skip['R-102'] >= 30 && !m.raw.length && !m.rawUi, [m.r102, m.skip, m.raw, m.rawUi]);
     ok('연결한 코드는 목록에서 사라짐', !m.notItem.includes('INJ|Mini|holder') && !m.notItem.includes('REF|Mini|RM01012'), m.notItem);
     const plan = await ev(() => { const x = ERP.inv.asmPlan().find(p => p.parent === 'BM01002'); return [x.conf, x.parts.map(p => p.role + '=' + p.code + ':' + p.conf)]; });
-    eq('BM01002 조립 BOM 제안 = RM102 · AB102 · MH · MS (모두 확실)', plan, ['high', ['refill=RM102:high', 'barrel=AB102:high', 'holder=MH:high', 'spoon=MS:high']]);
+    eq('BM01002 조립 BOM 제안 = RM102 · BM02 (배럴 — 1.13.16 부터 스탬핑 배럴 AB102 아님) · MH · MS (모두 확실)', plan, ['high', ['refill=RM102:high', 'barrel=BM02:high', 'holder=MH:high', 'spoon=MS:high']]);
     await ev(() => ERP.db.addMany('bom_lines', [{ parent: 'BM01005', child: 'RM105', qty: 2 }]));
-    await ev(() => { ERP.state.bomTab = 'asm'; ERP.state.asm = { kind: 'asm', line: '', stat: '', q: '', page: 0 }; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await page.waitForTimeout(400);
+    await ev(() => { ERP.state.bomTab = 'asm'; ERP.state.asm = { line: '', stat: '', q: '', page: 0 }; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await page.waitForTimeout(400);
     await page.click('main button:has-text("확실한 부품만 모두 적용")'); await page.waitForSelector('.modal'); await page.click('.modal .modal-foot button.primary'); await page.waitForTimeout(800);
     const a = await ev(() => { const L2 = ERP.db.rows('bom_lines'); const S = (c) => { const s = ERP.calc.stock().get(c); return s ? s.use : null; };
-      return { auto: L2.filter(l => l.src === 'auto').length, bm: L2.filter(l => l.parent === 'BM01002').map(l => l.child + ':' + l.qty + ':' + l.src).sort(), man: L2.filter(l => l.parent === 'BM01005').map(l => l.child + ':' + l.qty + ':' + (l.src || '')), use: ['RM102', 'AB102', 'MS', 'MH'].map(S), mhIn: ERP.calc.stock().get('MH').prod }; });
+      return { auto: L2.filter(l => l.src === 'auto').length, bm: L2.filter(l => l.parent === 'BM01002').map(l => l.child + ':' + l.qty + ':' + l.src).sort(), man: L2.filter(l => l.parent === 'BM01005').map(l => l.child + ':' + l.qty + ':' + (l.src || '')), use: ['RM102', 'BM02', 'MS', 'MH'].map(S), mhIn: ERP.calc.stock().get('MH').prod }; });
     ok('확실한 부품으로 조립 BOM 일괄 적용 (출처 auto)', a.auto > 300, a.auto);
-    eq('BM01002 BOM = AB102 · MH · MS · RM102 (1개씩)', a.bm, ['AB102:1:auto', 'MH:1:auto', 'MS:1:auto', 'RM102:1:auto']);
+    eq('BM01002 BOM = BM02 · MH · MS · RM102 (1개씩)', a.bm, ['BM02:1:auto', 'MH:1:auto', 'MS:1:auto', 'RM102:1:auto']);
     eq('직접 만든 BOM(BM01005)은 그대로', a.man, ['RM105:2:']);
-    eq('조립 1,000 → 부품 차감 RM102 · AB102 · MS · MH 각 1,000 (MH 입고 5,000)', a.use.concat([a.mhIn]), [1000, 1000, 1000, 1000, 5000]);
+    eq('조립 1,000 → 부품 차감 RM102 · BM02 · MS · MH 각 1,000 (MH 입고 5,000)', a.use.concat([a.mhIn]), [1000, 1000, 1000, 1000, 5000]);
     await ev(() => { const DB = ERP.db; DB.replace('prod_log', DB.rows('prod_log').filter(r => !r._t7)); DB.replace('code_map', []); DB.replace('bom_lines', []); });
   }
 
@@ -335,7 +334,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
       const chip = (document.querySelector('main .label-sample') || {}).textContent || '';
       const po = DB.rows('po').find(r => r._ex && r.po_no); DB.update('po', po._id, { remarks: 'checked' });   // PO 번호가 있는 줄 (8차: 예전에는 첫 줄이 데이터로 들어간 머리글 행이었다)
       return { ex: ERP.sampleCount('prod_log'), all: DB.rows('prod_log').length, chip, po: ERP.sampleCount('po'), poAll: DB.rows('po').length }; });
-    eq('생산일보: 예시 21,631행 + 새로 넣은 2행 (8차: 중복 일보 46행 정리)', [a.ex, a.all], [21631, 21633]); ok('화면 표시 "예시 21,631행 포함"', /21,631/.test(a.chip), a.chip);
+    eq('생산일보: 예시 21,613행 + 새로 넣은 2행 (8차: 중복 일보 46행 정리, 1.13.16: 핫포일 스탬핑 일보 18행 뺌)', [a.ex, a.all], [21613, 21615]); ok('화면 표시 "예시 21,613행 포함"', /21,613/.test(a.chip), a.chip);
     eq('손으로 고친 PO 1행은 예시에서 빠짐 (8차: 머리글 행 정리 → 521줄)', [a.po, a.poAll], [520, 521]);
     await ev(() => { ERP.goto('settings'); ERP.render(); }); await page.waitForTimeout(200);
     await page.click('main button:has-text("예시 데이터 한 번에 삭제")'); await page.waitForSelector('.modal');

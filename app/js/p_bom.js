@@ -241,12 +241,12 @@
 
   // ---------- 7차: 조립 BOM 자동 구성 (ECOUNT 품목코드) ----------
   function asmTab(host) {
-    const INV = ERP.inv; const st = ERP.state.asm = ERP.state.asm || { kind: 'asm', line: '', stat: '', q: '', page: 0 };
+    const INV = ERP.inv; const st = ERP.state.asm = ERP.state.asm || { line: '', stat: '', q: '', page: 0 };
     st.pick = st.pick || {};
     const plan = INV.asmPlan(); const IT = INV.items();
     const statusOf = (x) => (x.existing ? (x.auto ? 'auto' : 'manual') : (x.conf === 'high' ? 'high' : x.conf === 'part' ? 'part' : x.conf === 'review' ? 'review' : 'none'));
     const STL = { high: [L('바로 적용 가능', 'Áp dụng được ngay'), 'ok'], part: [L('일부 확인 필요', 'Cần xem một phần'), 'warn'], review: [L('확인 필요', 'Cần xem'), 'warn'], none: [L('부품 못 찾음', 'Không tìm thấy'), 'bad'], auto: [L('적용됨 (자동)', 'Đã áp dụng (tự động)'), 'info'], manual: [L('직접 만든 BOM', 'BOM tự tạo'), 'neutral'] };
-    const scope = plan.filter(x => (st.kind === 'stp' ? x.stp : !x.stp));
+    const scope = plan;   // 1.13.16: 조립 BOM 만 (스탬핑 BOM 은 없앰 — 핫포일 스탬핑은 생산 공정이 아님)
     const cnt = {}; scope.forEach(x => { const k = statusOf(x); cnt[k] = (cnt[k] || 0) + 1; });
     const lines = Array.from(new Set(scope.map(x => x.line).filter(Boolean))).sort();
     const ORDER = { high: 0, part: 1, review: 2, auto: 3, manual: 4, none: 5 }; const LINE_ORDER = { MINI: 0, PEN: 1, REG: 2, CPC: 3, GLA: 4, MARKER: 5 };
@@ -254,7 +254,7 @@
     if (st.line) rows = rows.filter(x => x.line === st.line);
     if (st.stat) rows = rows.filter(x => statusOf(x) === st.stat);
     if (st.q) { const k = INV.normName(st.q); rows = rows.filter(x => INV.normName(x.parent).includes(k) || INV.normName(x.name).includes(k) || x.parts.some(p => INV.normName(p.code).includes(k))); }
-    const roles = st.kind === 'stp' ? INV.STP_ROLES : INV.ASM_ROLES;
+    const roles = INV.ASM_ROLES;
     const usedRoles = roles.filter(R => rows.some(x => x.parts.some(p => p.role === R.role)));
     const ps = 80; const pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page >= pages) st.page = pages - 1; const slice = rows.slice(st.page * ps, st.page * ps + ps);
     const bulk = scope.filter(x => !x.existing && x.conf === 'high');   // 모든 부품이 확실한 품번만 (노랑이 섞인 품번은 행에서 골라 적용)
@@ -276,7 +276,6 @@
       h('p', { class: 'help', style: { marginTop: 0 } }, L('ECOUNT 품목코드로 조립품(펜)마다 들어가는 부품을 찾아 BOM을 만듭니다. 같은 제품군 + 같은 색 이름 + 코드 숫자로 찾고, 제품군에 하나뿐인 부품(MINI HOLDER · MINI SPOON 등)은 공용으로 씁니다. 초록 = 확실, 노랑 = 확인 필요(후보 중 선택), 빨강 = 못 찾음. 적용하면 "품목 · 구성 (BOM 설정)"에 저장되고, 조립 일보를 올리면 조립 수량만큼 이 부품들이 현장 재고에서 차감됩니다. 직접 만든 BOM은 바꾸지 않습니다.',
         'Tìm linh kiện của từng bút lắp ráp theo mã ECOUNT (cùng dòng SP + cùng tên màu + số trong mã; linh kiện duy nhất của dòng như MINI HOLDER dùng chung). Xanh = chắc chắn, vàng = cần chọn, đỏ = không tìm thấy. Áp dụng → lưu vào "Cấu thành (BOM)"; báo cáo lắp ráp sẽ trừ linh kiện theo số lượng. BOM tự tạo không bị thay đổi.')),
       h('div', { class: 'toolbar' },
-        h('div', { class: 'seg' }, [['asm', L('조립 BOM (펜 → 부품)', 'BOM lắp ráp (bút → linh kiện)')], ['stp', L('스탬핑 BOM (스탬핑 배럴 → 배럴)', 'BOM ép nhũ (barrel nhũ → barrel)')]].map(o => h('button', { class: 'btn sm' + (st.kind === o[0] ? ' primary' : ''), onclick: () => { st.kind = o[0]; st.page = 0; st.stat = ''; ERP.render(); } }, o[1]))),
         h('select', { class: 'inp', onchange: (e) => { st.line = e.target.value; st.page = 0; ERP.render(); } }, h('option', { value: '' }, L('제품군: 전체', 'Dòng SP: tất cả')), lines.map(v => h('option', { value: v, selected: st.line === v }, ERP.inv.label('line', v) + ' (' + v + ')'))),
         h('select', { class: 'inp', onchange: (e) => { st.stat = e.target.value; st.page = 0; ERP.render(); } }, h('option', { value: '' }, L('상태: 전체', 'Trạng thái: tất cả')), Object.keys(STL).map(k => h('option', { value: k, selected: st.stat === k }, STL[k][0] + ' (' + F.n(cnt[k] || 0) + ')'))),
         h('label', { class: 'search' }, h('input', { type: 'search', placeholder: L('품목코드 · 이름 · 부품코드', 'Mã · tên · mã linh kiện'), value: st.q, onchange: (e) => { st.q = e.target.value; st.page = 0; ERP.render(); } })),
@@ -286,12 +285,12 @@
           const r = INV.applyAsm(bulk.map(x => x.parent), { onlyHigh: true }); ERP.toast(L('BOM ' + r.done + '개 적용 · 부품 ' + r.lines + '줄', 'Đã áp dụng ' + r.done + ' BOM · ' + r.lines + ' dòng'), 'ok'); ERP.render(); } }, L('확실한 부품만 모두 적용 (', 'Áp dụng tất cả phần chắc chắn (') + F.n(bulk.length) + ')')),
       h('div', { class: 'toolbar', style: { gap: '6px' } }, Object.keys(STL).filter(k => cnt[k]).map(k => ERP.chip(STL[k][1], STL[k][0] + ' ' + F.n(cnt[k])))),
       rows.length ? h('div', { class: 'tbl-wrap', style: { maxHeight: '60vh' } }, h('table', { class: 'tbl' },
-        h('thead', h('tr', h('th', st.kind === 'stp' ? L('스탬핑 배럴', 'Barrel ép nhũ') : L('조립품', 'Sản phẩm lắp ráp')), h('th', L('이름', 'Tên')), h('th', L('제품군', 'Dòng')), usedRoles.map(R => h('th', L(R.ko, R.vi))), h('th', L('상태 · 현재 BOM', 'Trạng thái · BOM hiện tại')), h('th', ''))),
+        h('thead', h('tr', h('th', L('조립품', 'Sản phẩm lắp ráp')), h('th', L('이름', 'Tên')), h('th', L('제품군', 'Dòng')), usedRoles.map(R => h('th', L(R.ko, R.vi))), h('th', L('상태 · 현재 BOM', 'Trạng thái · BOM hiện tại')), h('th', ''))),
         h('tbody', slice.map(x => { const ex = exLines.get(x.parent) || []; const stt = statusOf(x);
           return h('tr', h('td', h('b', x.parent)), h('td', (x.name || '').slice(0, 26)), h('td', x.line || ''), usedRoles.map(R => cell(x, x.parts.find(p => p.role === R.role))),
             h('td', ERP.chip(STL[stt][1], STL[stt][0]), ex.length ? h('div', { style: { fontSize: '11.5px', marginTop: '3px' } }, ex.map(l => l.child).join(' + ')) : null),
             h('td', { class: 'nowrap' }, !x.existing || x.auto ? h('button', { class: 'btn sm primary', onclick: () => { const pick = {}; Object.keys(st.pick).forEach(k => { if (k.indexOf(x.parent + '|') === 0) pick[k] = st.pick[k]; });
-              const open = x.parts.filter(p => p.conf === 'review' && pick[x.parent + '|' + p.role] === undefined); if (open.length) { ERP.toast(L('노랑 부품을 골라 주세요: ', 'Hãy chọn linh kiện màu vàng: ') + open.map(p => INV.roleName(p.role, x.stp)).join(', '), 'warn'); return; }
+              const open = x.parts.filter(p => p.conf === 'review' && pick[x.parent + '|' + p.role] === undefined); if (open.length) { ERP.toast(L('노랑 부품을 골라 주세요: ', 'Hãy chọn linh kiện màu vàng: ') + open.map(p => INV.roleName(p.role)).join(', '), 'warn'); return; }
               const r = INV.applyAsm([x.parent], { pick, force: false, onlyHigh: true }); if (r.done) ERP.toast(L('BOM 적용: ', 'Đã áp dụng: ') + x.parent, 'ok'); else ERP.toast(L('넣을 부품이 없습니다', 'Không có linh kiện'), 'warn'); ERP.render(); } }, x.existing ? L('다시 적용', 'Áp dụng lại') : L('적용', 'Áp dụng')) : null,
               ' ', h('button', { class: 'btn sm', onclick: () => editor(x.parent) }, L('편집', 'Sửa')))); }))))
         : h('div', { class: 'empty' }, L('조건에 맞는 품목이 없습니다.', 'Không có mã phù hợp.')),

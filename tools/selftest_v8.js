@@ -177,8 +177,8 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
     });
     ok('XL.dailyTemplateBook 있음', !!r);
     if (r) {
-      const procs = ['INJ', 'REF', 'STP', 'ASM', 'WRP', 'PCK'];
-      eq('6개 공정 시트 모두 생산일보로 인식', r.map(j => [j.table, j.proc, j.p, j.mode, j.n, j.sh, j.d]), procs.map(p => ['prod_log', p, p, 'range', 1, 'N', '2026-10-21']));
+      const procs = ['INJ', 'REF', 'ASM', 'WRP', 'PCK'];   // 1.13.16: 핫포일 스탬핑은 공정 목록에서 뺌
+      eq('5개 공정 시트 모두 생산일보로 인식', r.map(j => [j.table, j.proc, j.p, j.mode, j.n, j.sh, j.d]), procs.map(p => ['prod_log', p, p, 'range', 1, 'N', '2026-10-21']));
     }
   }
 

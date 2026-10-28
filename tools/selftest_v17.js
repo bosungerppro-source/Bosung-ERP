@@ -13,6 +13,7 @@
    7-10 종이 권취 일보의 품목군 = Glass (현장 일일 생산일보 · ERP 일보 양식 · 일보 입력, 1.13.13)
    7-11 생산 관리 일별 · 월별 탭 · 종합 현황 일별 · 월별 위젯: 공정도 여러 개 골라 보기 (1.13.14)
    7-12 사출 생산일보 그대로 올리기 · 품목 맞추기 · 재고 · 원재료 사용량 (PS · PP · HDPE · LDPE 일별 · 월별 · 년별) · 7-13 품목군 이름 Regular → Dial · Dial Mini → Mini (1.13.15)
+   7-14 핫포일 스탬핑은 생산 관리에서 뺌 (공정 목록 · 일보 입력 · ERP 일보 양식 · 현장 일보의 스탬핑 시트 안 올림) · 생산 반영 안 함 · 스탬핑 배럴 · 스탬핑 BOM 없음 · 핫포일은 원부자재 입출고로만 (1.13.16)
    8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
@@ -90,8 +91,8 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await A.click('main .fpiv-card[data-id="asm"] button[data-act="edit"]'); await settle();
     const ed = await ev(() => { const e = document.querySelector('main .fpiv-card[data-id="asm"] .fpiv-edit'); return e ? { procs: Array.from(e.querySelectorAll('[data-proc]')).map(l => [l.dataset.proc, l.querySelector('input').checked]), divs: Array.from(e.querySelectorAll('[data-div]')).map(l => [l.dataset.div, l.innerText.trim(), l.querySelector('input').checked]),
       rows: Array.from(e.querySelectorAll('select[data-k="rows"] option')).map(o => o.textContent), cols: Array.from(e.querySelectorAll('select[data-k="cols"] option')).map(o => o.textContent) } : null; });
-    eq('설정: 공정 = 전체 + 현장에 있는 공정 (종이 권취 · 기타는 품목 없어 빠짐, 조립만 켜짐) · 품목군 = 전체(켜짐) · Mini · Dial · Pencil · 기타 · 행 4 · 열 (월 없음, 행과 같은 품목군 빼고)', ed, {
-      procs: [['', false], ['INJ', false], ['REF', false], ['STP', false], ['ASM', true], ['PCK', false]],
+    eq('설정: 공정 = 전체 + 현장에 있는 공정 (종이 권취는 품목 없어 빠짐, 스탬핑 배럴 S-M1 은 1.13.16 부터 기타, 조립만 켜짐) · 품목군 = 전체(켜짐) · Mini · Dial · Pencil · 기타 · 행 4 · 열 (월 없음, 행과 같은 품목군 빼고)', ed, {
+      procs: [['', false], ['INJ', false], ['REF', false], ['ASM', true], ['PCK', false], ['ETC', false]],
       divs: [['', '전체', true], ['MINI', 'Mini', false], ['REG', 'Dial', false], ['PEN', 'Pencil', false], ['', '기타', false]],
       rows: ['품목군', '공정', '단계', '품목'], cols: ['없음 (현재 재고 한 칸)', '공정', '단계'] });
     eq('설정을 열면 넓은 카드', (await cards())[0].narrow, false);
@@ -175,9 +176,9 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await setPivots([{ id: 'all', procs: [], rows: 'proc', cols: 'div' }]);
     const c = (await cards())[0];
     eq('모든 공정 재고 · 공정 \\ 품목군 · 합계 · Mini · Dial · Pencil · 기타 · 넓은 카드', [c.title, c.head, c.narrow], ['모든 공정 재고', ['공정 \\ 품목군', '합계', 'Mini', 'Dial', 'Pencil', '기타'], false]);
-    eq('공정 줄 (단위별) · 포장 CT 3 · SET 7 + 9/15 조정 2 = 9 · 단위별 합계', c.rows, [
-      ['사출 · PCS', '525', '525', '·', '·', '·'], ['리필 성형 · PCS', '50', '50', '·', '·', '·'], ['핫포일 스탬핑 · PCS', '70', '70', '·', '·', '·'], ['조립 · PCS', '205', '120', '40', '40', '5'],
-      ['포장 · CT', '3', '·', '·', '3', '·'], ['포장 · SET', '9', '·', '·', '9', '·'],
+    eq('공정 줄 (단위별) · 포장 CT 3 · SET 7 + 9/15 조정 2 = 9 · 스탬핑 배럴은 기타 (1.13.16) · 단위별 합계', c.rows, [
+      ['사출 · PCS', '525', '525', '·', '·', '·'], ['리필 성형 · PCS', '50', '50', '·', '·', '·'], ['조립 · PCS', '205', '120', '40', '40', '5'],
+      ['포장 · CT', '3', '·', '·', '3', '·'], ['포장 · SET', '9', '·', '·', '9', '·'], ['기타 · PCS', '70', '70', '·', '·', '·'],
       ['합계 · CT', '3', '·', '·', '3', '·'], ['합계 · PCS', '850', '765', '40', '40', '5'], ['합계 · SET', '9', '·', '·', '9', '·']]);
     ok('원부자재(RM-1)는 없음', !(await ev(() => document.querySelector('main .fpiv').innerText)).includes('RM-1'));
     await setPivots([{ id: 'pk', procs: ['PCK'], rows: 'div', cols: 'none' }]);
@@ -197,7 +198,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await ev(() => { window.__xl = null; ERP.xl.exportAoa = (name, hdr, rows) => { window.__xl = { name, hdr, rows }; }; });
     await A.click('main .fpiv-card button[data-act="xl"]'); await settle();
     const x = await ev(() => window.__xl);
-    eq('엑셀 = 머리 · 줄 6 + 단위별 합계 3 (보이는 표 그대로)', x && [x.name, x.hdr, x.rows[0], x.rows.length, x.rows.slice(-1)[0]], ['floor_pivot', ['품목군', '합계', '사출', '리필 성형', '핫포일 스탬핑', '조립', '포장'], ['Mini · PCS', 765, 525, 50, 70, 120, 0], 9, ['합계 · SET', 9, 0, 0, 0, 0, 9]]);
+    eq('엑셀 = 머리 · 줄 6 + 단위별 합계 3 (보이는 표 그대로)', x && [x.name, x.hdr, x.rows[0], x.rows.length, x.rows.slice(-1)[0]], ['floor_pivot', ['품목군', '합계', '사출', '리필 성형', '조립', '포장', '기타'], ['Mini · PCS', 765, 525, 50, 120, 0, 70], 9, ['합계 · SET', 9, 0, 0, 0, 9, 0]]);
     await setPivots(null);
     await A.click('main .fpiv-card button[data-act="xl"]'); await settle();
     const y = await ev(() => window.__xl);
@@ -218,7 +219,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('추가한 위젯 = 조립 재고 · 품목군 | 현재 재고 (현장 재고 위 표와 같은 숫자) · 가로 1칸 · 단위 PCS', w, [{ title: '조립 재고', head: ['품목군', '현재 재고'], rows: [['Mini', '120'], ['Dial', '40'], ['Pencil', '40'], ['기타', '5'], ['합계', '205']], w: '1', help: '단위 PCS · 현재 재고' }]);
     await A.click('.wgrid .w[data-id=floor_stock] .wbar button[title="위젯 설정"]'); await A.waitForSelector('.modal select');
     const opts = await ev(() => Array.from(document.querySelectorAll('.modal select')).map(s => Array.from(s.options).map(o => o.textContent)));
-    eq('⚙: 공정 (모든 공정 + 공정 + 기타) · 행 · 열', opts, [['모든 공정', '사출', '리필 성형', '핫포일 스탬핑', '조립', '종이 권취', '포장', '기타'], ['품목군', '공정', '단계', '품목'], ['없음 (현재 재고 한 칸)', '공정', '품목군', '단계']]);
+    eq('⚙: 공정 (모든 공정 + 공정 + 기타) · 행 · 열', opts, [['모든 공정', '사출', '리필 성형', '조립', '종이 권취', '포장', '기타'], ['품목군', '공정', '단계', '품목'], ['없음 (현재 재고 한 칸)', '공정', '품목군', '단계']]);
     await ev(() => { const s = document.querySelectorAll('.modal select')[0]; s.value = 'INJ'; s.dispatchEvent(new Event('change')); });
     await A.click('.modal .modal-foot button.primary'); await settle();
     w = await wOf();
@@ -650,7 +651,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('조립만으로 돌아오면 조립의 품목군 (따로 — 전체)', (await pv()).rows, [['Dial', '100'], ['일 합계', '100']]);
     await tickPr('[data-all]'); await ev(() => { ERP.state.pan.by = 'process'; ERP.render(); }); await settle(); v = await pv();
     eq('전체를 켜면 모든 공정 (포장은 pcs 환산) · 제목에 공정 이름 없음', [v.all, v.procs, v.rows, v.kpi[0], v.title],
-      [true, [], [['사출', '1,000'], ['리필 성형', '0'], ['핫포일 스탬핑', '0'], ['조립', '100'], ['종이 권취', '300'], ['포장', '120'], ['일 합계', '1,520']], '월 총 생산량 (pcs 환산)', '일별 생산수량 · 2026-10']);
+      [true, [], [['사출', '1,000'], ['리필 성형', '0'], ['조립', '100'], ['종이 권취', '300'], ['포장', '120'], ['일 합계', '1,520']], '월 총 생산량 (pcs 환산)', '일별 생산수량 · 2026-10']);
     await prod('monthly'); await tickPr('[data-v="WRP"]'); v = await pv();
     eq('월별 탭도 공정 체크 (따로 · 처음은 조립) — 종이 권취를 켜면 일별에서 그 묶음에 고른 품목군 (Glass) 그대로 (두 탭이 같이 씀) · 9월 50 + 10월 300', [v.procs, v.rows, v.tab], [['ASM', 'WRP'], [['Glass', '350'], ['월 합계', '350']], '월별 생산량']);
     // 종합 현황 일별 · 월별 위젯 ⚙: 공정도 체크 (예전 설정의 공정 하나는 그대로 읽음)
@@ -658,10 +659,10 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     const wv = (id) => ev((i) => { const el = document.querySelector('.wgrid .w[data-id=' + i + ']'); return { title: el.querySelector('h2').textContent, rows: Array.from(el.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) }; }, id);
     const dlgP = () => ev(() => { const f = document.querySelector('.modal [data-k="proc"]'); return f ? { all: f.querySelector('[data-all] input').checked, on: Array.from(f.querySelectorAll('[data-v]')).filter(l => l.querySelector('input').checked).map(l => l.dataset.v), n: f.querySelectorAll('[data-v]').length } : null; });
     await A.click('.wgrid .w[data-id=asm_monthly] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal [data-k="proc"]');
-    eq('월별 위젯 ⚙ (예전 설정 = 사출 하나): 공정 체크에 사출만 켜짐', await dlgP(), { all: false, on: ['INJ'], n: 6 });
+    eq('월별 위젯 ⚙ (예전 설정 = 사출 하나): 공정 체크에 사출만 켜짐', await dlgP(), { all: false, on: ['INJ'], n: 5 });
     await A.click('.modal .modal-foot button:not(.primary)'); await settle();
     await A.click('.wgrid .w[data-id=asm_daily] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal [data-k="proc"]');
-    eq('일별 위젯 ⚙: 공정 체크 (조립만 켜짐) · 품목군 체크', [await dlgP(), await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent))], [{ all: false, on: ['ASM'], n: 6 }, ['공정 (기본 조립)', '품목군']]);
+    eq('일별 위젯 ⚙: 공정 체크 (조립만 켜짐) · 품목군 체크', [await dlgP(), await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent))], [{ all: false, on: ['ASM'], n: 5 }, ['공정 (기본 조립)', '품목군']]);
     await A.click('.modal [data-k="proc"] [data-v="WRP"] input'); await A.waitForTimeout(150);
     eq('공정을 더 고르면 품목군 목록도 두 공정의 것', await ev(() => Array.from(document.querySelectorAll('.modal [data-k="divs"] [data-v]')).map(l => l.dataset.v)), ['dial', 'glass']);
     await A.click('.modal .modal-foot button.primary'); await settle();
@@ -746,6 +747,55 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
       const back = X.read(X.write(wb2, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false });
       const jobs = ERP.xl.analyze(back, {}); return { daily: (jobs.find(j => j.table === 'prod_log') || { rows: [] }).rows.map(o => o.division), po: jobs.filter(j => j.table === 'po').reduce((a, j) => a.concat(j.rows.map(o => o.kind)), []) }; });
     eq('ERP 일보 양식의 품목군 Regular → Dial · 생산관리 파일의 수주 품목군 Regular → Dial · Dial Mini → Mini', r2, { daily: ['Dial'], po: ['Dial', 'Mini'] });
+  });
+
+  await sec('7-14. 핫포일 스탬핑은 생산 관리에서 뺌 · 생산 품목에 넣지 않음 · 핫포일은 원부자재 입출고로만 (1.13.16, 사용자 "생산관리에서 핫포일 스탬핑 전부 삭제 생산 품목에 넣지 않는다. 소모품으로만 관리 원부자재 재고만 입출고로 수량관리")', async () => {
+    const keep = await ev(() => { const c = (t) => ERP.db.rows(t).map(r => Object.assign({}, r)); return { items: c('items'), prod_log: c('prod_log'), stock_open: c('stock_open'), stock_tx: c('stock_tx'), bom_lines: c('bom_lines') }; });
+    // 공정 목록 — 생산 관리 (일별 탭 공정 체크) · 일보 입력 · ERP 일보 양식 · 공정 설정
+    eq('공정 목록: 사출 · 리필 성형 · 조립 · 종이 권취 · 포장 (핫포일 스탬핑 없음)', await ev(() => ERP.PROC.map(p => p.id)), ['INJ', 'REF', 'ASM', 'WRP', 'PCK']);
+    eq('ERP 일보 양식: 공정마다 시트 (핫포일 스탬핑 시트 없음)', await ev(() => ERP.xl.dailyTemplateBook().SheetNames), ['prod_INJ', 'prod_REF', 'prod_ASM', 'prod_WRP', 'prod_PCK']);
+    const onTab = async (tab, fn) => { await ev((t) => { ERP.state.prodTab = t; ERP.goto('production'); ERP.render(); }, tab); await settle(); return ev(fn); };
+    eq('생산 관리 일별 탭 공정 체크 · 일보 입력 공정 고르기 · 공정 설정 표: 핫포일 스탬핑 없음', [
+      await onTab('analysis', () => Array.from(document.querySelectorAll('main .pprocs [data-v]')).map(e => e.dataset.v)),
+      await onTab('entry', () => Array.from(document.querySelectorAll('main select[aria-label=process] option')).map(o => o.value)),
+      await onTab('procs', () => Array.from(document.querySelectorAll('main .tbl tbody tr td:first-child b')).map(b => b.textContent))],
+    [['INJ', 'REF', 'ASM', 'WRP', 'PCK'], ['INJ', 'REF', 'ASM', 'WRP', 'PCK'], ['INJ', 'REF', 'ASM', 'WRP', 'PCK']]);
+    // 현장 일일 생산일보: 핫포일 스탬핑 시트 (In chuyển nhiệt) 는 올리지 않음 — 같은 파일의 조립 시트는 그대로
+    const mk = await ev(() => { const X = window.XLSX; const wb = X.utils.book_new();
+      const head = (place) => [[null, 'BÁO CÁO SẢN XUẤT HÀNG NGÀY / 생산 일보'], [null, '1. 작업장명 / Tên công đoạn', place, null, '생산일자 / Ngày sản xuất', '2026-10-22'], [], ['Machine', 'No', 'Code', 'Name', 'OK'], []];
+      X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(head('Hot foil stamping In chuyển nhiệt').concat([['Gold stamping M/C', '2', 'AFML10', 'Blue', 10800, '08:00', '10:00', null, 120, 0, 0, 0.5, 'TRÚC']])), 'In chuyen');
+      X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(head('Ass ( floor 1 ) / Lắp ráp tầng 1').concat([['Line 1', '1', 'A-M1', 'MINI RED', 1000, '08:00', '17:00', 80, 460, 0, 10, 0]])), 'Lap rap');
+      const back = X.read(X.write(wb, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false });
+      const jobs = ERP.xl.analyze(back, {}); ERP.state.imp = { jobs, files: [] };
+      return jobs.map(j => [j.sheet, j.table || null, j.proc || '', !!j.include, j.rows.length, j.skip || '']); });
+    eq('현장 일일 생산일보: 핫포일 스탬핑 시트 = 올리지 않음 · 조립 시트는 그대로', mk.map(x => x.slice(0, 5)), [['In chuyen', null, 'STP', false, 0], ['Lap rap', 'prod_log', 'ASM', true, 1]]);
+    ok('까닭: 핫포일 스탬핑은 생산 관리에서 뺀 공정 · 핫포일은 원부자재 입출고로', mk[0] && /핫포일 스탬핑/.test(mk[0][5]) && /원부자재/.test(mk[0][5]) && /입출고/.test(mk[0][5]), mk[0] && mk[0][5]);
+    await ev(() => { ERP.state.dataTab = 'import'; ERP.goto('data'); ERP.render(); }); await settle();
+    const pv = await ev(() => { const t = Array.from(document.querySelectorAll('main table.tbl')).find(x => { const th = x.querySelector('thead th'); return th && th.textContent.trim() === '반영'; });
+      return t ? Array.from(t.querySelectorAll('tbody tr')).map(tr => [tr.querySelector('input[type=checkbox]').disabled, tr.children[2].innerText.replace(/\s+/g, ' ').trim()]) : null; });
+    ok('자료 올리기 미리보기: 핫포일 스탬핑 시트는 고를 수 없고 까닭이 보임 (인식 불가 아님) · 조립 시트는 고를 수 있음', !!pv && pv.length === 2 && pv[0][0] === true && /핫포일 스탬핑/.test(pv[0][1]) && !/인식 불가/.test(pv[0][1]) && pv[1][0] === false, pv);
+    await ev(() => { ERP.state.imp = { jobs: [], files: [] }; });
+    // 생산 반영: 예전 자료 · 다른 PC 의 핫포일 스탬핑 일보 줄은 재고에 넣지 않고 해결할 항목에도 없음 (스탬핑 배럴 품목이 있어도)
+    const pp = await ev(async () => { const DB = ERP.db; DB.replace('prod_log', [
+        { date: '2026-10-22', process: 'STP', code: 'S-M1', ok_qty: 300, ok_ea: 300, source: 'daily-report' },
+        { date: '2026-10-22', process: 'STP', code: 'AFML10', ok_qty: 10800, ok_ea: 10800, source: 'daily-report' },
+        { date: '2026-10-22', process: 'ASM', code: 'A-M1', ok_qty: 10, ok_ea: 10, source: 'daily-report' }]); await DB.flush();
+      const p = ERP.inv.prodPost(); return { prod: p.rows.filter(t => t.kind === 'PROD').map(t => t.code + ':' + t.qty), notItem: Array.from(p.diag.notItem.keys()).filter(k => /^STP\|/.test(k)) }; });
+    eq('생산 반영: 핫포일 스탬핑 줄 (스탬핑 배럴 S-M1 · 모르는 코드 AFML10) 은 입고 · 해결할 항목 없음, 조립은 그대로', pp, { prod: ['A-M1:10'], notItem: [] });
+    // 스탬핑 배럴 (WIP11 · WIPx1) 은 공정 없음 (현장 재고 · 피벗에서 기타), 조립 BOM 자동 구성: 배럴은 배럴 (WIP01) 에서만 · 스탬핑 BOM 없음
+    eq('단계 → 공정: 스탬핑 배럴 WIP11 · WIPx1 = 없음 (기타), 배럴 WIP01 = 사출', await ev(() => ['WIP11', 'WIPx1', 'WIP01'].map(s => ERP.inv.procOfStage(s))), ['', '', 'INJ']);
+    eq('조립 BOM 자동 구성: 배럴 역할 = 배럴 (WIP01) 만 · 스탬핑 배럴 계획 없음', await ev(() => [ERP.inv.ASM_ROLES.find(r => r.role === 'barrel').st, ERP.inv.asmPlan().filter(x => x.stp || x.stage === 'WIP11').length, ERP.inv.STP_ROLES === undefined]), [['WIP01'], 0, true]);
+    await ev(() => { ERP.state.bomTab = 'asm'; ERP.goto('bom'); ERP.render(); }); await settle();
+    ok('BOM 화면 조립 BOM 자동 구성: 스탬핑 BOM 없음 (조립품 표만)', await ev(() => !/스탬핑/.test(document.querySelector('main').innerText) && /조립품/.test(document.querySelector('main').innerText)));
+    // 핫포일 (소모품 CM) 은 원부자재 재고에서 입출고로만: 기초 + 입고 − 출고, 스탬핑 일보와 상관없음
+    const foil = await ev(async (ec) => { const DB = ERP.db; DB.add('items', ERP.inv.classify({ code: 'R-200', name: 'HOT FOIL - REGULAR', erp_code: 'CM-HOTFOIL-REG-R-200', unit: 'PCS', src: 'test' }));
+      DB.add('stock_open', { date: ec, scope: 'WH', code: 'R-200', qty: 1000, unit: 'PCS' });
+      DB.addMany('stock_tx', [{ date: '2026-10-21', kind: 'IN', to_scope: 'WH', code: 'R-200', qty: 500, unit: 'PCS', src: 'manual' }, { date: '2026-10-23', kind: 'OUT', from_scope: 'WH', code: 'R-200', qty: 200, unit: 'PCS', src: 'manual' }]);
+      await DB.flush(); const s = ERP.inv.rows().find(x => x.code === 'R-200'); return s ? [ERP.inv.groupOf(s), Math.round(s.bal)] : null; }, EC);
+    eq('핫포일 R-200 (소모품): 원부자재 · 기초 1,000 + 입고 500 − 출고 200 = 1,300 (스탬핑 일보 10,800 과 상관없음)', foil, ['mat', 1300]);
+    // AI 비서 기본 설명도 같은 규칙
+    ok('AI 비서 기본 설명: 생산 공정에 핫포일 스탬핑 없음 · 핫포일 = 원부자재 소모품 (입출고)', await ev(() => { const s = ERP.ai && ERP.ai.systemPrompt ? ERP.ai.systemPrompt() : ''; return !/hot-foil stamping STP/.test(s) && /hot foil/i.test(s); }));
+    await ev(async (k) => { const DB = ERP.db; ['items', 'prod_log', 'stock_open', 'stock_tx', 'bom_lines'].forEach(t => DB.replace(t, k[t])); await DB.flush(); ERP.state.imp = null; ERP.state.prodTab = null; ERP.state.bomTab = null; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

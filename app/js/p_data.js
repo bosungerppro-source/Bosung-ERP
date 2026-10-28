@@ -90,7 +90,8 @@
         }
         return h('tr', h('td', cb), h('td', h('div', { class: 'strong' }, j.sheet), h('small', { class: 'muted' }, j.file || '')),
           h('td', { style: { whiteSpace: 'normal', maxWidth: '460px' } }, j.table ? [ERP.chip('info', j.label || ERP.tableLabel(j.table)), j.proc ? ' ' + ERP.procName(j.proc) : '', j.note ? h('div', { class: 'help' }, j.note) : null,
-            j.overlap ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 누적 시트(수주·생산 관리 파일)에 같은 날짜 · 공정 기록이 있습니다: ' + j.overlap + '행', '⚠ Sổ tổng hợp đã có cùng ngày · công đoạn: ' + j.overlap + ' dòng')) : null, prevBox(pv)] : (j.error ? ERP.chip('bad', j.error) : ERP.chip('neutral', L('인식 불가 (건너뜀)', 'Không nhận dạng (bỏ qua)')))),
+            j.overlap ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 누적 시트(수주·생산 관리 파일)에 같은 날짜 · 공정 기록이 있습니다: ' + j.overlap + '행', '⚠ Sổ tổng hợp đã có cùng ngày · công đoạn: ' + j.overlap + ' dòng')) : null, prevBox(pv)]
+            : (j.error ? ERP.chip('bad', j.error) : j.skip ? [ERP.chip('neutral', j.label), h('div', { class: 'help' }, j.skip)] : ERP.chip('neutral', L('인식 불가 (건너뜀)', 'Không nhận dạng (bỏ qua)')))),   // 1.13.16: 올리지 않는 까닭 (핫포일 스탬핑 일보)
           h('td', { class: 'num' }, F.n(j.rows.length)), h('td', dateCell), h('td', sel), h('td', extra));
       });
       const info = h('span', { class: 'muted' });

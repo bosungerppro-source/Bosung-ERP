@@ -53,7 +53,7 @@
     if (nd) { const n = +(nd[1] || nd[2] || nd[3]); if (n >= 1 && n <= 366) return { from: F.addDays(today, -(n - 1)), to: today, kind: 'range' }; }
     return { from: latest, to: latest, kind: 'latest' };
   }
-  const PROC_SYN = { INJ: ['사출', 'injection', 'ep nhua'], REF: ['리필', 'refill', 'ep loi'], STP: ['스탬핑', '스탬프', '핫포일', 'stamping', 'hot foil', 'in chuyen'], ASM: ['조립', 'assembly', 'lap rap'], WRP: ['권취', 'wrapping', 'quan giay'], PCK: ['포장', 'packing', 'dong goi'] };
+  const PROC_SYN = { INJ: ['사출', 'injection', 'ep nhua'], REF: ['리필', 'refill', 'ep loi'], ASM: ['조립', 'assembly', 'lap rap'], WRP: ['권취', 'wrapping', 'quan giay'], PCK: ['포장', 'packing', 'dong goi'] };
   function parseProcess(low, f) {
     for (const p of ERP.PROC) {
       const toks = [p.id.toLowerCase(), p.ko, fold(String(p.vi || '').replace(/\(.*?\)/g, '')).trim(), String(p.en || '').toLowerCase()].concat(PROC_SYN[p.id] || []).filter(x => x && x.length >= 2);

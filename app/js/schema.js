@@ -4,10 +4,12 @@
   'use strict';
   const ERP = window.ERP;
 
+  // 1.13.16 (사용자 2026-10-28 "생산관리에서 핫포일 스탬핑 전부 삭제 생산 품목에 넣지 않는다. 소모품으로만 관리 원부자재 재고만 입출고로 수량관리"):
+  //   핫포일 스탬핑 (STP) 은 생산 공정이 아니다 — 공정 목록에서 뺐다. 현장 일보의 스탬핑 시트는 올리지 않고 (xl.js), 예전 스탬핑 일보 줄은 생산 반영하지 않는다 (inv.js).
+  //   핫포일은 원부자재 (소모품 CM) 재고에서 입출고로만 센다
   ERP.PROC = [
     { id: 'INJ', ko: '사출', vi: 'Ép nhựa', en: 'Injection', color: '#1F5FBF', unit: 'pcs' },
     { id: 'REF', ko: '리필 성형', vi: 'Ép lõi (Refill)', en: 'Refill forming', color: '#0E7A5F', unit: 'pcs' },
-    { id: 'STP', ko: '핫포일 스탬핑', vi: 'In chuyển (Hot foil)', en: 'Hot foil stamping', color: '#B45F06', unit: 'pcs', dash: false },
     { id: 'ASM', ko: '조립', vi: 'Lắp ráp', en: 'Assembly', color: '#5B4BB7', unit: 'pcs' },
     { id: 'WRP', ko: '종이 권취', vi: 'Quấn giấy', en: 'Paper wrapping', color: '#A8326B', unit: 'pcs' },
     { id: 'PCK', ko: '포장', vi: 'Đóng gói', en: 'Packing', color: '#2B7A8C', unit: 'set' },
@@ -442,7 +444,6 @@
   ERP.ENTRY = {
     INJ: ['machine_no', 'division', 'part', 'cavity', 'shots', 'ct', 'ok_qty', 'ng_qty', 'weight_kg', 'raw_material', 'raw_kg', 'work_min', 'remark'],
     REF: ['machine', 'machine_no', 'name', 'code', 'plan_qty', 'ok_qty', 'ng_qty', 'weight_kg', 'start', 'end', 'break_min', 'workers', 'stop_min', 'remark'],
-    STP: ['machine', 'machine_no', 'code', 'name', 'ok_qty', 'ng_qty', 'start', 'end', 'break_min', 'workers', 'stop_min', 'remark'],
     ASM: ['machine', 'machine_no', 'code', 'name', 'ok_qty', 'ng_qty', 'start', 'end', 'break_min', 'workers', 'stop_min', 'remark'],
     WRP: ['machine_no', 'name', 'code', 'po_no', 'po_qty', 'plan_qty', 'ok_qty', 'ng_qty', 'work_min', 'workers', 'stop_min', 'remark'],
     PCK: ['name', 'code', 'po_no', 'po_qty', 'machine_no', 'plan_qty', 'ok_qty', 'ok_ea', 'ng_qty', 'start', 'end', 'break_min', 'workers', 'stop_min', 'stop_reason'],

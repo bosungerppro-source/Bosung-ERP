@@ -33,8 +33,9 @@
     { code: 'WIP04', ko: '스푼', vi: 'Spoon', proc: 'INJ', etype: '반제품' },
     { code: 'WIPx6', ko: '부품', vi: 'Linh kiện', proc: 'INJ', etype: '반제품', note: 'WIP06 + WIP16·26·36·46·56' },
     { code: 'WIPx5', ko: '부품', vi: 'Linh kiện', proc: 'INJ', etype: '반제품', note: 'WIP15·25·35' },
-    { code: 'WIP11', ko: '부품', vi: 'Linh kiện', proc: 'STP', etype: '반제품' },
-    { code: 'WIPx1', ko: '부품', vi: 'Linh kiện', proc: 'STP', etype: '반제품', note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차)' },
+    // 1.13.16: 핫포일 스탬핑은 생산 공정이 아님 (사용자 "생산 품목에 넣지 않는다") — 스탬핑 배럴 단계는 공정 없음 (현장 재고 · 피벗에서 기타)
+    { code: 'WIP11', ko: '부품', vi: 'Linh kiện', etype: '반제품' },
+    { code: 'WIPx1', ko: '부품', vi: 'Linh kiện', etype: '반제품', note: 'WIP21 · 31 · … — 배럴(WIP01) 계열 (11차)' },
     { code: 'WIP55', ko: '부품', vi: 'Linh kiện', proc: 'ASM', etype: '반제품' },
     { code: 'WIP', ko: '조립 완료', vi: 'Hoàn thành lắp ráp', proc: 'ASM', etype: '반제품' },
     { code: 'SG', ko: '마니라 포장 완료', vi: 'Đã đóng gói Manila', proc: 'PCK', etype: '반제품' },
@@ -350,7 +351,6 @@
     if (proc === 'REF') { const p = pickPart(['WIP00'], (pinf && pinf.line) || line, name, pinf && pinf.sub, src); if (p && p.code) add(IT.get(p.code), p.conf, p.how); if (p && p.cands) p.cands.forEach(c => add(IT.get(c), 'review', 'code')); }
     else if (proc === 'INJ') { const stg = PART_OF_INJ[normName(src)]; if (stg) { const c = byStageLine().get(stg + '|' + line) || []; const w = LINE_WORD[line]; const named = w ? c.filter(x => toks(x.name).includes(w)) : [];
       if (c.length === 1) add(c[0], 'high', 'shared'); else if (named.length === 1) add(named[0], stg === 'WIP03' || stg === 'WIP04' ? 'high' : 'review', 'line-name'); c.slice(0, 5).forEach(x => add(x, 'review', 'line')); } }
-    else if (proc === 'STP') { const p = pickPart(['WIP11', 'WIPx1'], line, name, '', src); if (p && p.code) add(IT.get(p.code), p.conf, p.how); }
     else if (proc === 'ASM' || proc === 'WRP') { const p = pickPart(['WIP', 'WIP55'], line, name, '', src); if (p && p.code) add(IT.get(p.code), p.conf === 'high' ? 'review' : p.conf, p.how); }
     else if (proc === 'PCK') { const k = normName(src); DB.rows('items').forEach(r => { const st = INV.info(r).stage; if ((st === 'SG' || st === 'FG') && k.length >= 4 && normName(r.erp_code).includes(k)) add(r, 'review', 'erp'); }); }
     INV.search(src, 4).forEach(r => add(r, 'review', 'search'));
@@ -375,29 +375,28 @@
     return sc.slice(0, 6).map((x, i) => ({ code: x[0].code, name: x[0].name, conf: i === 0 && unique && top >= 5 ? 'high' : 'review', how: 'name' }));
   };
 
-  // ------------------------------------------------------------------ 7차: 조립 · 스탬핑 BOM 자동 구성 (ECOUNT 품목코드로)
+  // ------------------------------------------------------------------ 7차: 조립 BOM 자동 구성 (ECOUNT 품목코드로). 1.13.16: 스탬핑 BOM 은 없앰 (핫포일 스탬핑은 생산 공정이 아님) — 배럴은 배럴 (WIP01) 에서만
   const ROLES = [
-    { role: 'refill', st: ['WIP00'], old: 'refill_code', ko: '심 (리필)', vi: 'Lõi' }, { role: 'barrel', st: ['WIP11', 'WIPx1', 'WIP01'], old: 'barrel_code', ko: '배럴', vi: 'Barrel' },
+    { role: 'refill', st: ['WIP00'], old: 'refill_code', ko: '심 (리필)', vi: 'Lõi' }, { role: 'barrel', st: ['WIP01'], old: 'barrel_code', ko: '배럴', vi: 'Barrel' },
     { role: 'nose', st: ['WIP02'], old: 'nose_code', ko: '노즈콘', vi: 'Nose cone' }, { role: 'holder', st: ['WIP03'], old: 'holder', ko: '홀더', vi: 'Holder' }, { role: 'spoon', st: ['WIP04'], old: 'spoon', ko: '스푼', vi: 'Spoon' }];
-  const STP_ROLES = [{ role: 'barrel', st: ['WIP01'], ko: '배럴 (스탬핑 전)', vi: 'Barrel (trước ép nhũ)' }];
-  INV.ASM_ROLES = ROLES; INV.STP_ROLES = STP_ROLES;
-  INV.roleName = (role, stp) => { const r = (stp ? STP_ROLES : ROLES).find(x => x.role === role) || ROLES.find(x => x.role === role); return r ? L(r.ko, r.vi) : role; };
-  /** proposals for every assembled pen (WIP · WIP55) and stamped barrel (WIP11). Existing BOM lines are reported, never overwritten here. */
+  INV.ASM_ROLES = ROLES;
+  INV.roleName = (role) => { const r = ROLES.find(x => x.role === role); return r ? L(r.ko, r.vi) : role; };
+  /** proposals for every assembled pen (WIP · WIP55). Existing BOM lines are reported, never overwritten here. */
   INV.asmPlan = () => DB.memo('inv.asmPlan', ['items', 'bom', 'bom_lines', 'code_dict'], () => {
     const old = new Map(); DB.rows('bom').forEach(b => { const c = up(b.color_code); if (c && !old.has(c)) old.set(c, b); });
     const have = new Map(); DB.rows('bom_lines').forEach(l => { const p = str(l.parent); if (!p) return; let a = have.get(p); if (!a) have.set(p, a = []); a.push(l); });
     const out = [];
     DB.rows('items').forEach(m => {
-      if (m.hidden) return; const inf = INV.info(m); const stp = inf.stage === 'WIP11'; if (!(inf.stage === 'WIP' || inf.stage === 'WIP55' || stp)) return;
+      if (m.hidden) return; const inf = INV.info(m); if (!(inf.stage === 'WIP' || inf.stage === 'WIP55')) return;
       const ob = old.get(up(m.code)); const parts = [];
-      (stp ? STP_ROLES : ROLES).forEach(R => {
+      ROLES.forEach(R => {
         if (ob && R.old && !str(ob[R.old])) return;   // the example BOM says this pen has no such part
         const pk = pickPart(R.st, inf.line, m.name, inf.sub, m.code, R.role === 'holder' || R.role === 'spoon'); if (!pk) return;
         parts.push(Object.assign({ role: R.role }, pk));
       });
       const ex = have.get(m.code) || [];
       const conf = !parts.length ? 'none' : parts.every(p => p.conf === 'high') ? 'high' : parts.some(p => p.conf === 'high') ? 'part' : (parts.some(p => p.conf === 'review') ? 'review' : 'none');
-      out.push({ parent: m.code, name: m.name, stage: inf.stage, line: inf.line, sub: inf.sub, stp, parts, conf, existing: ex.length, auto: ex.length > 0 && ex.every(l => l.src === 'auto') });
+      out.push({ parent: m.code, name: m.name, stage: inf.stage, line: inf.line, sub: inf.sub, parts, conf, existing: ex.length, auto: ex.length > 0 && ex.every(l => l.src === 'auto') });
     });
     return out;
   });
@@ -412,7 +411,7 @@
       const kids = x.parts.map(p => ({ role: p.role, code: pick[pc + '|' + p.role] !== undefined ? pick[pc + '|' + p.role] : ((p.conf === 'high' || (!opt.onlyHigh && p.conf === 'review')) ? p.code : '') })).filter(k => k.code);
       if (!kids.length) { skipped++; return; }
       cur.forEach(l => drop.push(l._id));
-      kids.forEach(k => add.push({ parent: pc, child: k.code, qty: 1, src: 'auto', note: INV.roleName(k.role, x.stp) }));
+      kids.forEach(k => add.push({ parent: pc, child: k.code, qty: 1, src: 'auto', note: INV.roleName(k.role) }));
       done++;
     });
     if (drop.length) DB.remove('bom_lines', drop);
@@ -496,6 +495,7 @@
     const madeSG = new Set(); (prodRows || []).forEach(r => { if (!r || !r.date || r.date <= openDate) return; const it = itemOf(r).item; if (it && INV.info(it).stage === 'SG') madeSG.add(it.code); });
     (prodRows || []).forEach(r => {
       if (!r || !r.date) return;
+      if (r.process === 'STP') return;   // 1.13.16: 핫포일 스탬핑은 생산이 아님 — 재고에 넣지 않고 해결할 항목에도 없음 (예전 자료 · 다른 PC 의 일보)
       if (r.date <= openDate) { diag.before++; return; }
       diag.considered++;
       const { item, src, mapped } = itemOf(r); if (mapped) diag.mapped++;

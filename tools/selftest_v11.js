@@ -98,27 +98,28 @@ function usageBook(rows) {
         bal: ['WAX1', 'PP1', 'CASE1', 'RM102', 'BM02', 'AB102', 'MH', 'MS', 'BM01002', 'BM05', 'RM105'].map(c => c + ':' + bal(c)),
         skip: Array.from(pp.diag.matSkip.entries()).map(([k, v]) => k + ':' + v.n).sort(), resin: pp.diag.resin, raw: pp.diag.rawUnmatched.size, mode: I.PROD_MODES().find(x => x.v === 'in_bom').label };
     });
-    eq('생산 입고: 조립 · 스탬핑 · 사출 · 리필 모두 현장 재고에 들어감 (불량만 있는 사출 행은 입고 0)', r.prod, ['AB102:200', 'BM01002:1000', 'BM05:500', 'RM102:800', 'RM105:300']);
-    eq('차감: 조립 → 심 · 스탬핑 배럴 · 홀더 · 스푼, 스탬핑 → 배럴 (현장 재고만)', r.use, ['AB102:1000', 'BM02:200', 'MH:1000', 'MS:1000', 'RM102:1000']);
+    // 1.13.16 (사용자 "생산관리에서 핫포일 스탬핑 전부 삭제 생산 품목에 넣지 않는다"): 핫포일 스탬핑 일보 (AB102 200) 는 입고 · 차감하지 않는다
+    eq('생산 입고: 조립 · 사출 · 리필은 현장 재고에 들어감, 핫포일 스탬핑 일보는 안 들어감 (1.13.16) (불량만 있는 사출 행은 입고 0)', r.prod, ['BM01002:1000', 'BM05:500', 'RM102:800', 'RM105:300']);
+    eq('차감: 조립 → 심 · 스탬핑 배럴 (BOM 그대로) · 홀더 · 스푼, 핫포일 스탬핑 일보는 차감 없음 (현장 재고만)', r.use, ['AB102:1000', 'MH:1000', 'MS:1000', 'RM102:1000']);
     eq('원부자재 차감 행 0', r.matUse, 0);
     eq('원재료 · 사출 수지 · 부자재 재고는 기초 그대로 (5,000)', r.bal.slice(0, 3), ['WAX1:5000', 'PP1:5000', 'CASE1:5000']);
-    eq('현장 재고: 기초 5,000 + 입고 − 차감', r.bal.slice(3), ['RM102:4800', 'BM02:4800', 'AB102:4200', 'MH:4000', 'MS:4000', 'BM01002:1000', 'BM05:500', 'RM105:300']);
+    eq('현장 재고: 기초 5,000 + 입고 − 차감 (배럴 BM02 · 스탬핑 배럴 AB102 는 스탬핑 일보로 바뀌지 않음)', r.bal.slice(3), ['RM102:4800', 'BM02:5000', 'AB102:4000', 'MH:4000', 'MS:4000', 'BM01002:1000', 'BM05:500', 'RM105:300']);
     eq('건너뛴 원부자재 차감이 진단에 남음 (부자재 케이스 · 원료 왁스 · 사출 수지 2행 · 배합표 왁스)', r.skip, ['CASE1:1', 'PP1:2', 'WAX1:2']);
     ok('사출 수지 차감 0 · 원료 이름 연결 목록 비어 있음', r.resin === 0 && r.raw === 0, r);
     ok('반영 방식 이름: 현장 부품만 차감', /현장/.test(r.mode) && !/자재 차감/.test(r.mode), r.mode);
   });
 
   // ------------------------------------------------------------------------------------------
-  await sec('3. 조립 BOM 자동 구성: 배럴 = WIP11 · WIPx1 · WIP01', async () => {
+  await sec('3. 조립 BOM 자동 구성: 배럴 = 배럴 (WIP01) 만 (1.13.16 — 핫포일 스탬핑은 생산 공정이 아님, 11차의 WIP11 · WIPx1 먼저는 없앰)', async () => {
     const r = await A.evaluate(async () => {
       ERP.db.replace('bom', []); await ERP.db.flush();   // 2 단락의 예시 색상 BOM(배럴 없음) 이 제안을 막지 않게
       const plan = ERP.inv.asmPlan(); const p = (c) => plan.find(x => x.parent === c);
       const bar = (c) => { const x = p(c); const b = x && x.parts.find(q => q.role === 'barrel'); return b ? b.code + ':' + b.conf : null; };
       return { red: bar('BM01002'), redOrange: bar('BM01005'), roles: ERP.inv.ASM_ROLES.find(x => x.role === 'barrel').st };
     });
-    eq('배럴 후보 순서: WIP11 → 배럴 계열(WIPx1) → 배럴(WIP01)', r.roles, ['WIP11', 'WIPx1', 'WIP01']);
-    eq('같은 색 WIP11 이 있으면 WIP11 (RED → AB102)', r.red, 'AB102:high');
-    eq('WIP11 이 없고 WIP21 이 있으면 WIP21 (RED ORANGE → AC105)', r.redOrange, 'AC105:high');
+    eq('배럴 후보: 배럴 (WIP01) 만', r.roles, ['WIP01']);
+    eq('같은 색 스탬핑 배럴 (WIP11 AB102) 이 있어도 배럴 (RED → BM02)', r.red, 'BM02:high');
+    eq('같은 색 배럴 계열 (WIP21 AC105) 이 있어도 배럴 (RED ORANGE → BM05)', r.redOrange, 'BM05:high');
   });
 
   // ------------------------------------------------------------------------------------------
