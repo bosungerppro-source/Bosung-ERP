@@ -326,7 +326,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     ok('Mini 를 누르면 품번별로 펼침 · Dial 다시 보임', o2.sub > 0 && o2.kinds.includes('Dial') && o2.off.length === 0, o2);
     await ev(() => { ERP.state.prodTab = 'analysis'; ERP.state.pan = null; ERP.goto('production'); ERP.render(); }); await page.waitForTimeout(400);
     const pa = await ev(() => ({ h: Array.from(document.querySelectorAll('main h2')).map(x => x.textContent).join(' | '), st: ERP.state.pan }));
-    ok('생산 관리 → 일별 생산수량: 기본 = 조립 · 품목군별', /일별 조립 생산수량/.test(pa.h) && pa.st.proc === 'ASM' && pa.st.by === 'division', pa);
+    ok('생산 관리 → 일별 생산수량: 기본 = 조립 · 품목군별', /일별 조립 생산수량/.test(pa.h) && JSON.stringify(pa.st.procs) === '["ASM"]' && pa.st.by === 'division', pa);   // 1.13.14 부터 공정은 여러 개 (procs)
   }
 
   section('15. 예시 데이터 = 행 단위 표시 · 예시 행만 한 번에 삭제');

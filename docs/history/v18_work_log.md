@@ -445,3 +445,33 @@
 ### 같은 날 사용자 질문: 휴대폰으로 보기가 안 됨 ("2일 전에는 됬는대 지금은 안되")
 - 확인 (코드 변경 없음): 웹 앱 (ERP 의 주소) `?ping=1` → 7판 정상, 휴대폰 화면 (비밀번호 화면) 정상, ERP 가 08:42 에 요약을 보냄 (드라이브 `ERP_mobile.json` 08:42 갱신, 6,731 bytes, 1.13.12), 그 실제 요약을 `google/Code.gs` 7판 휴대폰 화면으로 그려도 정상 (가짜 Apps Script — selftest_v15 와 같은 방식). 비밀번호 확인 방식 (소금 + SHA-256) 은 4판 · 6판 · 7판 같음.
 - 남은 원인 = 휴대폰의 비밀번호 단계 (틀림 · 10번 틀려 잠김 · 구글에 비밀번호 없음 · 예전 주소). 사용자에게: ERP 에서 비밀번호를 다시 정하고 (구글 쪽 비밀번호 · 잠금 · 기억한 열쇠가 새로) 휴대폰은 QR 을 다시 찍어 열기, 안 되면 휴대폰에 뜨는 글자를 알려 달라고 함.
+- Release v1.13.13: Claude 가 실행 (2026-10-28, Actions #12 성공, `dcde69b`, `releases/latest` = v1.13.13 — 깃허브 로그인이 풀려 사용자가 다시 로그인한 뒤). `ColorPencil-ERP-Setup-1.13.13.exe` 114,232,036 bytes · SHA-256 `956a0c97f9331a5d9687d6dd54a4bcede2d9d6c8dc525fe2d4d39a600c5bab89` (GitHub 에서 빌드) · `ERP_Demo.html` (이 PC 데모와 같음) · `latest.json` (1.13.13, 크기 · 지문이 Release 설치 파일과 같음). 이 PC 의 ERP 는 09:26 에 1.13.12 → 1.13.13 (`08_erp_code/scripts/update_erp.ps1` — 새 창이 뜬 뒤 닫아 한 번에 꺼짐).
+
+## 1.13.14 (2026-10-28) — 생산 관리 · 위젯: 공정도 여러 개 골라 보기
+- 사용자 (2026-10-28, 생산 관리 일별 조립 생산량 사진 — 공정 드롭다운을 연 모습): "생산 관리 조립 보는것을 내가 중복선택해서 볼수있게 바꾼다. 품목군 선택이나. 공정별 선택은 전부 선택해서 볼수있게 한다." (사출 일보 분석을 보고하던 중에 — 사출 일보는 1.13.15 로)
+
+### 정한 것
+- 품목군은 1.13.8 부터 체크 (여러 개). 공정도 같은 모양의 체크로 (전체 + 공정 설정의 공정들, 비면 모든 공정). 처음은 조립 (7차부터 기본). 순서는 공정 설정 순.
+- 같은 종류 ("하나말하면 다른거도"): 생산 관리 일별 · 월별 탭, 종합 현황 일별 · 월별 조립 생산량 위젯 ⚙. 그대로: 일보 조회 고르기 (목록 거르기 — 1.13.8 때도 그대로), 공정 실적 숫자 카드 (숫자 하나라 공정을 섞으면 단위가 섞임), 현장 재고 위젯, 휴대폰 요약 (조립).
+- 품목군 고르기는 공정 묶음마다 저장 (공정 하나면 예전 열쇠 그대로 — 예전에 고른 품목군 유지). 수량은 예전 '공정: 전체' 와 같이 양품 pcs (포장은 pcs 환산).
+
+### 한 것
+- `app/js/calc.js` `C.procPass` · `C.procKey`, `C.rowsBetween` · `C.prodDivs` · `C.prodDivsShown` · `C.setProdDivsShown` 이 공정 하나 (글자) 또는 여러 개 (배열).
+- `app/js/p_production.js` `procChecks` (`.pprocs`), 일별 · 월별 탭 `st.procs` (`procsOf` — 예전 `st.proc` 를 읽어 바꿈), 이름 (`procNames` — 숫자 카드 · 표 제목 · 탭 이름), 체크 모양 함수 `chk` 하나로.
+- `app/js/p_dashboard.js` `procsOfW` · `procOpt` (multi) · `pnames`, `asm_daily` · `asm_monthly` 가 공정 여러 개, `ERP.prodByMonth` 의 p 는 공정 하나 또는 열쇠 배열, 위젯 설정 대화상자: 글자 값도 체크로 · 체크를 바꾸면 다른 옵션 (품목군 목록) 도 다시 그림.
+- 버전 1.13.14.
+
+### 시험
+- 먼저 만든 시험 (v17 7-11장 · 7-3장의 공정 고르기를 체크 클릭으로): 고치기 전 7-3 · 7-11 실패 (공정 체크 없음 · 예전 드롭다운), 145 통과. 고친 뒤 처음: 월별 탭 기대값이 틀림 (일별에서 그 공정 묶음에 고른 품목군을 월별도 같이 씀 — 1.13.8 규칙) → 시험만 고침, v17 169 통과. v15 의 월별 공정 바꾸기 (드롭다운) 도 체크 클릭으로.
+  - 자료: 조립 Dial 100 · 종이 권취 Glass 300 (10-05) · 사출 Mini 1,000 · 포장 Dial 10 set (120 pcs, 10-06) · 종이 권취 Glass 50 (9월). 조립만 → 조립 + 종이 권취 (품목군 = 두 공정의 것, 이름 '월 생산량 (조립 · 종이 권취)', 탭 '일별 생산량') → 행: 공정별 → Glass 만 (저장 'ASM,WRP') → 조립만 (따로) → 전체 (포장 120 pcs) → 월별 · 위젯 ⚙ (예전 설정 '사출' 하나 → 사출만 켜짐, 조립 + 종이 권취 저장 = 배열, 제목) · 베트남어.
+- 전체 시험에서 v7 1개: "생산 관리 → 일별 생산수량: 기본 = 조립 · 품목군별" 이 상태 이름 `st.proc === 'ASM'` 을 봄 (화면 제목은 맞음) → `st.procs` = ['ASM'] 로 시험만 고침, 다시 148 통과.
+
+### 시험 · 설치 파일 · 데모 (이 PC 에서 만듦, 2026-10-28)
+- 전체 (이 PC, Windows, 2026-10-28): v18 184 · v17 169 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.13 `dcde69b` 로 업그레이드 시험 포함, 기대값 고친 뒤) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.14.exe`: 114,199,732 bytes, SHA-256 `b84361e20264ae924382e667e0caaa2b34e0683f8bab24f7af073b90ab7071c0` (electron-builder `--win dir` + NSIS 3.12). app.asar 의 calc.js · p_production.js · p_dashboard.js · core.js 등 = 소스와 같음, 버전 1.13.14.
+- 데모 `ERP_Demo.html`: 7,921,225 bytes, SHA-256 `b8858eb44b477d8baf32d1b12361abfb09c433b50b420bc55a49b532eb7b6478`.
+
+### 같은 날 사용자 요청 (다음 버전 1.13.15): 사출 생산일보 그대로 올리기 · 원재료 사용량
+- 사용자: "@…\2026.10.27.xlsx 사출 생산일보이다. 생산 수량에 - 중량수량을 수량으로 잡고 호기는 기계 번호/ 종류품명은 품목명이고 품명은 barrel 은 wip01 spoon 은 wip04 erp code 와 매칭시키고 색상명은 barrel blue 이면 bom에서 검색해소 코드와 erp코드 매칭시켜라. pp/ps/hdpe는 무시한다. 기본적인 데이터 A4:p55 는 기록해두고 사출 자료분석에만 사용한다. q1:v58 의 자료는 무시. 중량(kg) 에 있는 데이터는 spoon-ps / nose cone-pp / case-pp / barrel-pp / holder-hdpe / core-ldpe 원재료 사용량이다. ps/pp/hdpe/ldpe 일별 월별 년별 사용량만 따로 표시준다."
+- 분석 (코드 변경 없음): 시트 '10- 27' — A1 날짜, 4행 한국어 머리글 (A 호기 · B 주야 · C 종류품명 · D 품명 · E 색상명 · F 가동시간 · G 캐비티 · H 캐비티2 · I 톤수 (기계 모델) · J CT · K 중량(kg) · L 사출시간 · M Shot수 · N 수량 = Shot × 캐비티2 · O 수리현황 · P 중량수량 = 중량 ÷ 개당 g), 5 ~ 55행 = 호기 1 ~ 25 × 주야, 56행 합계. 지금 ERP 는 unknown. ERP 품목: barrel = WIP01-<품목군>-BRR, spoon = WIP04-…-SP, nose cone = WIP02-…-NCONE, holder · case = WIP03-…-HD (품목 이름 = 색). 이 파일: Mini barrel MAHOGANY BM42 · SCARLET BM03 · YELLOW BM14, dial barrel YELLOW ORANGE BR15 · BLUEGREEN BR06 은 하나씩, dial · regular barrel BLUE · PINK · BLACK 은 BR · FD 두 계열, spoon AQUAGREEN · TAN · nose cone BLACK · BROWN 은 품목에 없음, 색 칸 PP · PS · HDPE 는 매칭 안 함. 예전 사출 이력 (1-02 ~ 10-19, 8,635줄) 은 색 없이 'Barrel' 같은 부품 이름 · 원료 PP · GPPS · HDPE · raw_kg.
+- 사용자 답 (질문 4개): 현장 재고에도 넣기 · dial · regular barrel 은 BR 계열 · 원재료 사용량은 생산 관리 + 종합 현황 · nose cone · holder · case 도 같이 맞추기.

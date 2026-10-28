@@ -10,7 +10,8 @@
    7-4 현장 재고 → 원재료 환산 표 (조립 재고 옆 · 공정별 · 위젯) · 7-5 MRP 수주 가져오기: 전체 선택 · 진행 상태 · 범위 · 7-6 박스 포장의 SG 는 차감 안 함 (1.13.9)
    7-7 포장한 만큼 조립 재고가 줄어듦 — 박스 → 세트 → 조립품 (1.13.10) · 7-8 수주서 그대로 올리기 (1.13.11)
    7-9 수주 목록 품번 수 → 품목군 · 납기는 늦은 날짜부터 (수주 목록 · 종합 현황 · 휴대폰 · MRP · 품목 상세, 1.13.12)
-   7-10 종이 권취 일보의 품목군 = Glass (현장 일일 생산일보 · ERP 일보 양식 · 일보 입력, 1.13.13) · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7-10 종이 권취 일보의 품목군 = Glass (현장 일일 생산일보 · ERP 일보 양식 · 일보 입력, 1.13.13)
+   7-11 생산 관리 일별 · 월별 탭 · 종합 현황 일별 · 월별 위젯: 공정도 여러 개 골라 보기 (1.13.14) · 8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -305,9 +306,10 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('월별 조립 생산량에도 같은 품목군 (Mini = 9월 300 + 10월 200)', await pv(), { all: false, opts: on(['dial', 'mini']), rows: [['Dial', '150'], ['Mini', '500'], ['월 합계', '650']], kpi: '650', oldSel: false });
     await A.reload(); await ready(); await prod('monthly');
     eq('다시 열어도 그대로 (서버에 저장됨)', (await pv()).rows, [['Dial', '150'], ['Mini', '500'], ['월 합계', '650']]);
-    await A.selectOption('main .toolbar select:nth-of-type(2)', 'INJ'); await settle();
+    const tickPr = async (sel) => { await A.click('main .pprocs ' + sel + ' input'); await settle(); };   // 1.13.14 부터 공정도 체크
+    await tickPr('[data-v="INJ"]'); await tickPr('[data-v="ASM"]');
     eq('공정을 사출로 바꾸면 사출 일보의 품목군 · 사출은 따로 (전체)', await pv(), { all: true, opts: [['bulk', 'Bulk', false], ['mini', 'Mini', false]], rows: [['Bulk', '400'], ['Mini', '1,000'], ['월 합계', '1,400']], kpi: '1,400', oldSel: false });
-    await A.selectOption('main .toolbar select:nth-of-type(2)', 'ASM'); await settle();
+    await tickPr('[data-v="ASM"]'); await tickPr('[data-v="INJ"]');
     eq('조립으로 돌아오면 고른 것 그대로', (await pv()).opts, on(['dial', 'mini']));
     await tickP('[data-all]');
     eq('전체를 켜면 모두 · 저장된 것은 비움', [await pv(), await ev(() => ERP.db.setting('prodDivs'))],
@@ -616,6 +618,57 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('일보 입력: 종이 권취 = Glass · 설비 마스터 품목군 (Peel) 은 그대로 · 포장은 빈칸 그대로', await ev(() => ERP.db.rows('prod_log').filter(r => r.source === 'manual').map(r => [r.process, r.code, r.division || ''])),
       [['WRP', 'PC001', 'Glass'], ['WRP', 'PC012', 'Peel'], ['PCK', 'K-P1', '']]);
     await ev(async (k) => { const DB = ERP.db; DB.replace('prod_log', k.prod_log); DB.replace('machines', k.machines); await DB.flush(); ERP.state.entry = null; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-11. 생산 관리 · 위젯: 공정도 여러 개 골라 보기 (1.13.14, 사용자 "생산 관리 조립 보는것을 내가 중복선택해서 볼수있게 … 품목군 선택이나. 공정별 선택은 전부 선택해서 볼수있게 한다")', async () => {
+    const keep = await ev(() => ({ prod_log: ERP.db.rows('prod_log').map(r => Object.assign({}, r)), dash: ERP.db.setting('dash', null) }));
+    await ev(async () => { const DB = ERP.db; const r = (date, process, division, q, ea) => Object.assign({ date, process, shift: 'D', division, ok_qty: q, source: 'test' }, ea !== undefined ? { ok_ea: ea, unit: 'set' } : {});
+      DB.replace('prod_log', [r('2026-10-05', 'ASM', 'Dial', 100), r('2026-10-05', 'WRP', 'Glass', 300), r('2026-10-06', 'INJ', 'Mini', 1000), r('2026-10-06', 'PCK', 'Dial', 10, 120), r('2026-09-10', 'WRP', 'Glass', 50)]);
+      delete DB.meta.prodDivs; await DB.saveMeta(); await DB.flush(); });
+    const prod = async (tab) => { await ev((t) => { ERP.state.prodTab = t; ERP.state.pan = null; ERP.state.pmon = null; ERP.goto('production'); ERP.render(); }, tab); await settle(); };
+    /** 공정 체크 [전체, [공정, 이름, 켜짐]] · 품목군 체크 열쇠 · 첫 표 [이름, 합계] · 첫 숫자 카드 [제목, 값] · 표 제목 · 고른 탭 이름 · 예전 공정 드롭다운이 남았는지 */
+    const pv = () => ev(() => { const pr = document.querySelector('main .pprocs'), dv = document.querySelector('main .pdivs'), t = document.querySelector('main table.tbl');
+      return { all: pr ? pr.querySelector('[data-all] input').checked : null, procs: pr ? Array.from(pr.querySelectorAll('[data-v]')).filter(l => l.querySelector('input').checked).map(l => l.dataset.v) : null,
+        divs: dv ? Array.from(dv.querySelectorAll('[data-v]')).map(l => l.dataset.v) : null, rows: t ? Array.from(t.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) : null,
+        kpi: [(document.querySelector('main .kpis .kpi-label') || {}).textContent || '', (document.querySelector('main .kpis .kpi-val .v') || {}).textContent || ''], title: (document.querySelector('main section.card h2') || {}).textContent || '',
+        tab: (document.querySelector('main .tabs .on, main .tabs [aria-selected="true"], main .tabs .active') || {}).textContent || '', oldSel: Array.from(document.querySelectorAll('main .toolbar select option')).some(o => /^공정:/.test(o.textContent)) }; });
+    const tickPr = async (sel) => { await A.click('main .pprocs ' + sel + ' input'); await settle(); };
+    await prod('analysis');
+    let v = await pv();
+    eq('일별 탭 처음: 공정 = 체크 (조립만 켜짐) · 예전 공정 드롭다운 없음 · 조립 줄만', [v.all, v.procs, v.rows, v.kpi, v.oldSel], [false, ['ASM'], [['Dial', '100'], ['일 합계', '100']], ['월 조립 생산량', '100'], false]);
+    await tickPr('[data-v="WRP"]'); v = await pv();
+    eq('종이 권취도 켜면 두 공정을 같이: 품목군 = 두 공정 일보의 품목군 · 이름은 공정들', [v.procs, v.divs, v.rows, v.kpi, v.title, v.tab],
+      [['ASM', 'WRP'], ['dial', 'glass'], [['Dial', '100'], ['Glass', '300'], ['일 합계', '400']], ['월 생산량 (조립 · 종이 권취)', '400'], '일별 생산수량 (조립 · 종이 권취) · 2026-10', '일별 생산량']);
+    await ev(() => { ERP.state.pan.by = 'process'; ERP.render(); }); await settle();
+    eq('행: 공정별 → 고른 공정만 줄', (await pv()).rows, [['조립', '100'], ['종이 권취', '300'], ['일 합계', '400']]);
+    await ev(() => { ERP.state.pan.by = 'division'; ERP.render(); }); await settle();
+    await A.click('main .pdivs [data-v="glass"] input'); await settle();
+    eq('품목군 고르기는 공정 묶음마다 저장 (조립 + 종이 권취 = Glass 만)', [(await pv()).rows, await ev(() => ERP.db.setting('prodDivs'))], [[['Glass', '300'], ['일 합계', '300']], { 'ASM,WRP': ['glass'] }]);
+    await tickPr('[data-v="WRP"]');
+    eq('조립만으로 돌아오면 조립의 품목군 (따로 — 전체)', (await pv()).rows, [['Dial', '100'], ['일 합계', '100']]);
+    await tickPr('[data-all]'); await ev(() => { ERP.state.pan.by = 'process'; ERP.render(); }); await settle(); v = await pv();
+    eq('전체를 켜면 모든 공정 (포장은 pcs 환산) · 제목에 공정 이름 없음', [v.all, v.procs, v.rows, v.kpi[0], v.title],
+      [true, [], [['사출', '1,000'], ['리필 성형', '0'], ['핫포일 스탬핑', '0'], ['조립', '100'], ['종이 권취', '300'], ['포장', '120'], ['일 합계', '1,520']], '월 총 생산량 (pcs 환산)', '일별 생산수량 · 2026-10']);
+    await prod('monthly'); await tickPr('[data-v="WRP"]'); v = await pv();
+    eq('월별 탭도 공정 체크 (따로 · 처음은 조립) — 종이 권취를 켜면 일별에서 그 묶음에 고른 품목군 (Glass) 그대로 (두 탭이 같이 씀) · 9월 50 + 10월 300', [v.procs, v.rows, v.tab], [['ASM', 'WRP'], [['Glass', '350'], ['월 합계', '350']], '월별 생산량']);
+    // 종합 현황 일별 · 월별 위젯 ⚙: 공정도 체크 (예전 설정의 공정 하나는 그대로 읽음)
+    await ev(() => { ERP.db.setSetting('dash', [{ k: 'v17-ad', id: 'asm_daily', w: 4, o: { proc: 'ASM', view: 'table' } }, { k: 'v17-am', id: 'asm_monthly', w: 4, o: { proc: 'INJ', view: 'table' } }]); ERP.state.dashEdit = true; ERP.state.dashDate = '2026-10-06'; ERP.goto('dashboard'); ERP.render(); }); await settle();
+    const wv = (id) => ev((i) => { const el = document.querySelector('.wgrid .w[data-id=' + i + ']'); return { title: el.querySelector('h2').textContent, rows: Array.from(el.querySelectorAll('tbody tr')).map(tr => [tr.children[0].innerText.trim(), tr.children[1].innerText.trim()]) }; }, id);
+    const dlgP = () => ev(() => { const f = document.querySelector('.modal [data-k="proc"]'); return f ? { all: f.querySelector('[data-all] input').checked, on: Array.from(f.querySelectorAll('[data-v]')).filter(l => l.querySelector('input').checked).map(l => l.dataset.v), n: f.querySelectorAll('[data-v]').length } : null; });
+    await A.click('.wgrid .w[data-id=asm_monthly] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal [data-k="proc"]');
+    eq('월별 위젯 ⚙ (예전 설정 = 사출 하나): 공정 체크에 사출만 켜짐', await dlgP(), { all: false, on: ['INJ'], n: 6 });
+    await A.click('.modal .modal-foot button:not(.primary)'); await settle();
+    await A.click('.wgrid .w[data-id=asm_daily] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal [data-k="proc"]');
+    eq('일별 위젯 ⚙: 공정 체크 (조립만 켜짐) · 품목군 체크', [await dlgP(), await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent))], [{ all: false, on: ['ASM'], n: 6 }, ['공정 (기본 조립)', '품목군']]);
+    await A.click('.modal [data-k="proc"] [data-v="WRP"] input'); await A.waitForTimeout(150);
+    eq('공정을 더 고르면 품목군 목록도 두 공정의 것', await ev(() => Array.from(document.querySelectorAll('.modal [data-k="divs"] [data-v]')).map(l => l.dataset.v)), ['dial', 'glass']);
+    await A.click('.modal .modal-foot button.primary'); await settle();
+    eq('일별 위젯: 조립 + 종이 권취 · 제목에 두 공정 · 저장 (배열)', [await wv('asm_daily'), await ev(() => ERP.dashLayout().find(x => x.id === 'asm_daily').o.proc)],
+      [{ title: '일별 생산량 (조립 · 종이 권취) · 2026-10', rows: [['Glass', '300'], ['Dial', '100'], ['일 합계', '400']] }, ['ASM', 'WRP']]);
+    await ev(() => ERP.setLang('vi')); await prod('analysis');
+    const vt = await ev(() => document.querySelector('main .pprocs').innerText.replace(/\s+/g, ' '));
+    ok('베트남어: 공정 줄 Công đoạn · Tất cả · 한글 없음', /Công đoạn/.test(vt) && /Tất cả/.test(vt) && !/[가-힣]/.test(vt), vt);
+    await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('prod_log', k.prod_log); delete DB.meta.prodDivs; await DB.saveMeta(); DB.setSetting('dash', k.dash); await DB.flush(); ERP.state.dashEdit = false; ERP.state.dashDate = null; ERP.state.pan = null; ERP.state.pmon = null; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

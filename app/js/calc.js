@@ -71,9 +71,13 @@
     a.achieve = a.plan > 0 ? a.okForPlan / a.plan : null;
     return a;
   };
+  // 1.13.14 (사용자 2026-10-28 "공정별 선택은 전부 선택해서 볼수있게"): 공정 = 하나 ('' = 모든 공정) 또는 여러 개 (배열, 비면 모든 공정)
+  C.procPass = (proc) => Array.isArray(proc) ? (proc.length ? (p) => proc.includes(p) : () => true) : (proc ? (p) => p === proc : () => true);
+  /** 공정 고르기의 열쇠 — 공정 하나면 그 공정 (예전 설정과 같음), 여러 개면 'ASM,WRP', 모든 공정이면 '' */
+  C.procKey = (proc) => Array.isArray(proc) ? proc.map(String).sort().join(',') : String(proc || '');
   C.rowsBetween = function (from, to, proc) {
-    const ix = C.prodIndex(); const out = [];
-    for (const d of ix.dates) { if (d < from) continue; if (d > to) break; const a = ix.byDate.get(d); for (const r of a) if (!proc || r.process === proc) out.push(r); }
+    const ix = C.prodIndex(); const out = []; const pass = C.procPass(proc);
+    for (const d of ix.dates) { if (d < from) continue; if (d > to) break; const a = ix.byDate.get(d); for (const r of a) if (pass(r.process)) out.push(r); }
     return out;
   };
   C.dailySeries = function (from, to, metric) {
@@ -185,13 +189,14 @@
   C.setPoKindsShown = function (shown) { const s = new Set(shown); DB.setSetting('poKindsOff', C.poKinds().filter(k => !s.has(k))); };
   // 1.13.8: 생산일보 품목군 — 대소문자 · 앞뒤 공백만 다르면 한 묶음 (생산 관리 · 종합 현황의 일별 · 월별 표와 같은 규칙). 열쇠 = 소문자, 품목군이 없으면 '–'
   C.divKey = (r) => String((r && r.division) || '').trim().toLowerCase() || '–';
-  /** 그 공정 ('' = 모든 공정) 일보에 있는 품목군 [[열쇠, 이름]] + 이미 고른 것 (keep) — 이름은 처음 나온 글자, 순서는 열쇠 순 (표와 같음) */
+  /** 그 공정 ('' = 모든 공정, 1.13.14 부터 여러 개 배열도) 일보에 있는 품목군 [[열쇠, 이름]] + 이미 고른 것 (keep) — 이름은 처음 나온 글자, 순서는 열쇠 순 (표와 같음) */
   C.prodDivs = function (proc, keep) {
-    const seen = DB.memo('prodDivs:' + (proc || ''), ['prod_log'], () => { const m = new Map(); DB.rows('prod_log').forEach(r => { if (proc && r.process !== proc) return; const k = C.divKey(r); if (!m.has(k)) m.set(k, String(r.division || '').trim()); }); return m; });
+    const pass = C.procPass(proc);
+    const seen = DB.memo('prodDivs:' + C.procKey(proc), ['prod_log'], () => { const m = new Map(); DB.rows('prod_log').forEach(r => { if (!pass(r.process)) return; const k = C.divKey(r); if (!m.has(k)) m.set(k, String(r.division || '').trim()); }); return m; });
     const m = new Map(seen); (keep || []).forEach(k => { if (!m.has(k)) m.set(k, k); });
     return Array.from(m.keys()).sort().map(k => [k, k === '–' ? L('(품목군 없음)', '(không nhóm)') : m.get(k)]);
   };
-  /** 생산 관리 일별 · 월별 탭에서 보는 품목군 (공정마다, 비면 전체) — 현장 재고 표 설정처럼 저장 (모든 PC 같음) */
-  C.prodDivsShown = (proc) => { const a = (DB.setting('prodDivs', null) || {})[proc || '*']; return Array.isArray(a) ? a.map(String) : []; };
-  C.setProdDivsShown = (proc, keys) => { const m = Object.assign({}, DB.setting('prodDivs', null) || {}); if (keys && keys.length) m[proc || '*'] = keys.slice(); else delete m[proc || '*']; DB.setSetting('prodDivs', m); };
+  /** 생산 관리 일별 · 월별 탭에서 보는 품목군 (공정마다 — 여러 공정이면 그 묶음마다, 비면 전체) — 현장 재고 표 설정처럼 저장 (모든 PC 같음) */
+  C.prodDivsShown = (proc) => { const a = (DB.setting('prodDivs', null) || {})[C.procKey(proc) || '*']; return Array.isArray(a) ? a.map(String) : []; };
+  C.setProdDivsShown = (proc, keys) => { const k = C.procKey(proc) || '*'; const m = Object.assign({}, DB.setting('prodDivs', null) || {}); if (keys && keys.length) m[k] = keys.slice(); else delete m[k]; DB.setSetting('prodDivs', m); };
 })();

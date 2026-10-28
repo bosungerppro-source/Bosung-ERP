@@ -596,7 +596,7 @@ const backups = (ud) => { try { return fs.readdirSync(path.join(ud, 'update_back
     eq('이 달 칸 (월 합계 줄) = 일별 표의 월 합계', num(t2[1 + d.mi]), num(t1[1]));
     ok('월별 엑셀도 같은 모양 (품목군 · 연 합계 · 1~12월 / 마지막 줄 월 합계)', !!(g2 && g2.xl) && g2.xl.hd[0] === '품목군' && g2.xl.hd[1] === exp.y + ' 합계' && g2.xl.hd[2] === '1월' && g2.xl.hd.length === 14
       && g2.xl.rs.length === mk.length + 1 && g2.xl.rs[g2.xl.rs.length - 1][0] === '월 합계' && g2.xl.rs[g2.xl.rs.length - 1][1] === d.sum, g2 && g2.xl && { hd: g2.xl.hd, last: g2.xl.rs.slice(-1) });
-    await A.selectOption('main .toolbar select:nth-of-type(2)', 'INJ'); await A.waitForTimeout(800);
+    await A.click('main .pprocs [data-v="INJ"] input'); await A.waitForTimeout(500); await A.click('main .pprocs [data-v="ASM"] input'); await A.waitForTimeout(800);   // 1.13.14 부터 공정은 체크 (여러 개)
     ok('공정을 바꾸면 탭 이름 · 제목도 (월별 사출 생산량)', await A.evaluate(() => Array.from(document.querySelectorAll('.tabs .tab')).some(t => t.textContent === '월별 사출 생산량') && /월별 사출 생산량/.test(document.querySelector('main .card h2').textContent)));
     await A.evaluate(() => { ERP.state.pmon = null; ERP.setLang('vi'); }); await A.waitForTimeout(500);
     const vi = await A.evaluate(() => document.querySelector('main').innerText);
