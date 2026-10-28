@@ -9,7 +9,8 @@
    7-3 생산 관리 일별 · 월별 · 일보 조회 · 종합 현황 일별 · 월별 위젯도 품목군 여러 개 (1.13.8)
    7-4 현장 재고 → 원재료 환산 표 (조립 재고 옆 · 공정별 · 위젯) · 7-5 MRP 수주 가져오기: 전체 선택 · 진행 상태 · 범위 · 7-6 박스 포장의 SG 는 차감 안 함 (1.13.9)
    7-7 포장한 만큼 조립 재고가 줄어듦 — 박스 → 세트 → 조립품 (1.13.10) · 7-8 수주서 그대로 올리기 (1.13.11)
-   7-9 수주 목록 품번 수 → 품목군 · 납기는 늦은 날짜부터 (수주 목록 · 종합 현황 · 휴대폰 · MRP · 품목 상세, 1.13.12) · 8 이번 달 포장 누계 = pcs (1.12.3)
+   7-9 수주 목록 품번 수 → 품목군 · 납기는 늦은 날짜부터 (수주 목록 · 종합 현황 · 휴대폰 · MRP · 품목 상세, 1.13.12)
+   7-10 종이 권취 일보의 품목군 = Glass (현장 일일 생산일보 · ERP 일보 양식 · 일보 입력, 1.13.13) · 8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
@@ -584,6 +585,37 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     g = await list();
     eq('베트남어: 품목군 = Nhóm hàng · 머리글에 한글 없음', [g.head[3], g.head.filter(t => /[가-힣]/.test(t))], ['Nhóm hàng', []]);
     await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('po', k.po); DB.replace('prod_log', k.prod_log); DB.setSetting('dash', k.dash); await DB.flush(); ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-10. 종이 권취 일보의 품목군 = Glass (1.13.13, 사용자 "생산 관리에 종이 권취 공정의 품목군은 Glass 이다"): 현장 일일 생산일보 · ERP 일보 양식 · 일보 입력', async () => {
+    const keep = await ev(() => ({ prod_log: ERP.db.rows('prod_log').map(r => Object.assign({}, r)), machines: ERP.db.rows('machines').map(r => Object.assign({}, r)) }));
+    // 현장 일일 생산일보 (Quấn giấy): 품목군 칸이 없는 양식 — 머리글 'Target product', 두 줄 아래부터 1 설비 · 2 설비번호 · 4 품명 · 5 코드 · 6 PO · 11 양품
+    const daily = await ev(() => { const X = window.XLSX; const wb = X.utils.book_new();
+      const M = [[null, 'BÁO CÁO SẢN XUẤT HÀNG NGÀY / 생산 일보'], [null, '1. 작업장명 / Tên công đoạn', 'Paper wrapped / Quấn giấy', null, '생산일자 / Ngày sản xuất', '2026-10-25'], [],
+        [null, 'Machine', 'Machine No', 'Color', 'Name', 'Target product', 'PO', 'PO Qty', null, 'Plan', null, 'OK', null, 'CT', 'NG'], [],
+        ['1', 'Wrap', '1', null, 'White', 'PC001', '2026-5', 5400, null, 5400, null, 5000, null, 0, 350, 480, 2, 15, null, 'D'],
+        ['2', 'Wrap', '2', null, 'Black', 'PC012', '2026-6', 5400, null, 5400, null, 5100, null, 0, 300, 480, 2, 15, null, 'D']];
+      X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(M), 'Ca ngày');
+      const back = X.read(X.write(wb, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false });
+      return ERP.xl.analyze(back, {}).map(j => [j.id, j.proc, j.rows.map(r => [r.process, r.code, r.division || ''])]); });
+    eq('현장 일일 생산일보 (종이 권취): 줄마다 품목군 Glass', daily, [['daily', 'WRP', [['WRP', 'PC001', 'Glass'], ['WRP', 'PC012', 'Glass']]]]);
+    // ERP 일보 양식 (일보 양식 받기): 종이 권취 시트만 Glass, 다른 공정은 그대로
+    const tpl = await ev(() => { const X = window.XLSX; const wb = ERP.xl.dailyTemplateBook();
+      wb.SheetNames.forEach(n => { const aoa = X.utils.sheet_to_json(wb.Sheets[n], { header: 1 }); const hdr = aoa.find(r => r.some(c => /생산일|Ngày SX/.test(String(c)))); const hi = aoa.indexOf(hdr);
+        const row = hdr.map(c => /생산일|Ngày SX/.test(String(c)) ? '2026-10-25' : /양품|SL đạt/.test(String(c)) ? 500 : /코드|Mã hàng/.test(String(c)) ? 'PC001' : /설비번호|Số máy/.test(String(c)) ? '1' : null);
+        wb.Sheets[n] = X.utils.aoa_to_sheet(aoa.slice(0, hi + 1).concat([row])); });
+      const back = X.read(X.write(wb, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false });
+      return ERP.xl.analyze(back, {}).filter(j => ['WRP', 'PCK', 'ASM'].includes(j.proc)).map(j => [j.proc, j.rows.map(r => r.division || '')]); });
+    eq('ERP 일보 양식: 종이 권취 시트만 Glass (포장 · 조립은 그대로 비움)', tpl, [['ASM', ['']], ['WRP', ['Glass']], ['PCK', ['']]]);
+    // 일보 입력 (화면): 설비 마스터에 품목군이 있으면 그것 (예전 그대로), 없으면 Glass. 포장은 그대로
+    await ev(async () => { const DB = ERP.db; DB.replace('machines', [{ process: 'WRP', machine_no: '9', division: 'Peel', active: true }]); DB.replace('prod_log', []); await DB.flush(); });
+    const enter = async (proc, rows) => { await ev((a) => { ERP.state.entry = { proc: a.proc, date: '2026-10-25', shift: 'D', rows: a.rows }; ERP.state.prodTab = 'entry'; ERP.goto('production'); ERP.render(); }, { proc, rows }); await settle();
+      await ev(() => Array.from(document.querySelectorAll('main .toolbar button.primary')).find(b => b.textContent.trim() === '저장').click()); await settle(); };
+    await enter('WRP', [{ machine_no: '1', code: 'PC001', name: 'White', ok_qty: 100 }, { machine_no: '9', code: 'PC012', name: 'Black', ok_qty: 50 }]);
+    await enter('PCK', [{ code: 'K-P1', name: 'BOX', ok_qty: 10 }]);
+    eq('일보 입력: 종이 권취 = Glass · 설비 마스터 품목군 (Peel) 은 그대로 · 포장은 빈칸 그대로', await ev(() => ERP.db.rows('prod_log').filter(r => r.source === 'manual').map(r => [r.process, r.code, r.division || ''])),
+      [['WRP', 'PC001', 'Glass'], ['WRP', 'PC012', 'Peel'], ['PCK', 'K-P1', '']]);
+    await ev(async (k) => { const DB = ERP.db; DB.replace('prod_log', k.prod_log); DB.replace('machines', k.machines); await DB.flush(); ERP.state.entry = null; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

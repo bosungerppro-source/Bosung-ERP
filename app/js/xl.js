@@ -330,7 +330,7 @@
   const hist = (id, hre, mapRow, proc, label) => D(id, (n, M) => hdrIdx(M, hre[0], hre[1], hre[2]) >= 0, (M, ctx) => {
     const since = ctx.since || '2026-01-01'; const rows = []; const hi = hdrIdx(M, hre[0], hre[1], hre[2]);
     for (let i = hi + 1; i < M.length; i++) { const r = M[i]; const d = S(r, 0); if (!d || !isoRe.test(String(d)) || d < since) continue; const o = mapRow(r); if (o) rows.push(Object.assign({ date: d, process: proc, shift: 'D', source: 'history' }, pick(o))); }
-    rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; if (o.ng_qty === undefined) o.ng_qty = 0; });
+    rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; if (o.ng_qty === undefined) o.ng_qty = 0; ERP.fillDiv(o); });
     return [{ table: 'prod_log', rows, mode: 'range', proc, label, hasSince: true }];
   });
   hist('h-inj', [/^Machine No\.$/, /product classification/i], (r) => {
@@ -499,7 +499,7 @@
         if (kind === 'ASM') base({ machine: T(S(r, 0)), machine_no: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), ok_qty: N(S(r, 4)) || 0, start: T(S(r, 5)), end: T(S(r, 6)), break_min: N(S(r, 7)), work_min: N(S(r, 8)), stop_min: N(S(r, 9)), workers: N(S(r, 10)), ng_qty: N(S(r, 11)) || 0, remark: T(S(r, 17)), division: dailyDiv(T(S(r, 2)), S(r, 0)) });
         else base({ machine: T(S(r, 0)), machine_no: T(S(r, 1)), code: T(S(r, 2)), name: T(S(r, 3)), ok_qty: N(S(r, 4)) || 0, start: T(S(r, 5)), end: T(S(r, 6)), break_min: N(S(r, 7)), work_min: N(S(r, 8)), stop_min: N(S(r, 9)), ng_qty: N(S(r, 10)) || 0, workers: N(S(r, 11)), remark: T(S(r, 12)), division: dailyDiv(T(S(r, 2)), S(r, 0)) }); }
     }
-    rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; });
+    rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; ERP.fillDiv(o); });   // 1.13.13: 종이 권취 일보에는 품목군 칸이 없음 → Glass
     const label = L('생산 일보 · ', 'Báo cáo SX · ') + ERP.procName(kind) + ' ' + (date || L('(날짜 없음)', '(chưa có ngày)')) + (shift === 'N' ? L(' · 야간', ' · ca đêm') : '') + (workplace ? ' · ' + workplace : '');
     return [{ table: 'prod_log', rows, mode: 'range', proc: kind, label, hasShift: true, date, needDate: !date, include: rows.length > 0 && !!date, overlap: XL.overlapOf(rows),
       note: date ? '' : L('생산일자를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày sản xuất — hãy nhập ngày để áp dụng.') }];
@@ -522,7 +522,7 @@
       if ((o.ok_qty === undefined || o.ok_qty === null) && (o.ng_qty === undefined || o.ng_qty === null) && (o.ok_ea === undefined || o.ok_ea === null)) continue;   // 빈 줄 · 예시 줄
       o.date = ERP.fmt.parseDate(S(r, map.date)) || ''; o.shift = shiftCell(S(r, map.shift), 'D');
       if (o.ok_qty === undefined || o.ok_qty === null) o.ok_qty = 0; if (o.ok_ea === undefined || o.ok_ea === null) o.ok_ea = o.ok_qty; if (P && P.unit === 'set') o.unit = 'set';
-      rows.push(pick(o));
+      ERP.fillDiv(o); rows.push(pick(o));
     }
     const need = rows.some(r => !r.date);
     return [{ table: 'prod_log', rows, mode: 'range', proc, label: L('ERP 일보 양식 · ', 'Mẫu báo cáo ERP · ') + ERP.procName(proc), hasShift: true, needDate: need, include: rows.length > 0 && !need, overlap: XL.overlapOf(rows),

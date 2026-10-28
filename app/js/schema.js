@@ -14,6 +14,10 @@
   ];
   ERP.procName = (id) => { const p = ERP.PROC.find(x => x.id === id); return p ? L(p.ko, p.vi) : (id || ''); };
   ERP.procColor = (id) => { const p = ERP.PROC.find(x => x.id === id); return p ? p.color : '#8A93A0'; };
+  // 1.13.13 (사용자 2026-10-28 "생산 관리에 종이 권취 공정의 품목군은 Glass 이다"): 공정마다 정해진 품목군 — 일보 줄의 품목군이 비었을 때만 채운다
+  // (현장 일일 생산일보 · 누적 이력 · ERP 일보 양식 · 일보 입력 모두 여기로)
+  const PROC_DIV = { WRP: 'Glass' };
+  ERP.fillDiv = (r) => { if (r && !String(r.division || '').trim() && PROC_DIV[r.process]) r.division = PROC_DIV[r.process]; return r; };
 
   const procOpts = () => ERP.PROC.map(p => ({ v: p.id, ko: p.ko, vi: p.vi }));
   const shiftOpts = [{ v: 'D', ko: '주간 (D)', vi: 'Ca ngày (D)' }, { v: 'N', ko: '야간 (N)', vi: 'Ca đêm (N)' }];

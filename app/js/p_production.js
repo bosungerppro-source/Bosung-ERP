@@ -105,6 +105,7 @@
         o.ok_qty = o.ok_qty || 0; o.ng_qty = o.ng_qty || 0; if (o.ok_ea === undefined) o.ok_ea = o.ok_qty;
         calcMin(o); if (es.proc === 'PCK') o.unit = 'set';
         const m = DB.rows('machines').find(x => x.process === es.proc && String(x.machine_no) === String(o.machine_no)); if (m && !o.division && m.division) o.division = m.division;
+        ERP.fillDiv(o);   // 1.13.13: 설비 마스터에도 없으면 공정의 품목군 (종이 권취 = Glass)
         Object.keys(o).forEach(k => { if (o[k] === undefined || o[k] === '') delete o[k]; });
         out.push(o);
       });

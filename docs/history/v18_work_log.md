@@ -413,3 +413,35 @@
 - 전체 (이 PC, Windows, 2026-10-27): v18 184 · v17 154 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.11 `ab51fa3` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
 - 설치 파일 `ColorPencil-ERP-Setup-1.13.12.exe`: 114,211,575 bytes, SHA-256 `41943ad5a3121b1a949de1a1a2fbba1829ca3041a9d9f4b147927219a944328a` (electron-builder `--win dir` + NSIS 3.12). app.asar 의 calc.js · p_orders.js · p_dashboard.js · mobile.js · p_bom.js · p_stock.js · core.js · xl.js · inv.js · server.js = 소스와 같음, 버전 1.13.12.
 - 데모 `ERP_Demo.html`: 7,916,672 bytes, SHA-256 `587117bbcda18f3cfb74d348dec8ed05b1b427d653d653463e61ab198951020d`.
+- Release v1.13.12: Claude 가 실행 (2026-10-27, Actions #11 성공, `6dc5871`, `releases/latest` = v1.13.12). `ColorPencil-ERP-Setup-1.13.12.exe` 114,212,942 bytes · SHA-256 `77751f180075bb11e1d61ff648dae01378ef1515aec56c14156fdfdb025fdb86` (GitHub 에서 빌드) · `ERP_Demo.html` (이 PC 데모와 같음) · `latest.json` (1.13.12, 크기 · 지문이 Release 설치 파일과 같음).
+  - 이 PC 의 ERP: 10-27 16:48 · 16:54 에는 새 버전을 받는 중 (인터넷이 느려 1분 넘게) 에 창이 두 번 닫혀 못 함 (크래시 · 오류 기록 없음, `update.log` 에 download 두 줄). 10-28 08:17 사용자 "지금 올려" → 1분 만에 받아 1.13.11 → 1.13.12 (설치 직후 창이 뜨기 전에 보낸 닫기는 먹지 않아 다시 닫음 08:19 — `08_erp_code/scripts/update_erp.ps1` 은 새 창이 뜬 뒤 닫게 고침).
+  - 그 사이 사용자: 1.13.11 화면에서 납기 ▼ 를 눌러 찍은 사진과 "이렇게 납기 날짜가 큰숫자먼저 보여야 한다고" — 만든 것과 같음.
+
+## 1.13.13 (2026-10-28) — 종이 권취 일보의 품목군 = Glass
+- 사용자 (2026-10-28, 생산 관리 일보 조회 사진 — 종이 권취 줄의 품목군 빈칸): "생산 관리에 종이 권취 공정의 품목군은 Glass 이다. 수정하고 구글연동자료도 수정해줘 전부다".
+
+### 조사
+- 실제 자료: 일보 22,064줄 중 종이 권취 2,694줄 — 누적 이력 (history) 2,611줄은 Glass, 현장 일일 생산일보 (daily-report) 83줄 (10-20 ~ 10-24) 은 품목군 빈칸. 현장 일일 생산일보 (Quấn giấy) 를 읽는 코드 (`xl.js` daily `WRP`) 가 품목군을 넣지 않음 (양식에 품목군 칸 없음 — 조립 · 스탬핑은 `dailyDiv` 로 짐작, 리필은 설비 칸). ERP 일보 양식 · 일보 입력에도 권취 품목군 칸이 없음 (설비 마스터 0줄).
+- 품목군이 쓰이는 곳: 생산 관리 · 종합 현황 품목군 표, 코드 연결 표 (`MAP.daily(공정, 품목군, 코드)` — 이 PC 0줄), 부품 추정. 다른 공정의 빈 품목군 (포장 127 · 조립 36 · 스탬핑 11줄) 은 그대로 (요청 아님).
+
+### 실제 ERP 자료 (2026-10-28, Claude)
+- 사본 (구글 · 인터넷 막음, `08_erp_code/scripts/wrp_glass.js --copy`) 으로 먼저: 83줄 → Glass, 바뀐 표 = 생산 일보 · 칸 = 품목군 83개뿐. 생산 반영 (154 · 341) · 해결할 항목 75 · 없는 부품 40 · 현장 재고 (조립 13,344,627 · 리필 8,938,903 · 사출 4,417,270 · 포장 CT 1,599 · SET 7,200) · 마이너스 49 모두 그대로, 생산 관리 권취 2026 "Glass 12,243,467 · (품목군 없음) 973,322" → "Glass 13,216,789".
+- 백업 `05_backup/ERP_data_before_wrp_glass_2026-10-28/data` (ERP 끈 채로 데이터 폴더 통째, 22MB) → 08:31 ERP 켬 → `wrp_glass.js --apply` (`DB.update` 83번 — 사본과 같은 결과, 화면 오류 0, `apply/tables_before.json` · `tables_after.json`) → 구글 공유 08:31:57 생산 일보 보냄 · 구글 43,369행 = 이 PC · 구글 시트 표 08:32:58 갱신 → 구글 시트 '생산 일보' 탭 21,851 ~ 22,065행을 직접 읽어 권취 83줄 모두 Glass 확인 → 08:34 ERP 끔.
+
+### 한 것 (앞으로 들어올 일보)
+- `app/js/schema.js` `ERP.fillDiv(r)` (`PROC_DIV = { WRP: 'Glass' }`) — 일보 줄 품목군이 비었을 때만.
+- `app/js/xl.js` 현장 일일 생산일보 (`daily`) · 누적 이력 (`hist`) · ERP 일보 양식 (`erp-daily`), `app/js/p_production.js` 일보 입력 (설비 마스터 품목군 다음) 이 `ERP.fillDiv` 를 씀.
+- 버전 1.13.13.
+
+### 시험
+- 먼저 만든 시험 (v17 7-10장): 고치기 전 3개 실패 (현장 일일 생산일보 · ERP 일보 양식 · 일보 입력 모두 빈칸 — 실제와 같음), 나머지 154 통과. 고친 뒤 157 통과.
+  - 자료: 가짜 현장 일일 생산일보 (Quấn giấy · 'Target product' 머리글 · 2줄), ERP 일보 양식 (모든 공정 시트에 한 줄씩 — 권취만 Glass, 조립 · 포장 빈칸), 일보 입력 (권취 설비 1 → Glass · 설비 마스터 품목군 Peel 인 설비 9 → Peel · 포장 → 빈칸).
+
+### 시험 · 설치 파일 · 데모 (이 PC 에서 만듦, 2026-10-28)
+- 전체 (이 PC, Windows, 2026-10-28): v18 184 · v17 157 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.12 `6dc5871` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
+- 설치 파일 `ColorPencil-ERP-Setup-1.13.13.exe`: 114,204,054 bytes, SHA-256 `a3c83b2e8cf77b72a2ac6442da714fcd4f91eade4af5aeaadaf8a13175060f9f` (electron-builder `--win dir` + NSIS 3.12). app.asar 의 schema.js · xl.js · p_production.js · core.js 등 = 소스와 같음, 버전 1.13.13.
+- 데모 `ERP_Demo.html`: 7,917,388 bytes, SHA-256 `f66276ce933bd796af5de46b0dedaa5919c832596068c09c7b68e4aeacf6d29d`.
+
+### 같은 날 사용자 질문: 휴대폰으로 보기가 안 됨 ("2일 전에는 됬는대 지금은 안되")
+- 확인 (코드 변경 없음): 웹 앱 (ERP 의 주소) `?ping=1` → 7판 정상, 휴대폰 화면 (비밀번호 화면) 정상, ERP 가 08:42 에 요약을 보냄 (드라이브 `ERP_mobile.json` 08:42 갱신, 6,731 bytes, 1.13.12), 그 실제 요약을 `google/Code.gs` 7판 휴대폰 화면으로 그려도 정상 (가짜 Apps Script — selftest_v15 와 같은 방식). 비밀번호 확인 방식 (소금 + SHA-256) 은 4판 · 6판 · 7판 같음.
+- 남은 원인 = 휴대폰의 비밀번호 단계 (틀림 · 10번 틀려 잠김 · 구글에 비밀번호 없음 · 예전 주소). 사용자에게: ERP 에서 비밀번호를 다시 정하고 (구글 쪽 비밀번호 · 잠금 · 기억한 열쇠가 새로) 휴대폰은 QR 을 다시 찍어 열기, 안 되면 휴대폰에 뜨는 글자를 알려 달라고 함.
