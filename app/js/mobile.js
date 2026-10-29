@@ -58,7 +58,7 @@
   try { mob.last = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { mob.last = null; }
   const remember = (o) => { mob.last = o; try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* 저장소 없음 */ } };
   /** 옛 Code.gs 이면 알아듣게 */
-  ERP.gErr = (e) => { const m = String((e && e.message) || e); return /unknown action/.test(m) ? L('Apps Script 가 옛 판입니다 — 엑셀 · 구글 연동의 [Apps Script 코드 복사] 로 새 코드(7판)를 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요', 'Apps Script là bản cũ — hãy dán mã mới (bản 7, [Sao chép mã Apps Script] ở Excel · Google) và triển khai phiên bản mới') : m; };
+  ERP.gErr = (e) => { const m = String((e && e.message) || e); return /unknown action/.test(m) ? L('Apps Script 가 옛 판입니다 — 엑셀 · 구글 연동의 [Apps Script 코드 복사] 로 새 코드(8판)를 붙여넣고 "배포 관리 → 새 버전"으로 배포하세요', 'Apps Script là bản cũ — hãy dán mã mới (bản 8, [Sao chép mã Apps Script] ở Excel · Google) và triển khai phiên bản mới') : m; };
   ERP.mobileSend = function () {
     if (mob.busy) return mob.busy;
     mob.busy = (async () => {

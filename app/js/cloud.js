@@ -10,13 +10,14 @@
   const pad = (x) => String(x).padStart(2, '0');
   const when = (s) => { if (!s) return '–'; const d = new Date(s); return isNaN(d) ? '–' : d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
   const hm = (s) => { if (!s) return '–'; const d = new Date(s); return isNaN(d) ? '–' : pad(d.getHours()) + ':' + pad(d.getMinutes()); };
-  const ago = (s) => {
-    const t = Date.parse(s); if (!t) return ''; const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+  const agoMs = (ms) => {
+    const sec = Math.max(0, Math.round(ms / 1000));
     if (sec < 60) return L(sec + '초 전', sec + ' giây trước');
     if (sec < 3600) return L(Math.round(sec / 60) + '분 전', Math.round(sec / 60) + ' phút trước');
     if (sec < 86400) return L(Math.round(sec / 3600) + '시간 전', Math.round(sec / 3600) + ' giờ trước');
     return L(Math.round(sec / 86400) + '일 전', Math.round(sec / 86400) + ' ngày trước');
   };
+  const ago = (s) => { const t = Date.parse(s); return t ? agoMs(Date.now() - t) : ''; };
   const label = (n) => (n === '__meta' ? L('설정', 'Cài đặt') : ERP.TABLES[n] ? ERP.tableLabel(n) : n);
 
   /** 서버(cloudsync.js)가 돌려준 오류 코드 → 알아듣게 */
@@ -26,7 +27,7 @@
       NOT_JSON: L('웹 앱의 응답이 아닙니다 — 주소가 웹 앱 URL(…/exec)인지, 배포할 때 액세스 권한을 "모든 사용자"로 했는지 확인하세요', 'Không phải phản hồi của ứng dụng web — kiểm tra URL (…/exec) và quyền truy cập "Bất kỳ ai" (Anyone)'),
       NOT_FOUND: L('주소를 찾을 수 없습니다 — 웹 앱 URL 을 다시 복사해 넣으세요', 'Không tìm thấy địa chỉ — hãy sao chép lại URL ứng dụng web'),
       BAD_TOKEN: L('비밀 키(TOKEN)가 맞지 않습니다 — 사장님 PC 에서 [Apps Script 코드 복사] 로 다시 붙여넣고 새 버전으로 배포하세요 (직원 PC 는 연결 코드를 다시 받으세요)', 'TOKEN không khớp — trên máy chủ hãy dán lại mã và triển khai phiên bản mới (máy nhân viên lấy lại mã kết nối)'),
-      OLD_SCRIPT: L('구글 Apps Script 가 옛 판입니다 — [Apps Script 코드 복사] 로 새 코드(7판)를 붙여넣고 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 하세요', 'Apps Script là bản cũ — dán mã mới (bản 7) rồi Triển khai → Quản lý → Sửa → Phiên bản mới'),
+      OLD_SCRIPT: L('구글 Apps Script 가 옛 판입니다 — [Apps Script 코드 복사] 로 새 코드(8판)를 붙여넣고 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 하세요', 'Apps Script là bản cũ — dán mã mới (bản 8) rồi Triển khai → Quản lý → Sửa → Phiên bản mới'),
       NO_SHEET: L('이 Apps Script 는 구글 시트 없이 만들어져서 시트에 쓸 수 없습니다 (자료 공유는 됩니다)', 'Apps Script này không gắn với Google Sheet nên không ghi lên Sheet được (dùng chung vẫn chạy)'),
       OFF: L('공유가 꺼져 있습니다', 'Đang tắt dùng chung'),
       CID: L('다른 구글 저장소로 바뀌었습니다 (다른 Apps Script 주소) — 아래에서 다시 연결하세요', 'Đã đổi sang kho Google khác — hãy kết nối lại bên dưới'),
@@ -157,10 +158,10 @@
     try { c = await api('/api/cloud/check', cfg); } catch (e) { res.replaceChildren(h('p', { class: 'warn-text' }, e.message)); e.shown = true; throw e; }
     const lc = c.local || { tables: 0, rows: 0 };
     const items = [h('div', { class: 'toolbar' }, ERP.chip('ok', L('연결됨', 'Đã kết nối')), h('span', { class: 'muted' }, 'Apps Script ' + c.ver + L('판', '') + (c.sheet ? ' · ' + c.sheet : '')))];
-    if (Number(c.ver) < 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 ' + c.ver + '판입니다 — 자료 공유는 되고, 구글 시트에서 표로 보려면 새 코드(7판)로 바꾸세요 ([Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전).',
-      'Apps Script này là bản ' + c.ver + ' — dùng chung vẫn chạy; muốn xem bảng trên Google Sheet hãy đổi sang mã mới (bản 7) ([Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới).')));
-    else if (Number(c.ver) === 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 6판입니다 — 그대로 써도 되고, 7판 (보안 · 안정 고침) 으로 바꾸려면 [Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전.',
-      'Apps Script này là bản 6 — vẫn dùng được; muốn đổi sang bản 7 (sửa bảo mật · ổn định): [Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới.')));
+    if (Number(c.ver) < 6) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 ' + c.ver + '판입니다 — 자료 공유는 되고, 구글 시트에서 표로 보려면 새 코드(8판)로 바꾸세요 ([Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전).',
+      'Apps Script này là bản ' + c.ver + ' — dùng chung vẫn chạy; muốn xem bảng trên Google Sheet hãy đổi sang mã mới (bản 8) ([Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới).')));
+    else if (Number(c.ver) < 8) items.push(h('p', { class: 'help' }, L('이 Apps Script 는 ' + c.ver + '판입니다 — 그대로 써도 되고, 8판 (접속 중인 PC 보기) 으로 바꾸려면 [Apps Script 코드 복사] → 붙여넣기 → 배포 관리 → 수정 → 새 버전.',
+      'Apps Script này là bản ' + c.ver + ' — vẫn dùng được; muốn đổi sang bản 8 (xem máy đang kết nối): [Sao chép mã Apps Script] → dán → Quản lý → Sửa → Phiên bản mới.')));
     if (c.resume) items.push(h('p', { class: 'help' }, L('이 PC 는 전에 이 구글 저장소와 공유했습니다. 다시 켜면 꺼 둔 동안 양쪽에서 바뀐 것을 합칩니다.', 'Máy này đã từng dùng chung với kho này. Bật lại sẽ gộp các thay đổi của cả hai bên.')),
       h('div', { class: 'toolbar' }, btn('primary', L('다시 켜기', 'Bật lại'), () => connect(cfg, 'resume'))));
     if (c.empty) {
@@ -216,6 +217,41 @@
   const logBox = (s) => (s.log && s.log.length ? h('details', { class: 'cloud-log' }, h('summary', L('기록', 'Nhật ký') + ' (' + s.log.length + ')'),
     h('div', s.log.slice().reverse().map(e => h('div', { class: 'help' }, when(e.at) + '  ' + logText(e))))) : null);
 
+  /** 1.13.17 접속 중인 PC (상태의 pcs — cloudsync.js): 3분 안에 구글과 맞춘 PC = 접속 중 (ERP 를 켜 둔 PC 는 30초마다 맞춤), 그 밖은 마지막으로 맞춘 때 (하루 안).
+      구글 Apps Script 가 8판이 아니면 (list null) 표마다 마지막으로 자료를 보낸 PC 와 8판 안내 */
+  const LIVE_MS = 180000;
+  const live = (x) => x.ago !== null && x.ago <= LIVE_MS;
+  const pcName = (x) => x.name + (x.me ? L(' (이 PC)', ' (máy này)') : '');
+  function pcsPart(s, own) {
+    const p = s.pcs; if (!p) return null;
+    const head = h('h4', L('접속 중인 PC', 'Máy đang kết nối'));
+    if (p.list) {
+      const n = p.list.filter(live).length;
+      return h('div', { class: 'cloud-pcs' }, head,
+        h('div', { class: 'toolbar' }, p.list.length ? p.list.map(x => ERP.chip(live(x) ? 'ok' : 'neutral', pcName(x) + ' · ' + (live(x) ? L('접속 중', 'đang kết nối') : agoMs(x.ago)))) : h('span', { class: 'muted' }, '–')),
+        h('p', { class: 'help' }, L('지금 접속 중 ' + n + '대 — 3분 안에 구글과 맞춘 PC 입니다 (ERP 를 켜 둔 PC 는 30초마다 맞춥니다). 그 밖은 마지막으로 맞춘 때 (하루 안). 이름 = 그 PC 의 Windows 컴퓨터 이름.',
+          'Đang kết nối ' + n + ' máy — đã đồng bộ với Google trong 3 phút (máy mở ERP đồng bộ 30 giây một lần). Máy khác: lần đồng bộ cuối (trong 1 ngày). Tên = tên máy tính Windows.')));
+    }
+    const sd = p.senders || [];
+    return h('div', { class: 'cloud-pcs' }, head,
+      sd.length ? h('div', { class: 'toolbar' }, h('span', { class: 'muted' }, L('자료를 보낸 PC:', 'Máy đã gửi dữ liệu:')), sd.map(x => ERP.chip('neutral', pcName(x) + ' · ' + when(x.at)))) : null,
+      h('p', { class: 'help' }, own ? L('접속 중인 PC 는 구글 Apps Script 8판부터 보입니다 — [Apps Script 코드 복사] → Apps Script 편집기에 붙여넣기 → 저장 → 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 (주소는 그대로). 지금도 공유 · 시트 보기는 됩니다.',
+        'Máy đang kết nối hiển thị từ Apps Script bản 8 — [Sao chép mã Apps Script] → dán vào trình soạn thảo → Lưu → Triển khai → Quản lý → Sửa → Phiên bản mới (URL giữ nguyên). Dùng chung · xem Sheet vẫn đang chạy.')
+        : L('접속 중인 PC 는 사장님 PC 에서 구글 Apps Script 를 8판으로 바꾸면 보입니다.', 'Máy đang kết nối sẽ hiển thị khi máy chủ đổi Apps Script sang bản 8.')));
+  }
+  /** 설정 화면 짧은 카드의 한 줄 */
+  function pcsMini(s) {
+    const p = s.pcs; if (!p) return null;
+    if (p.list) {
+      const on = p.list.filter(live), off = p.list.filter(x => !live(x));
+      return h('p', { class: 'cloud-pcs-mini' }, h('b', L('접속 중인 PC: ', 'Máy đang kết nối: ')), on.length ? on.map(pcName).join(' · ') : L('없음', 'không có'),
+        off.length ? h('span', { class: 'muted' }, '  ·  ' + L('최근: ', 'Gần đây: ') + off.map(x => pcName(x) + ' (' + agoMs(x.ago) + ')').join(' · ')) : null);
+    }
+    const sd = p.senders || [];
+    return h('p', { class: 'cloud-pcs-mini' }, h('b', L('자료를 보낸 PC: ', 'Máy đã gửi dữ liệu: ')), sd.length ? sd.map(pcName).join(' · ') : '–',
+      h('span', { class: 'muted' }, '  ·  ' + L('접속 중인 PC 는 Apps Script 8판부터 보입니다', 'máy đang kết nối: từ Apps Script bản 8')));
+  }
+
   ERP.cloudCard = function () {
     const box = h('div', { class: 'card', id: 'cloudCard' }, title(), h('p', { class: 'help' }, '…'));
     if (DB.mode !== 'server') { box.replaceChildren(title(), h('p', { class: 'help' }, L('여러 PC 자료 공유는 PC 설치형 ERP 에서만 됩니다 (지금은 브라우저 테스트 모드).', 'Chỉ có ở bản cài đặt trên PC (đang ở chế độ trình duyệt).'))); return box; }
@@ -256,10 +292,9 @@
           h('dt', L('구글로 보냄', 'Gửi lên Google')), h('dd', when(s.lastSent)),
           h('dt', L('시작', 'Bắt đầu')), h('dd', when(s.since) + ' · ' + modeLabel(s.mode)),
           h('dt', L('웹 앱 주소', 'URL ứng dụng web')), h('dd', h('code', s.url || '–'))),
+        // 1.13.17: 접속 중인 PC — 8판이 아니면 (6판 · 7판 그대로) 그 안에 8판 안내 (1.13.3 의 6판 → 7판 안내를 대신함)
+        pcsPart(s, own),
         sheetPart(s),
-        // 1.13.3: 6판으로 배포한 채 — 7판 (휴대폰 보기 잠금 · 속성 크기 · 탭 이름 고침) 을 다시 배포하라고 한 번 알림 (구글 계정 주인 PC 에서만)
-        own && Number((s.sheet || {}).ver) === 6 ? h('p', { class: 'help' }, L('구글 Apps Script 7판 (보안 · 안정 고침) 이 나왔습니다 — [Apps Script 코드 복사] → Apps Script 편집기에 붙여넣기 → 저장 → 배포 → 배포 관리 → 수정(연필) → 버전: 새 버전 → 배포 (주소는 그대로). 지금도 공유 · 시트 보기는 됩니다.',
-          'Đã có Apps Script bản 7 (sửa bảo mật · ổn định) — [Sao chép mã Apps Script] → dán vào trình soạn thảo → Lưu → Triển khai → Quản lý → Sửa → Phiên bản mới (URL giữ nguyên). Dùng chung · xem Sheet vẫn đang chạy.')) : null,
         s.conflicts ? h('p', { class: 'help' }, L('두 PC 에서 같은 행을 거의 동시에 고친 것 ' + s.conflicts + '건은 나중에 맞춘 PC 의 내용으로 맞췄습니다.', 'Hai máy cùng sửa một dòng gần như cùng lúc: ' + s.conflicts + ' — giữ theo máy đồng bộ sau.')) : null,
         s.shrink && s.shrink.length ? h('p', { class: 'warn-text' }, L('다른 PC 에서 많이 지운 표가 있습니다: ', 'Có bảng bị xóa nhiều ở máy khác: ') + s.shrink.map(x => label(x.table) + ' ' + F.n(x.from) + ' → ' + F.n(x.to)).join(', ')
           + L(' — 지우기 전 자료는 데이터 폴더의 cloud_backup 에 복사해 두었습니다.', ' — dữ liệu trước khi xóa đã được sao chép vào cloud_backup.')) : null,
@@ -310,6 +345,7 @@
         h('div', { class: 'toolbar' }, ERP.chip(s.on ? (s.code ? 'bad' : 'ok') : 'neutral', s.on ? (s.code ? L('오류', 'Lỗi') : L('켜짐', 'Đang bật')) : L('꺼짐', 'Đang tắt')),
           s.on ? h('span', { class: 'muted' }, L('마지막으로 맞춤 ', 'Đồng bộ lần cuối ') + when(s.lastOk)) : null),
         s.on && s.code ? h('p', { class: 'warn-text' }, ERP.cloudMsg(s.code, s.error)) : null,
+        s.on ? pcsMini(s) : null,
         h('p', { class: 'help' }, L('사장님 PC 와 직원 PC 의 ERP 가 구글 드라이브를 거쳐 같은 자료를 씁니다.', 'Máy chủ và máy nhân viên dùng chung dữ liệu qua Google Drive.')),
         h('div', { class: 'toolbar' }, h('button', { type: 'button', class: 'btn', onclick: go }, s.on ? L('공유 상태 보기', 'Xem trạng thái') : L('설정하러 가기 (엑셀 · 구글 연동)', 'Đi tới cài đặt (Excel · Google)'))));
     }).catch(e => { box.lastChild.textContent = String(e.message || e); });

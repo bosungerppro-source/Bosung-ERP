@@ -1,5 +1,5 @@
 /**
- * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 7판 (v1.13.3)
+ * ColorPencil ERP  ·  Google Sheets / Drive bridge (Apps Script web app)  — 8판 (v1.13.17)
  * 설치 (ERP → 엑셀 · 구글 연동 → 구글 시트 · 드라이브 → "여러 PC 자료 공유" 카드의 순서와 같다):
  *   1) ERP 의 [Apps Script 코드 복사] — 이 코드에 비밀 키(TOKEN)를 넣어서 복사해 준다
  *   2) 새 구글 시트 (sheets.new) > 확장 프로그램 > Apps Script > 원래 코드를 모두 지우고 붙여넣기 > 저장
@@ -9,6 +9,8 @@
  *   (이미 배포했으면: 코드를 바꾼 뒤 배포 > 배포 관리 > 수정(연필) > 버전: 새 버전 > 배포 — 주소는 그대로)
  * Cài đặt: ERP > [Sao chép mã Apps Script] (đã có TOKEN) > Google Sheet mới > Tiện ích mở rộng > Apps Script > dán mã > Lưu
  *          > Triển khai (Deploy) > Bản triển khai mới > Ứng dụng web (Thực thi: Tôi, Truy cập: Bất kỳ ai / Anyone) > dán URL vào ERP > [Kiểm tra kết nối].
+ * 8판 (1.13.17): 접속 중인 PC — ERP 가 30초마다 묻는 cloud_info 에 PC 이름을 붙이면, PC 마다 마지막으로 물은 시각을 기억해 (스크립트 캐시, 하루) 같이 돌려준다 (pcs).
+ *      7판 그대로여도 자료 공유 · 시트 보기 · 휴대폰 보기는 된다 — 접속 중인 PC 만 보이지 않는다 (새 코드를 붙여넣고 배포 관리 → 수정 → 새 버전, 주소 그대로).
  * 7판 (1.13.3): 보안 · 안정 — 휴대폰 보기는 비밀번호 대신 "이 휴대폰의 열쇠" 를 기억해, 누가 비밀번호를 여러 번 틀려 잠겨도 기억해 둔 휴대폰은 그대로 본다
  *      (비밀번호를 바꾸거나 끄면 열쇠도 모두 지움). 탭 이름 · 머리글이 속성 한도(9KB)를 넘어도 저장이 실패하지 않고, 같은 이름의 탭이 있으면 "(ERP 2)" …, 아주 긴 이름도.
  *      6판 그대로여도 자료 공유 · 시트 보기는 된다 — 이 고침을 쓰려면 새 코드를 붙여넣고 배포 관리 → 수정 → 새 버전 (주소 그대로).
@@ -131,6 +133,7 @@ function backup_(req) {
 // ---------------------------------------------------------------- 5판: 여러 PC 자료 공유
 // 표마다 스크립트 속성 T_<표> = {v: 저장 번호, f: 드라이브 파일 id, s: 글자 수, n: 행 수, at: 저장 시각}, 파일 = DATA_FOLDER/<표>.json.gz.b64.
 // cloud_info {} → {cid, tables: {표: {v, s, n, at}}}   (cid = 이 저장소의 이름표 — 주소가 바뀌어도 같은 저장소인지 ERP 가 안다)
+//   8판: cloud_info {pc} → 답에 pcs {PC 이름: 마지막으로 물은 시각} — pc 를 붙여 물은 PC 를 접속 중으로 기억 (pcsSeen_)
 // cloud_get {names: [표]} → {tables: {표: {v, b64}}}
 // cloud_put {tables: {표: {base, b64, n}}} → {vers: {표: 새 번호}, conflicts: {표: 지금 번호}}
 //   ERP 가 마지막으로 본 번호(base)가 지금 번호와 같을 때만 쓴다. 다르면 다른 PC 가 먼저 쓴 것 → ERP 가 받아서 합친 뒤 다시 보낸다.
@@ -139,11 +142,11 @@ function backup_(req) {
 //   캐시를 채우고 바꾸는 것은 언제나 잠금 안에서 속성을 읽은 뒤 (쓰기 사이에 옛 목록이 끼지 않게). 캐시에 못 쓰면 지워서 다음 물음은 속성에서 읽는다.
 var NAME_RE_ = /^[A-Za-z0-9_]{1,40}$/;
 var IDX_KEY_ = 'CLOUD_IDX', IDX_TTL_ = 600;
-var CLOUD_VER_ = 7;   // 7판 (1.13.3): 보안 · 안정 고침 — 6판 (1.13.2): 구글 시트 = 공유 자료 보기 (표마다 탭, 쓸 때마다 갱신)
+var CLOUD_VER_ = 8;   // 8판 (1.13.17): 접속 중인 PC — 7판 (1.13.3): 보안 · 안정 고침 — 6판 (1.13.2): 구글 시트 = 공유 자료 보기 (표마다 탭, 쓸 때마다 갱신)
 function cloud_(req) {
   if (req.action === 'cloud_info') {
     var hit = null; try { hit = JSON.parse(CacheService.getScriptCache().get(IDX_KEY_) || 'null'); } catch (e) { hit = null; }
-    if (hit && hit.cid) return { ok: true, ver: CLOUD_VER_, cid: hit.cid, tables: hit.tables || {}, sheet: hit.surl || '', at: new Date().toISOString() };
+    if (hit && hit.cid) return { ok: true, ver: CLOUD_VER_, cid: hit.cid, tables: hit.tables || {}, sheet: hit.surl || '', pcs: pcsSeen_(req.pc), at: new Date().toISOString() };
   }
   var props = PropertiesService.getScriptProperties(), p;
   if (req.action === 'cloud_get') { p = props.getProperties(); return { ok: true, cid: p.CLOUD_ID || '', tables: cloudGet_(p, req.names || []) }; }
@@ -157,13 +160,30 @@ function cloud_(req) {
       try { return cloudPut_(props, p, req.tables || {}, String(req.pc || '').slice(0, 60)); } finally { cacheIdx_(p); }   // 몇 표만 쓰고 멈춰도 캐시 = 속성
     }
     cacheIdx_(p);
-    if (req.action === 'cloud_info') return { ok: true, ver: CLOUD_VER_, cid: p.CLOUD_ID, tables: cloudTables_(p), sheet: p.SHEET_URL || '', at: new Date().toISOString() };
+    if (req.action === 'cloud_info') return { ok: true, ver: CLOUD_VER_, cid: p.CLOUD_ID, tables: cloudTables_(p), sheet: p.SHEET_URL || '', pcs: pcsSeen_(req.pc), at: new Date().toISOString() };
     return { ok: false, error: 'unknown action' };
   } finally { lock.releaseLock(); }
 }
 function cacheIdx_(p) {
   var c = CacheService.getScriptCache();
   try { c.put(IDX_KEY_, JSON.stringify({ cid: p.CLOUD_ID, tables: cloudTables_(p), surl: p.SHEET_URL || '' }), IDX_TTL_); } catch (e) { try { c.remove(IDX_KEY_); } catch (e2) { /* 없음 */ } }
+}
+// 8판 (1.13.17): 접속 중인 PC — cloud_info 의 pc (PC 이름) 마다 마지막으로 물은 시각을 스크립트 캐시에 둔다 (속성 하루 한도를 쓰지 않음).
+//   하루 넘게 묻지 않은 PC 는 빼고 최근 50대까지. 6시간 동안 아무 PC 도 묻지 않으면 캐시가 비고, 다시 묻는 PC 부터 채운다.
+//   잠금 없이 쓴다 — 두 PC 가 동시에 물어 한쪽이 덮여도 30초 뒤 다음 물음에 다시 들어온다. pc 가 없으면 (연결 확인 · 옛 ERP) 읽기만.
+var PCS_KEY_ = 'CLOUD_PCS', PCS_TTL_ = 21600, PCS_KEEP_MS_ = 86400000, PCS_MAX_ = 50;
+function pcsSeen_(pc) {
+  var c = CacheService.getScriptCache(), m = {}, out = {};
+  try { m = JSON.parse(c.get(PCS_KEY_) || '{}'); } catch (e) { m = {}; }
+  if (!m || typeof m !== 'object' || Array.isArray(m)) m = {};
+  var now = new Date(), cut = now.getTime() - PCS_KEEP_MS_;
+  pc = String(pc || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
+  if (pc) m[pc] = now.toISOString();
+  Object.keys(m).filter(function (k) { var t = Date.parse(m[k]); return !isNaN(t) && t >= cut; })
+    .sort(function (a, b) { return m[a] < m[b] ? 1 : m[a] > m[b] ? -1 : 0; }).slice(0, PCS_MAX_)
+    .forEach(function (k) { out[k] = m[k]; });
+  if (pc) { try { c.put(PCS_KEY_, JSON.stringify(out), PCS_TTL_); } catch (e) { /* 못 쓰면 이번만 기억하지 못함 — 자료 공유와 상관없음 */ } }
+  return out;
 }
 function cloudMeta_(p, n) { try { return JSON.parse(p['T_' + n] || 'null'); } catch (e) { return null; } }
 function cloudTables_(p) {

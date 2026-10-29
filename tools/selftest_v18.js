@@ -12,6 +12,8 @@
    11 (1.13.3) 코드 검토에서 찾은 문제: 구글 비밀 키는 사내망의 다른 PC 브라우저에 보내지 않음 · 덮어쓰기는 구글에만 있는 표도 · 휴대폰 보기 잠금이 기억한 휴대폰은 막지 않음
       · 속성 9KB 한도 (바이트) · 긴 탭 이름 · "(ERP 2)" · 끊긴 동안 누른 [구글 시트 다시 쓰기] 를 잃지 않음
    12 (1.13.4) 정리: 행 합치기 코드는 app/js/merge.js 하나 (화면 · 서버 같은 결과, 같은 _id 두 행) · 서버 오류 글에 한국어 · 베트남어 · 저장마다 폴더를 훑지 않음
+   13 (1.13.17, Code.gs 8판) 접속 중인 PC: PC 이름 · 마지막으로 맞춘 때 (스크립트 캐시 · 하루 · 50대) · 이 PC · 몇 분 전은 구글 시계로 · 끄면 없음
+      · 7판이면 표마다 보낸 PC 와 8판 안내 · 화면 (설정 카드 · 공유 카드 · 베트남어 · 휴대폰 폭)
    사용:  npm run test:v18   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os'), http = require('http'), crypto = require('crypto'), zlib = require('zlib'), vm = require('vm');
 const ROOT = path.join(__dirname, '..');
@@ -157,7 +159,7 @@ function gasCtx(code, opt) {
 }
 /** 웹 서버: POST /macros/s/<id>/exec → doPost → 302 → GET 결과 (Apps Script 와 같음). down · login · old · beforePut 으로 상황을 만든다 */
 async function fakeGoogle(code, opt) {
-  const G = { gas: gasCtx(code, opt), hits: [], down: false, login: false, old: false, beforePut: null };
+  const G = { gas: gasCtx(code, opt), hits: [], down: false, login: false, old: false, beforePut: null, v7: false, skew: 0 };
   const outs = new Map(); let n = 0; const id = 'AKfy' + crypto.randomBytes(6).toString('hex');
   const readAll = (q) => new Promise(r => { const ch = []; q.on('data', d => ch.push(d)); q.on('end', () => r(Buffer.concat(ch).toString('utf8'))); });
   const srv = http.createServer(async (q, res) => {
@@ -177,6 +179,13 @@ async function fakeGoogle(code, opt) {
         if (G.v5 && (j.action === 'ping' || j.action === 'cloud_info')) {   // 5판의 답 모양 (번호 · 크기 · 행 수 · 시각만)
           const o = JSON.parse(out); o.ver = 5;
           if (j.action === 'cloud_info') { delete o.sheet; Object.keys(o.tables || {}).forEach(n => { const x = o.tables[n]; o.tables[n] = { v: x.v, s: x.s, n: x.n, at: x.at }; }); }
+          out = JSON.stringify(o);
+        }
+        if (G.v7 && (j.action === 'ping' || j.action === 'cloud_info')) { const o = JSON.parse(out); o.ver = 7; delete o.pcs; out = JSON.stringify(o); }   // 7판으로 배포한 채 (1.13.17)
+        if (G.skew && j.action === 'cloud_info') {   // 구글 시계가 PC 시계와 다름 (1.13.17)
+          const o = JSON.parse(out); const sh = (s) => new Date(Date.parse(s) + G.skew).toISOString();
+          if (o.at) o.at = sh(o.at);
+          if (o.pcs) Object.keys(o.pcs).forEach(k => { o.pcs[k] = sh(o.pcs[k]); });
           out = JSON.stringify(o);
         }
       }
@@ -235,14 +244,14 @@ async function ownerData(S) {
   // ------------------------------------------------------------------------------------------
   await sec('1. Code.gs 6판 (구글 쪽) — 5판 공유: 표마다 파일 · 저장 번호 · 충돌 · 이름표', async () => {
     const src = fs.readFileSync(CODE_FILE, 'utf8');
-    ok('7판 머리글 (1.13.3) · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /7판 \(v1\.13\.\d\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
+    ok('8판 머리글 (1.13.17) · 데이터 폴더 · TOKEN 한 줄 (ERP 가 채움)', /8판 \(v1\.13\.\d+\)/.test(src) && /var DATA_FOLDER = 'ColorPencil ERP Data';/.test(src) && src.split("var TOKEN = 'CHANGE-ME';").length === 2);
     const raw = gasCtx(src);
     eq("'CHANGE-ME' 그대로 배포하면 아무 요청도 받지 않음", raw.post({ token: 'CHANGE-ME', action: 'ping' }).error, 'bad token');
     const G = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"));
-    eq('?ping=1 · ping → 7판', [JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, G.post({ token: TK, action: 'ping' }).ver], [7, 7]);
+    eq('?ping=1 · ping → 8판', [JSON.parse(G.c.doGet({ parameter: { ping: '1' } }).getContent()).ver, G.post({ token: TK, action: 'ping' }).ver], [8, 8]);
     eq('틀린 키 → bad token', G.post({ token: TK + 'x', action: 'cloud_info' }).error, 'bad token');
     const i0 = G.post({ token: TK, action: 'cloud_info' }), i1 = G.post({ token: TK, action: 'cloud_info' });
-    ok('빈 저장소: 표 없음 · 이름표(cid) 한 번 만들고 그대로', i0.ok && Object.keys(i0.tables).length === 0 && /^[0-9a-f-]{36}$/.test(i0.cid) && i1.cid === i0.cid && i0.ver === 7, { i0, i1 });
+    ok('빈 저장소: 표 없음 · 이름표(cid) 한 번 만들고 그대로', i0.ok && Object.keys(i0.tables).length === 0 && /^[0-9a-f-]{36}$/.test(i0.cid) && i1.cid === i0.cid && i0.ver === 8, { i0, i1 });
     const p1 = G.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'AAA', n: 2 } } });
     const x1 = JSON.parse(G.props.get('T_po')); const f1 = G.files.get(x1.f);
     ok('올리기 → 번호 1 · 드라이브 "ColorPencil ERP Data/po.json.gz.b64" · 크기 · 행 수 · 시각', p1.ok && p1.vers.po === 1 && x1.v === 1 && x1.s === 3 && x1.n === 2 && x1.at && f1 && f1.name === 'po.json.gz.b64' && f1.content === 'AAA' && f1.folder === G.folders.get('ColorPencil ERP Data'), { p1, x1 });
@@ -265,7 +274,7 @@ async function ownerData(S) {
     // 시트 없이 만든 스크립트 (script.google.com 에서 바로)
     const SA = gasCtx(src.replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';"), { noSheet: true });
     const sp = SA.post({ token: TK, action: 'ping' }), sl = SA.post({ token: TK, action: 'list' }), sc = SA.post({ token: TK, action: 'cloud_put', tables: { po: { base: 0, b64: 'A' } } });
-    ok('시트 없는(독립형) 스크립트: ping · 공유는 됨, 시트 기능만 안내', sp.ok && sp.ver === 7 && sp.sheet === '' && sl.ok === false && /no spreadsheet/.test(sl.error) && sc.vers.po === 1, { sp, sl, sc });
+    ok('시트 없는(독립형) 스크립트: ping · 공유는 됨, 시트 기능만 안내', sp.ok && sp.ver === 8 && sp.sheet === '' && sl.ok === false && /no spreadsheet/.test(sl.error) && sc.vers.po === 1, { sp, sl, sc });
     // 4판까지의 기능 그대로
     ok('휴대폰 보기 · 드라이브 백업 그대로 (4판 기능)', G.post({ token: TK, action: 'mobile_pw', pw: 'secret12' }).on === true && G.post({ token: TK, action: 'mobile', summary: JSON.stringify({ v: 1, kpi: {} }) }).ok
       && G.c.mobileData('secret12').ok && G.post({ token: TK, action: 'backup', name: 'ERP_backup_2026-10-22.json.gz', b64: Buffer.from('x').toString('base64') }).ok);
@@ -328,7 +337,7 @@ async function ownerData(S) {
     const wrong = await capi(A, 'check', { url: G.url, token: TK.replace('T18', 'X18') });
     eq('키가 다르면 BAD_TOKEN', wrong.json.code, 'BAD_TOKEN');
     const ck = await capi(A, 'check', { url: G.url, token: TK });
-    ok('연결 확인: 7판 · 비어 있음 · 이 PC 자료 (표 · 행) · 다시 켤 것 없음', ck.status === 200 && ck.json.ver === 7 && ck.json.empty === true && ck.json.resume === false && ck.json.local.tables === 3 && ck.json.local.rows === 125 && ck.json.sheet === 'ERP 공유', ck.json);
+    ok('연결 확인: 8판 · 비어 있음 · 이 PC 자료 (표 · 행) · 다시 켤 것 없음', ck.status === 200 && ck.json.ver === 8 && ck.json.empty === true && ck.json.resume === false && ck.json.local.tables === 3 && ck.json.local.rows === 125 && ck.json.sheet === 'ERP 공유', ck.json);
     const nb = await capi(A, 'connect', { url: G.url, token: TK, mode: 'replace' });
     eq('빈 저장소에 "구글 자료로" 는 안 됨 (EMPTY)', nb.json.code, 'EMPTY');
     const up = await capi(A, 'connect', { url: G.url, token: TK, mode: 'upload' });
@@ -562,7 +571,7 @@ async function ownerData(S) {
       await P.click('#cloudCard .cloud-setup .toolbar button:has-text("연결 확인") >> nth=0');
       await P.waitForSelector('#cloudCard .cloud-res button:has-text("이 PC 자료를 올리고 공유 시작")', { timeout: 15000 });
       const r0 = await P.evaluate(() => document.querySelector('#cloudCard .cloud-res').innerText);
-      ok('연결 확인 → 연결됨 · 7판 · 아직 자료 없음 · 이 PC 자료 수', /연결됨/.test(r0) && /Apps Script 7판/.test(r0) && /아직 자료가 없습니다/.test(r0) && /표 \d+개/.test(r0), r0);
+      ok('연결 확인 → 연결됨 · 8판 · 아직 자료 없음 · 이 PC 자료 수', /연결됨/.test(r0) && /Apps Script 8판/.test(r0) && /아직 자료가 없습니다/.test(r0) && /표 \d+개/.test(r0), r0);
       await P.click('#cloudCard .cloud-res button:has-text("이 PC 자료를 올리고 공유 시작")');
       await P.waitForSelector('.modal .cloud-done', { timeout: 30000 });
       const done = await P.evaluate(() => document.querySelector('.modal').innerText);
@@ -639,7 +648,7 @@ async function ownerData(S) {
     ok('ERP 창을 닫기 · 업데이트 설치 · 사내망 재시작 전에 구글로 보냄 (flushAll → cloud.flush)', /async function flushAll\(\)/.test(main) && /info\.cloud\.flush\(15000\)/.test(main) && /beforeInstall: \(\) => flushAll\(\)/.test(main) && /flushAll\(\)\.then\(/.test(main) && /await flushAll\(\); app\.relaunch\(\)/.test(main));
     ok('Windows 자동 업데이트 시험이 cloudsync.js 바뀜에도 돎', /- 'cloudsync\.js'/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'update-test.yml'), 'utf8')));
     const core = fs.readFileSync(path.join(ROOT, 'app', 'js', 'core.js'), 'utf8'), nsi = fs.readFileSync(path.join(ROOT, 'build', 'installer.nsi'), 'utf8');
-    eq('버전 1.13.16 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.16 /.test(pkg.scripts.dist)], ['1.13.16', '1.13.16', '1.13.16', true]);
+    eq('버전 1.13.17 (package · 화면 · 설치 프로그램)', [pkg.version, (core.match(/v: '([\d.]+)'/) || [])[1], (nsi.match(/!define VERSION "([\d.]+)"/) || [])[1], /-DVERSION=1\.13\.17 /.test(pkg.scripts.dist)], ['1.13.17', '1.13.17', '1.13.17', true]);
     ok('index.html 에 cloud.js', /<script src="js\/cloud\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8')));
   });
 
@@ -659,7 +668,7 @@ async function ownerData(S) {
     const w1 = put('po', poRows, 0, LAY.po, 'PC-A');
     ok('저장(cloud_put)은 시트를 기다리지 않음 — 저장 번호만 주고, 시트는 아직 그대로', w1.ok && w1.vers.po === 1 && !('sheet' in w1) && S.book.names().join() === '시트1' && S.book.writes === 0, { w1, tabs: S.book.names() });
     const i1 = info();
-    ok('cloud_info: 7판 · 보낸 PC · 시트에 쓴 번호 (sv 0 = 아직)', i1.ver === 7 && i1.tables.po.pc === 'PC-A' && i1.tables.po.sv === 0 && i1.tables.po.v === 1, i1.tables.po);
+    ok('cloud_info: 8판 · 보낸 PC · 시트에 쓴 번호 (sv 0 = 아직)', i1.ver === 8 && i1.tables.po.pc === 'PC-A' && i1.tables.po.sv === 0 && i1.tables.po.v === 1, i1.tables.po);
     const s1 = sheetGo(); const tab = S.book.tab('수주 (PO)');
     ok('cloud_sheet → 표마다 탭 (ERP 화면과 같은 한국어 이름) · 쓴 표 · 시트 주소 · 이름', s1.ok && s1.sheet === true && JSON.stringify(s1.written) === '["po"]' && !s1.more && !!tab && s1.url === 'https://sheet.example' && s1.name === 'ColorPencil ERP 공유 자료', s1);
     const t1 = tab ? tab.table() : [];
@@ -725,7 +734,7 @@ async function ownerData(S) {
     const plTab = bk.tab('생산 일보');
     ok('생산 일보 탭: 머리글 = 화면 (생산일 …) · 맨 끝 ID (ERP) · 120행', !!plTab && plTab.table()[0][0] === '생산일' && plTab.table()[0].slice(-1)[0] === 'ID (ERP)' && plTab.table().length === 121, plTab && plTab.table()[0]);
     const st1 = await stat(P1);
-    ok('상태: 구글 시트 있음 · 주소 · 이름 · 7판 · 최신 (갱신 대기 · 오류 없음)', !!st1.sheet && st1.sheet.has === true && st1.sheet.url === 'https://sheet.example' && st1.sheet.name === 'ColorPencil ERP 공유 자료' && st1.sheet.ver === 7 && !st1.sheet.code && st1.sheet.lag.length === 0 && !Object.keys(st1.sheet.errs).length && !!st1.sheet.at, st1.sheet);
+    ok('상태: 구글 시트 있음 · 주소 · 이름 · 8판 · 최신 (갱신 대기 · 오류 없음)', !!st1.sheet && st1.sheet.has === true && st1.sheet.url === 'https://sheet.example' && st1.sheet.name === 'ColorPencil ERP 공유 자료' && st1.sheet.ver === 8 && !st1.sheet.code && st1.sheet.lag.length === 0 && !Object.keys(st1.sheet.errs).length && !!st1.sheet.at, st1.sheet);
     const pl = await getT(P1, 'prod_log'); byId(pl, 'pl7').ok_ea = 7777; await putT(P1, 'prod_log', pl); await sync(P1);
     const rowOf = (tn, id) => ((bk.tab(tn) && bk.tab(tn).table().find(r => r[r.length - 1] === id)) || []);
     ok('ERP 에서 고쳐 저장 → 구글 시트 탭도 (몇 초 안에) · 안내 탭에 보낸 PC', await waitFor(() => rowOf('생산 일보', 'pl7').includes(7777)) && (bk.sheets[0].table().find(r => r[5] === 'prod_log') || [])[3] === 'PC-사장', bk.sheets[0].table());
@@ -795,7 +804,7 @@ async function ownerData(S) {
     const cj = path.join(P1.dataDir, 'cloud.json'), cjo = JSON.parse(fs.readFileSync(cj, 'utf8')); delete cjo.sheet; delete cjo.sheetAt; fs.writeFileSync(cj, JSON.stringify(cjo));
     const P1b = keep(await startPc(P1.dataDir, { pcName: 'PC-사장', cloudSheet: 1000, cloudSheetLag: 0 }), servers);
     const sb0 = (await stat(P1b)).sheet; await sync(P1b); const sb1 = (await stat(P1b)).sheet;
-    ok('1.13.1 까지 연결한 PC: 처음엔 시트를 모름 (확인 중) → 한 판 뒤 7판 · 시트 주소', sb0.has === null && sb0.ver === null && sb1.has === true && sb1.url === 'https://sheet.example' && sb1.ver === 7 && !sb1.lag.length, { sb0, sb1 });
+    ok('1.13.1 까지 연결한 PC: 처음엔 시트를 모름 (확인 중) → 한 판 뒤 8판 · 시트 주소', sb0.has === null && sb0.ver === null && sb1.has === true && sb1.url === 'https://sheet.example' && sb1.ver === 8 && !sb1.lag.length, { sb0, sb1 });
   });
 
   // ------------------------------------------------------------------------------------------
@@ -976,6 +985,93 @@ async function ownerData(S) {
       ok('하루 백업은 그대로 (그날 처음 저장하기 전 내용)', days.length === 1 && JSON.stringify(JSON.parse(fs.readFileSync(path.join(bdir, days[0], 'returns.json'), 'utf8'))) === '[]', days);
       await capi(F, 'off');
     }
+  });
+
+  // ------------------------------------------------------------------------------------------
+  await sec('13. 접속 중인 PC (1.13.17, Code.gs 8판) — PC 이름 · 마지막으로 맞춘 때 · 이 PC · 구글 시계 · 7판이면 보낸 PC 와 안내', async () => {
+    const src = fs.readFileSync(CODE_FILE, 'utf8').replace("var TOKEN = 'CHANGE-ME';", "var TOKEN = '" + TK + "';");
+    const names = (m) => Object.keys(m || {});
+    // ---- (가) 구글 쪽: cloud_info 에 PC 이름 → PC 마다 마지막으로 물은 시각 (스크립트 캐시 · 하루 · 50대)
+    {
+      const K = gasCtx(src);
+      const info = (pc) => K.post(pc === undefined ? { token: TK, action: 'cloud_info' } : { token: TK, action: 'cloud_info', pc });
+      const cacheMap = () => { try { return JSON.parse(K.cache.get('CLOUD_PCS') || '{}') || {}; } catch (e) { return {}; } };
+      const a = info('PC-A');
+      ok('8판 · cloud_info 에 PC 이름 → 그 PC 를 기억해 같이 돌려줌 (pcs = 구글 시각)', a.ok && a.ver === 8 && names(a.pcs).join() === 'PC-A' && Date.parse((a.pcs || {})['PC-A']) <= Date.parse(a.at), a);
+      info('PC-B'); const b2 = info('PC-B');
+      ok('다른 PC 도 · 번호 목록 캐시 (빠른 길) 로 답할 때도 기억', names(b2.pcs).sort().join() === 'PC-A,PC-B' && K.cache.has('CLOUD_IDX'), b2.pcs);
+      const r0 = K.stats.propReads; for (let i = 0; i < 10; i++) info('PC-A');
+      ok('스크립트 속성 (하루 한도) 은 읽지도 쓰지도 않음 — 캐시만', K.stats.propReads === r0 && !Array.from(K.props.keys()).some(k => /PC/.test(k)) && K.cache.has('CLOUD_PCS'), { reads: K.stats.propReads - r0, keys: Array.from(K.props.keys()) });
+      const keep0 = K.cache.get('CLOUD_PCS'); const n0 = info(), n1 = info('   ');
+      ok('PC 이름 없이 묻기 (연결 확인 · 옛 ERP) · 빈 이름 → 읽기만 (목록 그대로)', keep0 !== null && K.cache.get('CLOUD_PCS') === keep0 && names(n0.pcs).length === 2 && names(n1.pcs).length === 2, { n0: n0.pcs, n1: n1.pcs });
+      const lg = info('가'.repeat(80) + '\u0007');
+      ok('긴 이름은 60자 · 제어 문자는 뺌', names(lg.pcs).includes('가'.repeat(60)), names(lg.pcs));
+      const o = cacheMap(); o['PC-OLD'] = new Date(Date.now() - 25 * 3600000).toISOString(); K.cache.set('CLOUD_PCS', JSON.stringify(o));
+      const od = info('PC-A');
+      ok('하루 넘게 묻지 않은 PC 는 뺌', !!od.pcs && !('PC-OLD' in od.pcs) && names(cacheMap()).length > 0 && !('PC-OLD' in cacheMap()), names(od.pcs));
+      const many = {}; for (let i = 0; i < 60; i++) many['PC-' + i] = new Date(Date.now() - (i + 1) * 1000).toISOString();
+      K.cache.set('CLOUD_PCS', JSON.stringify(many)); const mx = info('PC-NEW').pcs || {};
+      ok('최근 50대까지 (오래된 것부터 뺌)', names(mx).length === 50 && !!mx['PC-NEW'] && !!mx['PC-0'] && !mx['PC-49'] && !mx['PC-59'], names(mx).length);
+      K.cache.set('CLOUD_PCS', '{깨진'); const bk = info('PC-A');
+      ok('캐시 글자가 깨져도 다시 시작', names(bk.pcs).join() === 'PC-A', bk.pcs);
+      K.stats.cacheFail = true; const cf = info('PC-C'); K.stats.cacheFail = false;
+      ok('캐시에 못 써도 cloud_info 는 그대로 (이름표 · 표) — 이번만 기억 못 함', cf.ok && !!cf.cid && typeof cf.tables === 'object' && names(cf.pcs).includes('PC-C') && !names(cacheMap()).includes('PC-C'), cf);
+    }
+    // ---- (나) ERP 와 함께: 판마다 이 PC 이름을 보냄 → 상태 pcs (이 PC 표시 · 몇 분 전은 구글 시계로 · 끄면 없음)
+    const G8 = keep(await fakeGoogle(src), googles);
+    const U = keep(await startPc(tmp('erp-v18-pu-'), { pcName: 'PC-사장' }), servers);
+    const V = keep(await startPc(tmp('erp-v18-pv-'), { pcName: 'PC-직원1' }), servers);
+    await ownerData(U);
+    await capi(U, 'connect', { url: G8.url, token: TK, mode: 'upload' });
+    await capi(V, 'connect', { url: G8.url, token: TK, mode: 'replace' });
+    await sync(V); await sync(U);
+    const by = (s, n) => (((s && s.pcs && s.pcs.list) || []).find(x => x.name === n)) || {};
+    const su = await stat(U), sv = await stat(V);
+    ok('사장님 PC 상태: 접속 중인 PC 두 대 (이름 · 몇 초 전) · 이 PC 표시', !!su.pcs && Array.isArray(su.pcs.list) && su.pcs.list.length === 2 && by(su, 'PC-사장').me === true && by(su, 'PC-직원1').me === false && su.pcs.list.every(x => x.ago >= 0 && x.ago < 60000), su.pcs);
+    ok('직원 PC 상태에서도 같은 두 대 · 이 PC = 직원 PC', !!sv.pcs && Array.isArray(sv.pcs.list) && sv.pcs.list.length === 2 && by(sv, 'PC-직원1').me === true && by(sv, 'PC-사장').me === false, sv.pcs);
+    ok('구글 쪽에 두 PC 이름 (ERP 가 cloud_info 에 pc 를 붙임)', ['PC-사장', 'PC-직원1'].every(k => k in JSON.parse(G8.gas.cache.get('CLOUD_PCS') || '{}')), G8.gas.cache.get('CLOUD_PCS'));
+    const pm = JSON.parse(G8.gas.cache.get('CLOUD_PCS') || '{}'); pm['PC-직원1'] = new Date(Date.now() - 10 * 60000).toISOString(); G8.gas.cache.set('CLOUD_PCS', JSON.stringify(pm));
+    await sync(U); const su2 = await stat(U);
+    ok('직원 PC 가 10분 동안 묻지 않음 → 사장님 PC 에서 10분 전 (이 PC 는 방금, 맨 앞)', by(su2, 'PC-직원1').ago >= 9.5 * 60000 && by(su2, 'PC-직원1').ago < 11 * 60000 && by(su2, 'PC-사장').ago < 60000 && ((((su2.pcs || {}).list || [])[0]) || {}).name === 'PC-사장', su2.pcs);
+    G8.skew = 2 * 3600000; await sync(U); const su3 = await stat(U); G8.skew = 0;
+    ok('구글 시계가 2시간 빨라도 몇 분 전은 그대로 (구글 시계로 잼 — PC 시계가 틀려도 맞음)', by(su3, 'PC-사장').ago < 60000 && by(su3, 'PC-직원1').ago >= 9.5 * 60000 && by(su3, 'PC-직원1').ago < 11 * 60000, su3.pcs);
+    await capi(V, 'off'); const sv2 = await stat(V);
+    ok('공유를 끄면 상태에 접속 중인 PC 없음 (null)', sv2.on === false && sv2.pcs === null, sv2.pcs);
+    // ---- (다) 구글 Apps Script 를 7판으로 둔 채 → 접속 중인 PC 는 모름 (list null) · 표마다 마지막으로 보낸 PC (senders)
+    const G7 = keep(await fakeGoogle(src), googles); G7.v7 = true;
+    const W = keep(await startPc(tmp('erp-v18-pw-'), { pcName: 'PC-7판' }), servers); await ownerData(W);
+    await capi(W, 'connect', { url: G7.url, token: TK, mode: 'upload' }); await sync(W); const sw = await stat(W);
+    ok('7판: 접속 중인 PC 목록 없음 (list null) · 자료를 보낸 PC = 이 PC (표마다 보낸 PC 에서)', !!sw.pcs && sw.pcs.list === null && Array.isArray(sw.pcs.senders) && sw.pcs.senders.length === 1 && sw.pcs.senders[0].name === 'PC-7판' && sw.pcs.senders[0].me === true, sw.pcs);
+    // ---- (라) 화면: 설정 카드 한 줄 · 공유 카드 (접속 중 · 몇 분 전 · 이 PC · 몇 대) · 7판 안내 · 베트남어 · 휴대폰 폭
+    const browser = await pw.chromium.launch(exe ? { executablePath: exe } : {});
+    try {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+      const open = async (S, where) => {
+        const p = await ctx.newPage(); p.on('pageerror', e => errors.push('pageerror: ' + e.message));
+        await p.goto(S.url + '/#/' + where); await p.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.querySelector('.side'), null, { timeout: 180000 });
+        return p;
+      };
+      const txt = (p, sel) => p.evaluate((s) => (document.querySelector(s) || {}).innerText || '', sel);
+      const P = await open(U, 'settings'); await P.waitForSelector('#cloudMini .chip', { timeout: 15000 });
+      const mini = await txt(P, '#cloudMini');
+      ok('설정 카드: 접속 중인 PC = PC-사장 (이 PC) · 최근 PC-직원1 (10분 전)', /접속 중인 PC/.test(mini) && /PC-사장 \(이 PC\)/.test(mini) && /PC-직원1 \(10분 전\)/.test(mini) && !/\bnull\b|undefined|NaN/.test(mini), mini);
+      await P.evaluate(() => { ERP.state.dataTab = 'google'; ERP.goto('data'); }); await P.waitForSelector('#cloudCard .cloud-pcs', { timeout: 15000 }).catch(() => {});
+      const card = await txt(P, '#cloudCard .cloud-pcs');
+      ok('공유 카드: 접속 중인 PC · 이 PC 는 접속 중 · 직원 PC 는 10분 전 · 지금 접속 중 1대', /접속 중인 PC/.test(card) && /PC-사장 \(이 PC\) · 접속 중/.test(card) && /PC-직원1 · 10분 전/.test(card) && /접속 중 1대/.test(card), card);
+      await P.evaluate(() => ERP.setLang('vi')); await P.waitForFunction(() => /Máy đang kết nối/.test((document.querySelector('#cloudCard') || {}).innerText || ''), null, { timeout: 15000 }).catch(() => {});
+      const vi = await txt(P, '#cloudCard .cloud-pcs');
+      ok('베트남어: Máy đang kết nối · máy này · null/undefined 없음', /Máy đang kết nối/.test(vi) && /máy này/.test(vi) && !/\bnull\b|undefined|NaN/.test(vi), vi);
+      await P.evaluate(() => ERP.setLang('ko'));
+      await P.setViewportSize({ width: 390, height: 844 }); await P.evaluate(() => ERP.render()); await P.waitForSelector('#cloudCard .cloud-pcs', { timeout: 10000 }).catch(() => {}); await P.waitForTimeout(300);
+      const fit = await P.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, has: !!document.querySelector('#cloudCard .cloud-pcs') }));
+      ok('휴대폰 폭(390)에 맞음', fit.has && fit.sw <= fit.iw + 1, fit);
+      const Q = await open(W, 'settings'); await Q.waitForSelector('#cloudMini .chip', { timeout: 15000 });
+      const m7 = await txt(Q, '#cloudMini');
+      await Q.evaluate(() => { ERP.state.dataTab = 'google'; ERP.goto('data'); }); await Q.waitForSelector('#cloudCard .cloud-pcs', { timeout: 15000 }).catch(() => {});
+      const c7 = await txt(Q, '#cloudCard .cloud-pcs');
+      ok('7판: 설정 카드 = 자료를 보낸 PC · 8판 안내 / 공유 카드 = 보낸 PC · [Apps Script 코드 복사] 로 8판 · 주소 그대로', /자료를 보낸 PC/.test(m7) && /PC-7판 \(이 PC\)/.test(m7) && /8판/.test(m7) && /자료를 보낸 PC/.test(c7) && /8판부터/.test(c7) && /Apps Script 코드 복사/.test(c7) && /주소는 그대로/.test(c7), { m7, c7 });
+      await ctx.close();
+    } finally { await browser.close(); }
   });
 
   ok('화면 오류 없음', !errors.length, errors.slice(0, 6));

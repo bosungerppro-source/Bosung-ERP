@@ -14,7 +14,9 @@
    - 시트 갱신(cloud_sheet)은 주고받기와 따로 돈다: 이 PC 가 보낸 뒤 20초 (그 사이 저장은 모아서 한 번), 다른 PC 가 못 한 갱신 (뒤처진 지 1분) 은 대신, [구글 시트 다시 쓰기] 는 바로.
      저장 응답 · 30초 판 · 끄기 전 보내기는 시트 쓰기를 기다리지 않는다. 5판 · 시트 없이 만든 스크립트는 부르지 않는다.
    1.13.3: 덮어쓰기는 구글에만 있는 표도 (이 ERP 가 아는 표면 빈 표로 — 이 PC 로 가져오지 않음, 모르는 표는 그대로).
-     [구글 시트 다시 쓰기] 가 실패하면 그 요청을 남겨 두고 기다린 뒤 다시 한다. */
+     [구글 시트 다시 쓰기] 가 실패하면 그 요청을 남겨 두고 기다린 뒤 다시 한다.
+   1.13.17 (Code.gs 8판): 접속 중인 PC — 판마다 묻는 cloud_info 에 이 PC 이름 (o.pc) 을 붙이고, 구글이 돌려준 pcs (PC 마다 마지막으로 물은 시각) 를 상태 (pcs) 에 둔다.
+     몇 분 전인지는 구글 시계 (답의 at) 로 잰다 — PC 시계가 틀려도 맞음. 7판까지는 표마다 마지막으로 보낸 PC (senders) 만. */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), util = require('util');
 const gzip = util.promisify(zlib.gzip), gunzip = util.promisify(zlib.gunzip);
 
@@ -97,6 +99,8 @@ function create(o) {
   const run = { busy: false, at: null, ok: null, code: null, error: null, conflicts: 0, shrink: [], log: [] };
   // 구글 시트 갱신 (6판): ver = 구글 Apps Script 판 (cloud_info), lag = 시트가 뒤처진 표, errs = 시트에 쓰지 못한 표 {표: 오류}
   const sh = { ver: null, busy: false, timer: null, due: 0, all: false, again: false, next: 0, fails: 0, code: null, error: null, lag: [], errs: {}, wrote: [] };
+  // 접속 중인 PC (1.13.17): 마지막으로 성공한 판의 cloud_info — got = 받은 때 (이 PC 시계), gnow = 답의 at (구글 시계), pcs (8판) · senders (표마다 보낸 PC)
+  const seen = { got: 0, gnow: 0, pcs: null, senders: null };
   let timer = null, pokeT = null, failN = 0, nextAt = 0, queued = null, chain = Promise.resolve(), stopped = false;
   /** 기록 (화면이 글자로 바꿈): k = on · off · got · sent · conf · err · shrink · lost · sheeterr */
   const note = (k, x) => { run.log.push({ at: new Date().toISOString(), k, x: x === undefined ? null : x }); if (run.log.length > 40) run.log.splice(0, run.log.length - 40); if (o.log) o.log(k + ' ' + JSON.stringify(x)); };
@@ -249,14 +253,14 @@ function create(o) {
   }
   async function cycle() {
     const cfg = cfgNow(); const out = { got: new Set(), sent: new Set(), conflicts: 0, info: null };
-    let info = await call(cfg, { action: 'cloud_info' }, 60000);
+    let info = await call(cfg, { action: 'cloud_info', pc: PC }, 60000);   // 1.13.17: 8판은 pc 를 접속 중으로 기억
     for (let round = 0; ; round++) {
       if (info.cid !== st.cid) throw fail('CID');
       out.info = info;
       const r = await round1(cfg, info, out);
       if (!r.retry) break;
       if (round >= 3) throw fail('BUSY', 'conflicts');
-      info = await call(cfg, { action: 'cloud_info' }, 60000);
+      info = await call(cfg, { action: 'cloud_info', pc: PC }, 60000);
     }
     return out;
   }
@@ -269,6 +273,7 @@ function create(o) {
       if (r.got.size) { st.lastGot = at; note('got', Array.from(r.got)); }
       if (r.sent.size) { st.lastSent = at; note('sent', Array.from(r.sent)); }
       if (r.conflicts) { run.conflicts += r.conflicts; note('conf', r.conflicts); }
+      noteSeen(r.info);
       saveState();
       try { sheetAfter(r.info, Array.from(r.sent)); } catch (e) { /* 시트 갱신은 자료 공유와 따로 — 공유 오류로 보이지 않게 */ }
     } catch (e) {
@@ -478,7 +483,7 @@ function create(o) {
       if (mode === 'upload' && !empty) throw fail('NOT_EMPTY');
       if ((mode === 'replace' || mode === 'merge') && empty) throw fail('EMPTY');
       clearTimeout(timer); clearTimeout(pokeT);
-      saveUrl(cfg);
+      saveUrl(cfg); seen.got = 0;
       const res = { mode, tables: 0, rows: 0, added: 0, backup: null };
       if (mode !== 'resume') { st = Object.assign(blank(), { cid: info.cid }); clearBases(); }
       st.sheet = p.sheet ? { url: String(p.url || ''), name: String(p.sheet) } : false;   // 6판: 그 Apps Script 의 구글 시트 (없으면 시트 없이 만든 스크립트)
@@ -498,7 +503,7 @@ function create(o) {
   }
   function off() {
     return exclusive(async () => {
-      st.on = false; saveState(); clearTimeout(timer); clearTimeout(pokeT); clearTimeout(sh.timer); sh.timer = null; nextAt = 0; note('off');
+      st.on = false; saveState(); clearTimeout(timer); clearTimeout(pokeT); clearTimeout(sh.timer); sh.timer = null; nextAt = 0; seen.got = 0; note('off');
       return status();
     });
   }
@@ -509,11 +514,27 @@ function create(o) {
     if (src.indexOf(line) < 0) throw fail('GAS', 'Code.gs TOKEN line');
     return src.replace(line, "var TOKEN = '" + token + "';");
   }
+  /** 1.13.17: 판이 끝나면 — 8판은 접속 중인 PC (pcs), 7판까지는 표마다 마지막으로 보낸 PC (tables[].pc) 만 */
+  function noteSeen(info) {
+    if (!info) return;
+    const send = {}, t = info.tables || {};
+    Object.keys(t).forEach(n => { const x = t[n] || {}; if (n === META || !x.pc) return; const k = String(x.pc), at = String(x.at || ''); if (!(k in send) || at > send[k]) send[k] = at; });
+    Object.assign(seen, { got: Date.now(), gnow: Date.parse(info.at) || 0, pcs: info.pcs && typeof info.pcs === 'object' ? info.pcs : null, senders: send });
+  }
+  /** {PC 이름: 시각} → [{name, at, ago (ms), me}] 최근 것 먼저. ago = 구글 시계로 잰 때 + 그 뒤 흐른 시간 (이 PC 시계로) */
+  function pcList(map) {
+    if (!map || typeof map !== 'object') return null;
+    const now = (seen.gnow || seen.got) + (Date.now() - seen.got), key = (x) => (x.ago === null ? Infinity : x.ago);
+    return Object.keys(map).map(name => { const t = Date.parse(map[name]); return { name: name.slice(0, 60), at: String(map[name] || ''), ago: isNaN(t) ? null : Math.max(0, now - t), me: !!PC && name === PC }; })
+      .sort((a, b) => key(a) - key(b) || a.name.localeCompare(b.name)).slice(0, 50);
+  }
   function status() {
     const m = store.readMeta();
     return { on: st.on, cid: st.cid, mode: st.mode, since: st.since, url: st.cid ? (m.gUrl || null) : null, busy: run.busy, at: run.at, ok: run.ok, code: run.code, error: run.error,
       lastOk: st.lastOk, lastGot: st.lastGot, lastSent: st.lastSent, conflicts: run.conflicts, shrink: run.shrink.slice(), log: run.log.slice(-30),
-      every: EVERY, nextAt: st.on && nextAt ? new Date(nextAt).toISOString() : null, pending: pending(), tables: Object.keys(st.t).length, sheet: sheetStatus() };
+      every: EVERY, nextAt: st.on && nextAt ? new Date(nextAt).toISOString() : null, pending: pending(), tables: Object.keys(st.t).length, sheet: sheetStatus(),
+      // 1.13.17 접속 중인 PC: null = 꺼짐 · 아직 한 판도 못 맞춤, list null = 7판까지 (구글이 모름 — senders 만)
+      pc: PC || null, pcs: st.on && seen.got ? { at: new Date(seen.got).toISOString(), list: pcList(seen.pcs), senders: pcList(seen.senders) } : null };
   }
   return {
     status, check, preview, connect, off, code, syncNow, poke, pending, sheetNow,
