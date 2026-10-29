@@ -587,3 +587,10 @@
 - 고친 뒤 v18 205 / 205. 바꾼 기대값: v18 판 번호 7 → 8 (머리글 · ping · cloud_info · 연결 확인 · 시트 상태 · 1.13.1 PC) · 버전 1.13.17, v15 ping 8판 · 옛 Code.gs 알림 "새 코드(8판)".
 - 전체 (새 PC Soo, Windows, Node 24.22.2, 2026-10-29): v18 205 · v17 197 · v16 86 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · v7 148 (ERP_PREV = 1.13.16 `d96a6f3` 로 업그레이드 시험 포함) · assistant 290 모두 통과, v9 86 / 87 (Windows 환경 차이 1개 — 11차부터 같음).
 - 데모 `ERP_Demo.html`: 7,934,542 bytes, SHA-256 `dafab426239c5c0a99a94c0182c71103bc92f4fd5873228e31e8c890745b65a9`. 설치 파일은 이 PC 에서 만들지 않음 (electron-builder 의 NSIS 캐시가 없음) — GitHub 의 Windows 업데이트 시험 · Release 빌드를 씀.
+
+### GitHub · Apps Script 8판 · Release · 이 PC ERP (2026-10-29, Claude)
+- 새 PC 의 GitHub 로그인: 사용자가 Claude 앱 브라우저에 GitHub (bosungerppro-source) · 구글에 로그인 → Claude 가 GitHub CLI 기기 승인 코드를 넣고 승인 (`workflow` 권한도 — `release.yml` 을 올리려면 필요) · `gh auth setup-git`. 이 PC 는 github.com 연결이 가끔 몰아서 끊긴다 (한 시험에서 12번 중 8번) — 기기 승인 대기가 두 번 끊겨 다시 함, 올리기 · 받기는 다시 시도하게 함.
+- 올림: `main` `d96a6f3` → `b835c3e` (1.13.17). Windows 업데이트 시험 #34 성공 (17:06).
+- **Apps Script 8판** (17:01 저장 · 17:03 배포): "ColorPencil ERP 공유 자료" 시트에 붙은 프로젝트 (배포 "erp") 의 편집기 코드를 먼저 저장소 7판과 대조 (키 줄만 빼고 같음 — 키 32자, 24번째 줄) → 키 줄은 그대로 두고 나머지를 8판 (`b835c3e` 의 Code.gs) 으로 (570줄, 8판과 같음) → 저장 → 배포 관리 → "erp" 수정 → 새 버전 (버전 2) → 배포. 주소 그대로, `?ping=1` → ver 8. 키 값은 편집기 안에서만 다루고 읽거나 입력하지 않음.
+- Release v1.13.17: Claude 가 실행 (Actions #16 성공, 17:11, `releases/latest` = v1.13.17, `b835c3e`). `ColorPencil-ERP-Setup-1.13.17.exe` 114,263,513 bytes · SHA-256 `ec4f27c4310eca19288031f5fecb37df99f38ca943b7b36ef3dfbe7c6b5b621e` (GitHub 에서 빌드) · `ERP_Demo.html` (이 PC 데모와 같음) · `latest.json` (1.13.17, 크기 · 지문이 Release 설치 파일과 같음).
+- 이 PC (Soo) 의 ERP: 17:13 에 1.13.16 → 1.13.17 (업데이트 확인 → 받기 → 설치, `update_backup\2026-10-29_171340_v1.13.16_to_v1.13.17`). 한 판 뒤: 공유 켜짐 · 오류 없음 · 시트 8판, 접속 중인 PC = Soo (이 PC) · 접속 중, 표마다 자료를 보낸 PC = MrSoo-PC. 화면: 설정 카드 "접속 중인 PC: Soo (이 PC)", 공유 카드 "Soo (이 PC) · 접속 중 · 지금 접속 중 1대", 자료 43,324행 그대로, 화면 오류 0.
