@@ -162,7 +162,8 @@
     const byProc = new Map(); items.forEach(s => { const p = procOf(s); let a = byProc.get(p); if (!a) byProc.set(p, a = []); a.push(s); });
     const map = new Map(); const procs = []; let miss = 0;
     Array.from(byProc.keys()).sort((a, b) => procOrder(a) - procOrder(b)).forEach(p => {
-      const res = ERP.mrp ? ERP.mrp(byProc.get(p).map(s => ({ code: s.code, qty: s.bal, unit: 'pcs' })), { gross: true }) : { rows: [], info: [] };
+      // 1.13.18: 재고 수량은 품목 단위 그대로 (ea) — MRP 의 set · pcs 는 카톤 BOM 의 세트 · 색연필 수로 바꾸므로 (세트 재고 10 set 을 색연필 10 개로 보면 안 됨)
+      const res = ERP.mrp ? ERP.mrp(byProc.get(p).map(s => ({ code: s.code, qty: s.bal, unit: 'ea' })), { gross: true }) : { rows: [], info: [] };
       let any = false;
       res.rows.forEach(r => { if (r.kind !== 'raw' || !(r.need > EPS)) return; any = true; let x = map.get(r.code); if (!x) map.set(r.code, x = { k: r.code, name: r.name || '', unit: r.unit || 'kg', cells: new Map(), tot: 0 }); x.cells.set(p, r4((x.cells.get(p) || 0) + r.need)); x.tot = r4(x.tot + r.need); });
       if (any) procs.push(p);

@@ -26,8 +26,21 @@
   }
   const dlCodes = (id) => h('datalist', { id }, codeList().map(v => h('option', { value: v })));
 
+  // ---------- 1.13.18: 사용자 구성 (bom_lines) 의 세트 · 색연필 수 ----------
+  // 사용자 2026-10-30 점검 ("수주에 마춰서 아이템별 set개수가 bom과 맞는지"): ECOUNT BOM 의 수주 품번은 카톤 코드 (카톤 1 + 세트 SG ×12 → 세트 1 = 조립 색연필 ×24) 라서
+  //   예전 MRP 는 수주 set 을 카톤 개수로 풀어 카톤당 세트 수만큼 부풀었다. 결과 품목 1개 안의 세트 · 색연필 수를 세서 set · pcs 를 결과 품목 개수로 바꾼다.
+  // 세트 = 단계 SG, 색연필 = 단계 WIP · WIP55 — ERP 단계 (stage · ERP CODE) 가 있는 품목만. BOM 설정에서 유형만 정한 품목 (반제품 = WIP 로 봄) 은 세지 않는다 (직접 만든 BOM 은 예전처럼 개수 그대로)
+  const stageOf = (code) => { const it = ERP.inv ? ERP.inv.item(code) : null; return it && (it.stage || it.erp_code) ? ERP.inv.info(it).stage : ''; };
+  const isSetCode = (code) => stageOf(code) === 'SG';
+  const isPenCode = (code) => { const s = stageOf(code); return s === 'WIP' || s === 'WIP55'; };
+  /** code 1개 안에 test 에 맞는 품목이 몇 개인가 (맞는 품목에서 멈춤 — 세트 안의 세트 · 색연필 안의 부품은 세지 않음) */
+  function unitsIn(lp, code, test, d) { if (test(code)) return 1; if (d > 8) return 0; return (lp.get(code) || []).reduce((a, k) => a + C.num(k.qty || 1) * unitsIn(lp, k.child, test, d + 1), 0); }
+  /** 결과 품목 1개 = 세트 sets 개 · 색연필 pens 개 (사용자 구성이 없으면 null) */
+  ERP.mrpUnits = function (code) { const lp = linesByParent(); code = String(code || '').trim(); if (!(lp.get(code) || []).length) return null; return { sets: unitsIn(lp, code, isSetCode, 0), pens: unitsIn(lp, code, isPenCode, 0) }; };
+
   // ---------- MRP engine ----------
-  /** lines: [{code, qty, unit: 'set'|'pcs'|'ea'}] -> {rows:[component rows], info:[per line], kpi}. opt.gross: 세미 · 부품 재고를 빼지 않는 총량 (1.13.9 현장 재고 원재료 환산) */
+  /** lines: [{code, qty, unit: 'set'|'pcs'|'ea'}] -> {rows:[component rows], info:[per line], kpi}. opt.gross: 세미 · 부품 재고를 빼지 않는 총량 (1.13.9 현장 재고 원재료 환산)
+      1.13.18: 사용자 구성은 set = BOM 의 세트 수 · pcs = 조립 색연필 수 · ea = 결과 품목 개수 그대로 (info.units = 결과 품목 개수 · info.conv = { per, by } · 낱개 카톤의 set = { noSet, pens } · info.alt = 비슷한 품번 BOM) */
   function mrpCalc(lines, opt) {
     opt = opt || {};
     const st = C.stock(); const bi = bomIdx(); const rec = recipeByCode(); const lp = linesByParent(); const mats = matByName();
@@ -41,21 +54,25 @@
     const info = []; const unknown = [];
     (lines || []).forEach(ln => {
       const code = String(ln.code || '').trim(); const qty = C.num(ln.qty); if (!code || !qty) return;
-      const unit = ln.unit || 'pcs'; let route = null, pcs = qty, colors = 0;
+      const unit = ln.unit || 'pcs'; let route = null, pcs = qty, colors = 0, units, conv = null, alt = null;
       const custom = lp.get(code);
       let rows = bi.byRetail.get(code);
-      if (!rows && !custom) { const b = ERP.bomFor(code); if (b.rows.length && !bi.byColor.has(code)) rows = b.rows; }
+      if (!rows && !custom) { const b = ERP.bomFor(code); if (b.rows.length && !bi.byColor.has(code)) { rows = b.rows; if (b.key && b.key !== code) alt = b.key; } }   // 1.13.18: 비슷한 품번 BOM 을 쓰면 해석 칸에 알린다
       if (custom) {
-        route = 'custom'; explodeCustom(code, qty, 0);
+        route = 'custom'; const u = ERP.mrpUnits(code) || { sets: 0, pens: 0 }; units = qty;
+        if (unit === 'set' && u.sets > 0) { units = qty / u.sets; if (u.sets !== 1) conv = { per: u.sets, by: 'set' }; }
+        else if (unit === 'pcs' && u.pens > 0) { units = qty / u.pens; if (u.pens !== 1) conv = { per: u.pens, by: 'pcs' }; }
+        else if (unit === 'set' && u.pens > 1) conv = { noSet: true, pens: u.pens };   // 낱개 카톤 (세트 없음): 결과 품목 개수 그대로 — 해석 칸에 알림 (색연필 수는 pcs 로)
+        explodeCustom(code, units, 0);
       } else if (rows && rows.length) {
         route = 'retail'; colors = rows.length;
-        const ib = DB.rows('item_bom').find(x => x.item === code); const perSet = (ib && ib.colors) || rows[0].n_colors || rows.length;
+        const ib = DB.rows('item_bom').find(x => x.item === code) || (alt ? DB.rows('item_bom').find(x => x.item === alt) : null); const perSet = (ib && ib.colors) || rows[0].n_colors || rows.length;
         pcs = unit === 'set' ? qty * perSet : qty; const per = pcs / rows.length;
         rows.forEach(b => colorNeed(b, per));
       } else if (bi.byColor.has(code)) {
         route = 'color'; colors = 1; colorNeed(bi.byColor.get(code), qty);
       } else { route = 'unknown'; unknown.push(code); }
-      info.push({ code, qty, unit, route, pcs, colors });
+      info.push({ code, qty, unit, route, pcs, colors, units, conv, alt });
     });
     function colorNeed(b, per) {
       let netRefill = per;
@@ -91,12 +108,49 @@
   }
   ERP.mrp = mrpCalc;
 
+  // ---------- 1.13.18: 수주에서 온 MRP 줄 ----------
+  // 사용자 2026-10-30 "bom을 초기에넣고 중간에넣고 몇번넣어서 혹시 중복계산되는건없는지": 예전에는 '진행 중 수주에서 가져오기' 를 다시 누르면 같은 수주가 또 더해지고,
+  //   수주 화면 MRP 단추는 같은 품번이면 큰 값 하나만 남겨 (여러 PO) 모자랐다. 줄마다 refs = { 수주 줄 _id: 넣은 수량 } 을 두고 수주 줄 하나는 한 번만 센다.
+  /** 수주 줄 (C.orders() 의 줄) → MRP 줄 { code, qty, unit, ref, refs }. 남은 set (all: 다 포장했으면 주문 set). 세트가 없는 낱개 카톤 BOM (예: 색연필 ×1000) 은 수주의 pcs ÷ set 비율로 pcs */
+  ERP.mrpPoLine = function (o, all) {
+    const code = String(o.p.item_no || '').trim(); let q = Math.max(0, Math.round(o.sets - o.packed)); if (!q && all) q = Math.round(o.sets); let unit = 'set';
+    const u = ERP.mrpUnits(code); if (u && !u.sets && u.pens > 1 && C.num(o.p.pcs) > 0 && o.sets > 0) { q = Math.round(q * C.num(o.p.pcs) / o.sets); unit = 'pcs'; }
+    return { code, qty: q, unit, ref: o.p.po_no, refs: { [o.p._id]: q } };
+  };
+  /** 수주 줄을 MRP 줄에 합친다: 같은 수주 줄을 다시 넣으면 더하지 않고 새 수량으로 바꾼다 (품번 · 단위가 달라도 한 줄에만). 손으로 고친 수량 (refs 합과의 차이) 은 남긴다.
+      예전에 가져온 줄 (ref 만 있고 refs 없음) 은 어느 수주인지 몰라 같은 품번 · 단위를 넣으면 새로 채운다. opt.drop: 이제 진행 중이 아닌 수주 줄 (완료 · 취소 · 보류 · 다 포장 · 지움) 을 뺀다 (가져오기 창).
+      돌려줌 { legacy: 새로 채운 예전 줄 수, dropped: 뺀 수주 줄 수 } */
+  function mergePoLines(lines, adds, opt) {
+    const owner = new Map(); lines.forEach(l => Object.keys(l.refs || {}).forEach(id => owner.set(id, l)));
+    const drop = (id) => { const o = owner.get(id); if (!o) return false; o.qty = Math.max(0, C.num(o.qty) - C.num(o.refs[id])); delete o.refs[id]; owner.delete(id); return true; };
+    let legacy = 0, dropped = 0;
+    if (opt && opt.drop) { const live = new Set(C.orders().filter(o => C.isOpen(o) && o.sets - o.packed > 0).map(o => String(o.p._id))); Array.from(owner.keys()).forEach(id => { if (!live.has(id) && drop(id)) dropped++; }); }
+    adds.forEach(n => {
+      Object.keys(n.refs).forEach(drop);
+      let ex = lines.find(l => l.code === n.code && (l.unit || 'set') === n.unit);
+      if (ex && ex.ref && !ex.refs) { ex.qty = 0; ex.refs = {}; legacy++; }
+      if (!ex) { ex = { code: n.code, qty: 0, unit: n.unit }; if (n.ref) ex.ref = n.ref; lines.push(ex); }
+      ex.refs = ex.refs || {};
+      Object.keys(n.refs).forEach(id => { ex.refs[id] = n.refs[id]; ex.qty = C.num(ex.qty) + C.num(n.refs[id]); owner.set(id, ex); });
+    });
+    for (let i = lines.length - 1; i >= 0; i--) { const l = lines[i]; if (l.refs && !Object.keys(l.refs).length && !(C.num(l.qty) > 0)) lines.splice(i, 1); }   // 수주가 다 빠지고 0 이 된 줄
+    return { legacy, dropped };
+  }
+  const mergeToast = (r) => { const t = [];
+    if (r.legacy) t.push(L('예전에 가져온 줄 ' + r.legacy + '개는 이번 수주의 남은 수량으로 새로 채움 (더하지 않음)', 'Đã điền lại ' + r.legacy + ' dòng lấy trước đây bằng số còn lại của PO (không cộng thêm)'));
+    if (r.dropped) t.push(L('끝난 수주 ' + r.dropped + '줄은 뺌', 'Đã bỏ ' + r.dropped + ' dòng PO đã xong'));
+    if (t.length) ERP.toast(t.join(' · '), 'warn'); };
+
   // ---------- MRP tab ----------
   function mrpTab(host) {
     const lines = DB.setting('mrpLines', null) || [{ code: '', qty: '', unit: 'set' }];
     const st = ERP.state.mrp = ERP.state.mrp || { view: 'all', net: true };
     const p = ERP.state.params;
-    if (p && p.lines) { if (lines.length === 1 && !lines[0].code) lines.length = 0; p.lines.forEach(n => { const ex = lines.find(l => l.code === n.code && l.unit === n.unit); if (ex) ex.qty = Math.max(C.num(ex.qty), n.qty); else lines.push(n); }); ERP.state.params = {}; DB.setSetting('mrpLines', lines); }
+    if (p && p.lines) { if (lines.length === 1 && !lines[0].code) lines.length = 0;
+      // 1.13.18: 수주에서 온 줄 (refs — 수주 화면 MRP 단추) 은 수주 줄마다 한 번만 · 여러 PO 의 같은 품번은 합침 (예전: 같은 품번은 큰 값 하나만 남아 모자랐다). refs 없는 줄 (AI 비서 등) 은 예전처럼 큰 값
+      const po = p.lines.filter(n => n && n.refs); if (po.length) mergeToast(mergePoLines(lines, po));
+      p.lines.filter(n => n && !n.refs).forEach(n => { const ex = lines.find(l => l.code === n.code && l.unit === n.unit); if (ex) ex.qty = Math.max(C.num(ex.qty), n.qty); else lines.push(n); });
+      ERP.state.params = {}; DB.setSetting('mrpLines', lines); }
     if (p && p.retail) { if (!lines.some(l => l.code === p.retail)) { if (lines.length === 1 && !lines[0].code) lines.length = 0; lines.push({ code: p.retail, qty: Math.round(p.qty || 0), unit: 'set' }); } ERP.state.params = {}; }
     const save = () => DB.setSetting('mrpLines', lines);
     const wrap = h('div');
@@ -105,6 +159,7 @@
     function importPO() {
       const open = C.orders().filter(o => C.isOpen(o) && o.p.item_no && (o.sets - o.packed) > 0).sort((a, b) => (a.p.due || '9').localeCompare(b.p.due || '9')).slice(0, 150).sort(C.byDueDesc);   // 1.13.12: 납기 이른 150줄을 늦은 납기부터
       const started = (o) => o.packed > 0;
+      const inMrp = new Set(); lines.forEach(l => Object.keys(l.refs || {}).forEach(id => inMrp.add(id)));   // 1.13.18: 이미 MRP 줄에 있는 수주 줄
       const sel = new Set(); const scope = () => (DB.setting('mrpPoScope', 'all') === 'wait' ? 'wait' : 'all');
       const inScope = (o) => scope() === 'all' || !started(o);
       const allBox = h('input', { type: 'checkbox', onchange: (e) => { sel.clear(); if (e.target.checked) open.forEach((o, i) => { if (inScope(o)) sel.add(i); }); refresh(); } });
@@ -114,6 +169,7 @@
         return h('label', { 'data-po': o.p.po_no, style: { display: 'flex', gap: '8px', alignItems: 'center', padding: '4px 0' } }, cb,
           h('span', { style: { flex: '1 1 auto', minWidth: 0 } }, h('b', o.p.po_no), ' ' + [o.p.customer, o.p.item_no].join(' · ') + ' · ' + F.n(o.sets - o.packed) + ' set · ' + F.d(o.p.due)),
           started(o) ? ERP.chip('info', L('진행 중', 'Đang làm')) : ERP.chip('neutral', L('진행 전', 'Chưa làm')),
+          inMrp.has(String(o.p._id)) ? ERP.chip('ok', L('MRP 에 있음', 'Đã có trong MRP')) : null,
           h('div', { class: 'poprog', style: { width: '120px', flex: '0 0 auto' } }, ERP.bar(o.prog * 100, o.st === 'late' ? 'bad' : 'info'), h('small', { class: 'muted' }, F.n(o.prog * 100, 0) + '% · ' + F.n(Math.min(o.packed, o.sets || o.packed)) + '/' + F.n(o.sets))));
       });
       function refresh() {
@@ -129,11 +185,13 @@
       const head = h('div', { class: 'toolbar', style: { margin: '0 0 8px' } }, h('label', { class: 'nowrap', 'data-act': 'all' }, allBox, ' ', h('b', L('전체 선택', 'Chọn tất cả'))),
         h('span', { class: 'muted' }, L('전체 선택 범위', 'Phạm vi chọn tất cả')), segEl, sumEl);
       refresh();
-      ERP.modal({ title: L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở'), width: '860px', body: open.length ? h('div', head, h('div', { style: { maxHeight: '55vh', overflow: 'auto' } }, rows)) : h('div', { class: 'empty' }, L('미포장 수주가 없습니다', 'Không có PO chưa đóng gói')),
+      const note = h('p', { class: 'help', style: { margin: '0 0 6px' } }, L('이미 MRP 에 있는 수주 줄을 다시 고르면 더하지 않고 지금 남은 set 으로 바꿉니다. 끝난 수주 (완료 · 다 포장) 는 뺍니다.', 'Chọn lại dòng PO đã có trong MRP sẽ thay bằng số set còn lại, không cộng thêm. PO đã xong (xong · đóng gói hết) sẽ bị bỏ.'));
+      ERP.modal({ title: L('진행 중 수주에서 가져오기', 'Lấy từ PO đang mở'), width: '860px', body: open.length ? h('div', head, note, h('div', { style: { maxHeight: '55vh', overflow: 'auto' } }, rows)) : h('div', { class: 'empty' }, L('미포장 수주가 없습니다', 'Không có PO chưa đóng gói')),
         buttons: [{ label: L('취소', 'Hủy') }, { label: L('선택 추가 (미포장 set)', 'Thêm mục đã chọn (set còn lại)'), kind: 'primary', onClick: () => {
           if (lines.length === 1 && !lines[0].code) lines.length = 0;
-          open.forEach((o, i) => { if (sel.has(i)) { const ex = lines.find(l => l.code === o.p.item_no && l.unit === 'set'); const q = Math.round(o.sets - o.packed); if (ex) ex.qty = C.num(ex.qty) + q; else lines.push({ code: o.p.item_no, qty: q, unit: 'set', ref: o.p.po_no }); } });
-          save(); draw(); } }] });
+          // 1.13.18: 같은 수주 줄은 한 번만 (다시 넣으면 지금 남은 set 으로 바꿈) · 끝난 수주는 뺌 — 예전에는 누를 때마다 더해져 두 번 · 세 번 셌다
+          const r = mergePoLines(lines, open.filter((o, i) => sel.has(i)).map(o => ERP.mrpPoLine(o)), { drop: true });
+          save(); draw(); mergeToast(r); } }] });
     }
     function pasteBox() {
       const ta = h('textarea', { class: 'inp', style: { width: '100%', height: '200px', fontFamily: 'monospace' }, placeholder: '52-9724-A\t240\tset\nBM01002\t5000\tpcs' });
@@ -152,7 +210,11 @@
             h('td', h('input', { list: 'dl_mrp', value: l.code || '', 'data-r': i, 'data-c': 'code', style: { minWidth: '200px' }, onchange: (e) => { l.code = e.target.value.trim(); save(); draw(); } })),
             h('td', h('input', { type: 'number', min: 0, value: l.qty === undefined ? '' : l.qty, 'data-r': i, 'data-c': 'qty', onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); if (i === lines.length - 1) { lines.push({ code: '', qty: '', unit: l.unit }); save(); draw(); } const n = wrap.querySelector('input[data-r="' + (i + 1) + '"][data-c="code"]'); if (n) n.focus(); } }, onchange: (e) => { l.qty = e.target.value === '' ? '' : Number(e.target.value); save(); draw(); } })),
             h('td', h('select', { class: 'inp', onchange: (e) => { l.unit = e.target.value; save(); draw(); } }, [['set', L('세트 (set)', 'Bộ (set)')], ['pcs', L('색연필 낱개 (pcs)', 'Cây lẻ (pcs)')], ['ea', 'ea']].map(o => h('option', { value: o[0], selected: (l.unit || 'set') === o[0] }, o[1])))),
-            h('td', { class: 'muted' }, !l.code ? '' : unk ? ERP.chip('bad', L('BOM 없음', 'Không có BOM')) : inf ? [ERP.chip('info', { retail: L('Retail BOM', 'BOM Retail'), color: L('색상 BOM', 'BOM màu'), custom: L('사용자 구성', 'Cấu thành tự tạo') }[inf.route] || inf.route), ' ' + (inf.route === 'retail' ? F.n(inf.pcs) + ' pcs · ' + inf.colors + L('색', ' màu') : '')] : ''),
+            h('td', { class: 'muted' }, !l.code ? '' : unk ? ERP.chip('bad', L('BOM 없음', 'Không có BOM')) : inf ? [ERP.chip('info', { retail: L('Retail BOM', 'BOM Retail'), color: L('색상 BOM', 'BOM màu'), custom: L('사용자 구성', 'Cấu thành tự tạo') }[inf.route] || inf.route), ' ' + (inf.route === 'retail' ? F.n(inf.pcs) + ' pcs · ' + inf.colors + L('색', ' màu') : ''),
+              // 1.13.18: 사용자 구성의 환산 (예: 120 set → 카톤 10개, 1개 = 12 set) · 낱개 카톤의 set · 비슷한 품번 BOM
+              inf.conv && inf.conv.per ? L('= ' + F.n(inf.units, 2) + '개 (1개 = ' + F.n(inf.conv.per) + ' ' + inf.conv.by + ')', '= ' + F.n(inf.units, 2) + ' (1 = ' + F.n(inf.conv.per) + ' ' + (inf.conv.by === 'set' ? 'bộ' : 'pcs') + ')') : null,
+              inf.conv && inf.conv.noSet ? ERP.chip('warn', L('세트 구성 없음 — 개수 그대로 (색연필 수는 pcs 로)', 'Không có bộ — tính theo số lượng (số cây: pcs)')) : null,
+              inf.alt ? ERP.chip('warn', L('비슷한 품번 BOM ', 'BOM mã gần giống ') + inf.alt) : null] : ''),
             h('td', h('button', { class: 'icon-btn', 'aria-label': 'remove', onclick: () => { lines.splice(i, 1); if (!lines.length) lines.push({ code: '', qty: '', unit: 'set' }); save(); draw(); } }, '×'))); })));
       const view = st.view; const show = res.rows.filter(r => view === 'all' ? true : view === 'short' ? r.short > 0 : view === 'raw' ? r.kind === 'raw' : r.kind !== 'raw');
       const kindChip = (r) => r.kind === 'raw' ? ERP.chip('info', L('원부자재', 'NVL')) : r.kind === 'asm' ? ERP.chip('neutral', L('조립품', 'Cụm lắp')) : ERP.chip('neutral', r.part || L('세미/부품', 'Bán TP/chi tiết'));
@@ -167,7 +229,8 @@
           h('button', { class: 'btn', onclick: () => { lines.length = 0; lines.push({ code: '', qty: '', unit: 'set' }); save(); draw(); } }, L('모두 지우기', 'Xóa hết')), h('span', { class: 'sp' }),
           h('label', { class: 'muted nowrap', title: L('리필 재고가 있으면 그만큼 원료 소요를 줄입니다', 'Nếu có tồn refill thì giảm nhu cầu nguyên liệu tương ứng') }, h('input', { type: 'checkbox', checked: st.net, onchange: (e) => { st.net = e.target.checked; draw(); } }), ' ', L('세미(리필) 재고 차감 후 원료 계산', 'Trừ tồn bán TP (refill) khi tính NL'))),
         h('div', { class: 'entry-wrap' }, lineTbl),
-        h('p', { class: 'help' }, L('수량 단위: "세트"는 BOM 색상수 × 수량으로 pcs 환산, "낱개(pcs)"는 색연필 개수입니다. 여러 품번을 줄줄이 입력하면 합산하여 계산합니다. 입력 내용은 자동 저장됩니다.', '"Bộ" = số màu × số lượng → pcs; "pcs" = số cây. Nhập nhiều mã, hệ thống cộng gộp. Tự động lưu.')),
+        h('p', { class: 'help' }, L('수량 단위: "세트"는 수주의 set — 품목 구성 (BOM) 이 카톤이면 카톤당 세트 수로 나눠 카톤 수로, 색상별 BOM 이면 색상수 × 수량으로 pcs 환산합니다. "낱개(pcs)"는 색연필 개수, "ea"는 그 품목 개수 그대로입니다. 여러 품번을 줄줄이 입력하면 합산하여 계산합니다. 수주에서 가져온 줄은 같은 수주를 다시 가져와도 더하지 않고 지금 남은 set 으로 바꿉니다. 입력 내용은 자동 저장됩니다.',
+          '"Bộ" = set của PO — nếu cấu thành (BOM) là thùng thì chia cho số bộ/thùng; BOM theo màu: số màu × số lượng → pcs. "pcs" = số cây, "ea" = số lượng của chính mã đó. Nhập nhiều mã, hệ thống cộng gộp. Dòng lấy từ PO: lấy lại cùng PO sẽ thay bằng số set còn lại, không cộng thêm. Tự động lưu.')),
         res.rows.length ? h('div', [
           h('section', { class: 'kpis', style: { margin: '14px 0' } },
             ERP.kpi(L('소요 품목', 'Số mã cần'), F.n(res.rows.length), L('종', 'mã'), 'neutral', null, L('원부자재 ' + res.rows.filter(r => r.kind === 'raw').length + ' · 세미/부품 ' + res.rows.filter(r => r.kind !== 'raw').length, 'NVL ' + res.rows.filter(r => r.kind === 'raw').length + ' · bán TP ' + res.rows.filter(r => r.kind !== 'raw').length)),

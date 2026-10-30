@@ -14,6 +14,8 @@
    7-11 생산 관리 일별 · 월별 탭 · 종합 현황 일별 · 월별 위젯: 공정도 여러 개 골라 보기 (1.13.14)
    7-12 사출 생산일보 그대로 올리기 · 품목 맞추기 · 재고 · 원재료 사용량 (PS · PP · HDPE · LDPE 일별 · 월별 · 년별) · 7-13 품목군 이름 Regular → Dial · Dial Mini → Mini (1.13.15)
    7-14 핫포일 스탬핑은 생산 관리에서 뺌 (공정 목록 · 일보 입력 · ERP 일보 양식 · 현장 일보의 스탬핑 시트 안 올림) · 생산 반영 안 함 · 스탬핑 배럴 · 스탬핑 BOM 없음 · 핫포일은 원부자재 입출고로만 (1.13.16)
+   7-15 MRP: 카톤 BOM 의 set · pcs 환산 (카톤 = 세트 ×12 → 세트 수로 나눔, 낱개 카톤 · 세트 안 세트 · 직접 만든 BOM 은 예전처럼) · 원재료 환산은 그대로 ·
+        진행 중 수주에서 가져오기를 처음 · 중간 · 여러 번 해도 한 번만 (지금 남은 set 으로 바꿈 · 끝난 수주는 뺌 · 손으로 고친 수량 · 예전 줄) · 수주 화면 MRP 단추는 같은 품번을 합침 (1.13.18)
    8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
@@ -796,6 +798,100 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     // AI 비서 기본 설명도 같은 규칙
     ok('AI 비서 기본 설명: 생산 공정에 핫포일 스탬핑 없음 · 핫포일 = 원부자재 소모품 (입출고)', await ev(() => { const s = ERP.ai && ERP.ai.systemPrompt ? ERP.ai.systemPrompt() : ''; return !/hot-foil stamping STP/.test(s) && /hot foil/i.test(s); }));
     await ev(async (k) => { const DB = ERP.db; ['items', 'prod_log', 'stock_open', 'stock_tx', 'bom_lines'].forEach(t => DB.replace(t, k[t])); await DB.flush(); ERP.state.imp = null; ERP.state.prodTab = null; ERP.state.bomTab = null; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-15. MRP: 수주 set = 카톤 BOM 의 세트 · 다시 가져와도 한 번만 · 여러 PO 의 같은 품번은 합침 (1.13.18, 사용자 "bom을 초기에넣고 중간에넣고 몇번넣어서 혹시 중복계산되는건없는지 수주에 마춰서 아이템별 set개수가 bom과 맞는지 점검")', async () => {
+    const keep = await ev(() => { const DB = ERP.db; const t = {}; ['items', 'bom_lines', 'po', 'prod_log', 'stock_open'].forEach(n => { t[n] = DB.rows(n).map(r => Object.assign({}, r)); }); t.lines = DB.setting('mrpLines', null); t.scope = DB.setting('mrpPoScope', null); return t; });
+    // ECOUNT 모양 BOM: 카톤 C-CT = 카톤 상자 C-BOX ×1 + 세트 C-SET ×12 · 세트 = 조립 색연필 C-P1 · C-P2 · C-P3 ×1 + 케이스 C-CASE · 색연필 = 원료 C-RM 0.002 kg
+    //   낱개 카톤 C-BULK = 색연필 C-P1 ×1000 · 세트 안 세트 C-NEST = C-OUT (SG) ×6 → C-SET ×1 · 직접 만든 BOM (유형만, 단계 없음) C-MYFG = 반제품 C-MY ×2 → 원료 0.5 kg
+    await ev(async (o) => { const DB = ERP.db; const it = (code, stage, unit) => ({ code, name: code + ' NAME', stage, line: 'MINI', unit, src: 'test' });
+      DB.replace('items', DB.rows('items').concat([it('C-CT', 'FG', 'CT'), it('C-BOX', 'SM', 'PCS'), it('C-SET', 'SG', 'SET'), it('C-CASE', 'SM', 'PCS'), it('C-P1', 'WIP', 'PCS'), it('C-P2', 'WIP', 'PCS'), it('C-P3', 'WIP', 'PCS'), it('C-RM', 'RM', 'kg'),
+        it('C-BULK', 'FG', 'CT'), it('C-NEST', 'FG', 'CT'), it('C-OUT', 'SG', 'SET'), { code: 'C-MYFG', name: 'MY FG', type: 'FG', unit: 'pcs', src: 'local' }, { code: 'C-MY', name: 'MY SEMI', type: 'SEMI', unit: 'pcs', src: 'local' }]));
+      const b = (parent, child, qty) => ({ parent, child, qty, src: 'test' });
+      DB.replace('bom_lines', [b('C-CT', 'C-BOX', 1), b('C-CT', 'C-SET', 12), b('C-SET', 'C-P1', 1), b('C-SET', 'C-P2', 1), b('C-SET', 'C-P3', 1), b('C-SET', 'C-CASE', 1),
+        b('C-P1', 'C-RM', 0.002), b('C-P2', 'C-RM', 0.002), b('C-P3', 'C-RM', 0.002), b('C-BULK', 'C-P1', 1000), b('C-BULK', 'C-BOX', 1), b('C-NEST', 'C-OUT', 6), b('C-OUT', 'C-SET', 1), b('C-OUT', 'C-CASE', 1),
+        b('C-MYFG', 'C-MY', 2), b('C-MY', 'C-RM', 0.5)]);
+      DB.replace('stock_open', DB.rows('stock_open').concat([{ date: o.FLOOR, scope: 'FAC', code: 'C-SET', qty: 10, unit: 'SET', grp: 'floor' }]));
+      DB.replace('prod_log', []); await DB.flush(); }, { FLOOR });
+    const need = (lines) => ev((ls) => { const r = ERP.mrp(ls, { gross: true }); const m = {}; r.rows.forEach(x => { m[x.code] = Math.round(x.need * 1000) / 1000; });
+      return { need: m, info: r.info.map(i => ({ units: i.units === undefined ? null : Math.round(i.units * 1000) / 1000, conv: i.conv || null })) }; }, lines);
+    const pick = (m, ks) => Object.fromEntries(ks.map(k => [k, m[k] === undefined ? null : m[k]]));
+    const K = ['C-CT', 'C-BOX', 'C-SET', 'C-CASE', 'C-P1', 'C-RM'], ten = { 'C-CT': 10, 'C-BOX': 10, 'C-SET': 120, 'C-CASE': 120, 'C-P1': 120, 'C-RM': 0.72 };
+    let r = await need([{ code: 'C-CT', qty: 120, unit: 'set' }]);
+    eq('카톤 품번에 120 set → 카톤 10 · 세트 120 · 색연필 120 · 원료 0.72 kg (예전: 카톤 120 · 세트 1,440 — 카톤당 세트 수만큼 부풂)', [pick(r.need, K), r.info[0].units, r.info[0].conv], [ten, 10, { per: 12, by: 'set' }]);
+    r = await need([{ code: 'C-CT', qty: 360, unit: 'pcs' }]);
+    eq('카톤 품번에 360 pcs (색연필) → 카톤 10 (1개 = 36 pcs)', [pick(r.need, K), r.info[0].conv], [ten, { per: 36, by: 'pcs' }]);
+    r = await need([{ code: 'C-CT', qty: 10, unit: 'ea' }]);
+    eq('카톤 품번에 10 ea → 카톤 10 그대로', [pick(r.need, K), r.info[0].conv], [ten, null]);
+    r = await need([{ code: 'C-SET', qty: 120, unit: 'set' }, { code: 'C-P2', qty: 50, unit: 'set' }]);
+    eq('세트 품번 120 set → 세트 120 · 색연필 품번 50 set → 색연필 50 (둘 다 예전과 같음)', [pick(r.need, ['C-SET', 'C-P1', 'C-P2']), r.info.map(i => i.conv)], [{ 'C-SET': 120, 'C-P1': 120, 'C-P2': 170 }, [null, null]]);
+    r = await need([{ code: 'C-BULK', qty: 26000, unit: 'pcs' }]);
+    eq('낱개 카톤 (색연필 ×1000) 에 26,000 pcs → 카톤 26 · 색연필 26,000', pick(r.need, ['C-BULK', 'C-P1', 'C-BOX']), { 'C-BULK': 26, 'C-P1': 26000, 'C-BOX': 26 });
+    r = await need([{ code: 'C-BULK', qty: 26, unit: 'set' }]);
+    eq('낱개 카톤에 set (세트 구성 없음) → 결과 품목 개수 그대로 + 알림', [pick(r.need, ['C-BULK', 'C-P1']), r.info[0].conv], [{ 'C-BULK': 26, 'C-P1': 26000 }, { noSet: true, pens: 1000 }]);
+    r = await need([{ code: 'C-NEST', qty: 60, unit: 'set' }]);
+    eq('세트 안에 세트 (C-NEST = C-OUT ×6 → C-SET) 에 60 set → 카톤 10 · 겉 세트 60 · 안 세트 60 · 색연필 60', pick(r.need, ['C-NEST', 'C-OUT', 'C-SET', 'C-P1']), { 'C-NEST': 10, 'C-OUT': 60, 'C-SET': 60, 'C-P1': 60 });
+    r = await need([{ code: 'C-MYFG', qty: 10, unit: 'set' }, { code: 'C-MYFG', qty: 4, unit: 'pcs' }]);
+    eq('BOM 설정에서 직접 만든 BOM (단계 없음 · 반제품) 은 예전처럼 개수 그대로 (set · pcs 모두)', [pick(r.need, ['C-MYFG', 'C-MY', 'C-RM']), r.info.map(i => i.conv)], [{ 'C-MYFG': 14, 'C-MY': 28, 'C-RM': 14 }, [null, null]]);
+    eq('현장 재고 → 원재료 환산은 재고 수량 (품목 단위) 그대로: 세트 재고 10 set → 색연필 30 → 원료 0.06 kg', await ev(() => { const x = ERP.pivot.rawBuild().rows.find(y => y.k === 'C-RM'); return x ? Math.round(x.tot * 1000) / 1000 : null; }), 0.06);
+    const mrpView = async (ls) => { await ev(async (x) => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.db.setSetting('mrpLines', x); await ERP.db.saveMeta(); ERP.state.bomTab = 'mrp'; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }, ls); await settle();
+      return ev(() => Array.from(document.querySelectorAll('main table.tbl.entry tbody tr')).map(tr => tr.children[4].innerText.replace(/\s+/g, ' ').trim())); };
+    let cells = await mrpView([{ code: 'C-CT', qty: 120, unit: 'set' }, { code: 'C-BULK', qty: 26, unit: 'set' }]);
+    ok('해석 칸: 카톤 품번 = 사용자 구성 · 10개 (1개 = 12 set) · 낱개 카톤의 set = 세트 구성 없음 알림', /10개 \(1개 = 12 set\)/.test(cells[0] || '') && /세트 구성 없음/.test(cells[1] || ''), cells);
+
+    // 수주: Q-1 C-CT 120 (진행 전) · Q-2 C-CT 240 (60 포장 → 남은 180, 진행 중) · Q-3 세트 C-SET 50 (진행 전) · Q-4 낱개 카톤 C-BULK 26,000 set = 26,000 pcs (진행 전)
+    await ev(async () => { const DB = ERP.db, F = ERP.fmt; const d = (n) => F.addDays(F.today(), n); const po = (po_no, item_no, sets, due, pcs) => ({ po_no, item_no, sets, pcs, due, date: d(-10), customer: 'TEST', kind: 'Mini' });
+      DB.replace('po', [po('Q-1', 'C-CT', 120, d(30), 4320), po('Q-2', 'C-CT', 240, d(20), 8640), po('Q-3', 'C-SET', 50, d(10), 150), po('Q-4', 'C-BULK', 26000, d(5), 26000)]);
+      DB.replace('prod_log', [{ date: d(-2), process: 'PCK', po_no: 'Q-2', code: 'C-CT', ok_qty: 60, shift: 'D', source: 'test' }]);
+      DB.setSetting('mrpLines', null); delete DB.meta.mrpPoScope; await DB.saveMeta(); await DB.flush(); });
+    const mrpLines = () => ev(() => (ERP.db.setting('mrpLines', []) || []).filter(l => l.code).map(l => [l.code, l.qty, l.unit]));
+    const toast = () => ev(() => (document.querySelector('#toasts') || {}).innerText || '');
+    const round = async (scope) => {
+      await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); document.querySelectorAll('#toasts .toast').forEach(t => t.remove()); ERP.state.bomTab = 'mrp'; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await settle();
+      await A.click('main [data-act="import-po"]'); await A.waitForSelector('.modal [data-po]');
+      await A.click('.modal [data-scope="' + scope + '"]'); await A.waitForTimeout(150);
+      if (!(await ev(() => document.querySelector('.modal [data-act="all"] input').checked))) { await A.click('.modal [data-act="all"] input'); await A.waitForTimeout(150); }
+      await A.click('.modal .modal-foot button.primary'); await settle(); return mrpLines(); };
+    const all3 = (ct, set) => [['C-CT', ct, 'set']].concat(set === null ? [] : [['C-SET', set, 'set']]).concat([['C-BULK', 26000, 'pcs']]);
+    eq('① 처음 (진행 전만): Q-1 120 · Q-3 50 · 낱개 카톤 Q-4 는 수주 pcs 26,000 으로', await round('wait'), all3(120, 50));
+    eq('② 중간 (진행 중 포함): 이미 넣은 Q-1 은 더하지 않음 → C-CT 120 + 180 = 300 (예전: 420)', await round('all'), all3(300, 50));
+    eq('③ 한 번 더 (진행 중 포함): 그대로 (예전: 480 · 세트 100 · 낱개 52,000 → 78,000)', await round('all'), all3(300, 50));
+    r = await need((await ev(() => ERP.db.setting('mrpLines', []))).map(l => ({ code: l.code, qty: l.qty, unit: l.unit })));
+    eq('그 MRP: 카톤 25 · 세트 300 + 50 = 350 · 색연필 350 + 26,000 · 낱개 카톤 26', pick(r.need, ['C-CT', 'C-SET', 'C-P1', 'C-BULK']), { 'C-CT': 25, 'C-SET': 350, 'C-P1': 26350, 'C-BULK': 26 });
+    await ev(async () => { const DB = ERP.db, F = ERP.fmt; DB.add('prod_log', { date: F.addDays(F.today(), -1), process: 'PCK', po_no: 'Q-1', code: 'C-CT', ok_qty: 30, shift: 'D', source: 'test' }); await DB.flush(); });
+    eq('④ 포장이 진행된 뒤 다시 가져오기 → 지금 남은 set 으로 바뀜 (Q-1 120 → 90): 90 + 180 = 270', await round('all'), all3(270, 50));
+    await ev(async () => { const DB = ERP.db; const q3 = DB.rows('po').find(p => p.po_no === 'Q-3'); DB.update('po', q3._id, { done_at: ERP.fmt.today() }); await DB.flush(); });
+    eq('⑤ 끝난 수주 (Q-3 완료) 는 다시 가져올 때 뺌 → 세트 줄 없어짐', await round('all'), all3(270, null));
+    ok('⑤ 알림: 끝난 수주 1줄은 뺌', /끝난 수주 1줄/.test(await toast()), await toast());
+    await ev(async () => { const DB = ERP.db; const ls = DB.setting('mrpLines', []); ls.find(l => l.code === 'C-CT').qty = 280; DB.setSetting('mrpLines', ls); await DB.saveMeta(); });
+    eq('⑥ 손으로 고친 수량 (+10) 은 다시 가져와도 남음 → 280', (await round('all')).find(l => l[0] === 'C-CT'), ['C-CT', 280, 'set']);
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await settle();
+    await A.click('main [data-act="import-po"]'); await A.waitForSelector('.modal [data-po]');
+    eq('가져오기 창: 이미 MRP 에 있는 수주 줄에 "MRP 에 있음" · 줄의 첫 표시는 진행 상태 그대로', await ev(() => Array.from(document.querySelectorAll('.modal [data-po]')).map(x => [x.dataset.po, /MRP 에 있음/.test(x.textContent), x.querySelector('.chip').textContent])),
+      [['Q-1', true, '진행 중'], ['Q-2', true, '진행 중'], ['Q-4', true, '진행 전']]);
+    await ev(async () => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.db.setSetting('mrpLines', [{ code: 'C-CT', qty: 120, unit: 'set', ref: 'Q-1' }, { code: 'C-SET', qty: 7, unit: 'set' }]); await ERP.db.saveMeta(); });
+    eq('⑦ 예전 방식으로 가져온 줄 (ref 만 · refs 없음) 은 더하지 않고 새로 채움 (C-CT 120 → 270) · 손으로 넣은 줄 (C-SET 7) 은 그대로', await round('all'), [['C-CT', 270, 'set'], ['C-SET', 7, 'set'], ['C-BULK', 26000, 'pcs']]);
+    ok('⑦ 알림: 예전에 가져온 줄 1개', /예전에 가져온 줄 1개/.test(await toast()), await toast());
+
+    // 수주 화면 MRP 단추: 같은 품번 (C-CT) 이 PO 두 개 — 예전에는 큰 값 하나만 (Q-5 100 · Q-6 50 → 100)
+    await ev(async () => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); const DB = ERP.db, F = ERP.fmt; const d = (n) => F.addDays(F.today(), n);
+      DB.replace('po', [{ po_no: 'Q-5', item_no: 'C-CT', sets: 100, due: d(15), date: d(-3), customer: 'TEST' }, { po_no: 'Q-6', item_no: 'C-CT', sets: 50, due: d(16), date: d(-3), customer: 'TEST' }]); DB.replace('prod_log', []);
+      DB.setSetting('mrpLines', null); await DB.saveMeta(); await DB.flush(); });
+    const viaPo = async (no) => { await ev((n) => { ERP.goto('bom', { tab: 'mrp', lines: ERP.poMrpLines(n) }); ERP.render(); }, no); await settle(); return mrpLines(); };
+    await viaPo('Q-5');
+    eq('수주 화면 "자재 소요량 계산 (전체 품번)": Q-5 → Q-6 → 같은 품번은 합침 (100 + 50 = 150, 예전: 100)', await viaPo('Q-6'), [['C-CT', 150, 'set']]);
+    eq('같은 PO 를 다시 눌러도 그대로 150', await viaPo('Q-5'), [['C-CT', 150, 'set']]);
+    await ev(() => { ERP.state.ord = { tab: 'open', sel: 'Q-6', view: 'po' }; ERP.goto('orders'); ERP.render(); }); await settle();
+    await A.click('main button[title="BOM/MRP"]'); await settle();
+    eq('수주 상세의 품번 줄 MRP 단추 (Q-6): 이미 있는 수주 줄이라 더하지 않음 → 150', await mrpLines(), [['C-CT', 150, 'set']]);
+    await ev(() => ERP.setLang('vi'));
+    cells = await mrpView([{ code: 'C-CT', qty: 120, unit: 'set' }, { code: 'C-BULK', qty: 26, unit: 'set' }]);
+    ok('베트남어: 해석 칸에 한글 없음', cells.length === 2 && cells.every(c => !/[가-힣]/.test(c)) && /12/.test(cells[0]), cells);
+    await A.click('main [data-act="import-po"]'); await A.waitForSelector('.modal [data-po]');
+    const vt = await ev(() => document.querySelector('.modal').innerText);
+    ok('베트남어: 가져오기 창에 한글 없음', !/[가-힣]/.test(vt), vt.match(/.{0,20}[가-힣]+.{0,20}/g));
+    await ev(async (k) => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.setLang('ko'); const DB = ERP.db; ['items', 'bom_lines', 'po', 'prod_log', 'stock_open'].forEach(n => DB.replace(n, k[n])); DB.setSetting('mrpLines', k.lines);
+      if (k.scope === null) delete DB.meta.mrpPoScope; else DB.meta.mrpPoScope = k.scope; await DB.saveMeta(); await DB.flush(); ERP.state.bomTab = null; ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

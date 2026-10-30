@@ -74,10 +74,11 @@
         if (ERP.state.ord) ERP.state.ord.sel = H.po_no; ERP.toast(L('저장했습니다 (' + ls.length + '개 품번)', 'Đã lưu (' + ls.length + ' mã)'), 'ok'); ERP.render(); } }]) });
   }
 
-  /** "자재 소요량 계산 (전체 품번)": 진행 중인 품번 줄의 남은 수량만 (완료 · 취소 · 보류 줄은 뺀다) */
+  /** "자재 소요량 계산 (전체 품번)": 진행 중인 품번 줄의 남은 수량만 (완료 · 취소 · 보류 줄은 뺀다)
+      1.13.18: 줄마다 수주 줄 기록 (refs) — MRP 화면에서 같은 수주 줄은 한 번만 세고 여러 PO 의 같은 품번은 합친다. 품번은 수주 품번 그대로 (비슷한 품번 BOM 은 MRP 가 찾아서 알림) */
   ERP.poMrpLines = function (poNo) {
     const g = C.poGroups().find(x => String(x.po_no) === String(poNo)); if (!g) return [];
-    return g.lines.filter(l => l.p.item_no && C.isOpen(l) && l.sets - l.packed > 0).map(l => ({ code: bomFor(l.p.item_no).key || l.p.item_no, qty: Math.round(l.sets - l.packed), unit: 'set' }));
+    return g.lines.filter(l => l.p.item_no && C.isOpen(l) && l.sets - l.packed > 0).map(l => ERP.mrpPoLine(l));
   };
 
   // 13차: 강제 완료 — 포장 실적과 상관없이 PO 를 완료로 표시 (완료 탭에서 "완료 취소" 로 되돌림)
@@ -198,7 +199,7 @@
         h('div', h('h3', L('품번별 진행 (' + o.n + ')', 'Tiến độ từng mã (' + o.n + ')')),
           ERP.simpleTable([{ label: L('품번', 'Mã hàng'), render: l => h('div', h('b', l.p.item_no || '–'), h('div', { class: 'sub' }, l.p.kind || '')) }, { label: 'set', num: 1, render: l => F.n(l.packed) + ' / ' + F.n(l.sets) }, { label: L('진행', 'Tiến độ'), render: l => h('div', { style: { minWidth: '70px' } }, ERP.bar(l.prog * 100, l.st === 'late' ? 'bad' : l.st === 'done' ? 'ok' : 'info'), h('small', { class: 'muted' }, F.n(l.prog * 100, 0) + '%')) },
             { label: L('완제품 재고', 'Tồn TP'), num: 1, render: l => { const st0 = ERP.calc.stock().get(String(l.p.item_no || '')); if (!st0 || (!st0.bal && !st0.n)) return h('span', { class: 'muted' }, '–'); const rem = Math.max(0, l.sets - l.packed); const sets = st0.sets; return h('div', { title: L('창고 ', 'Kho ') + F.n(st0.by.WH) + ' / ' + L('공장 ', 'Xưởng ') + F.n(st0.by.FAC) + ' ' + st0.prim }, h('b', { style: st0.bal < 0 ? { color: '#B3261E' } : null }, F.n(st0.bal, st0.prim === 'kg' ? 1 : 0) + ' ' + st0.prim), sets !== null && sets !== undefined ? h('div', { class: 'sub', style: rem && sets >= rem ? { color: '#0E7A5F' } : null }, F.n(sets) + ' set') : null); } },
-            { label: L('납기', 'Hạn'), render: l => h('div', F.md(l.p.due), ERP.ddayChip(l.dday, l.st)) }, { label: '', render: l => h('button', { class: 'btn sm', title: 'BOM/MRP', onclick: () => ERP.goto('bom', { tab: 'mrp', lines: [{ code: bomFor(l.p.item_no).key || l.p.item_no, qty: Math.max(0, Math.round(l.sets - l.packed)) || Math.round(l.sets), unit: 'set' }] }) }, 'MRP') }], lineIds, { maxH: '260px' }),
+            { label: L('납기', 'Hạn'), render: l => h('div', F.md(l.p.due), ERP.ddayChip(l.dday, l.st)) }, { label: '', render: l => h('button', { class: 'btn sm', title: 'BOM/MRP', onclick: () => ERP.goto('bom', { tab: 'mrp', lines: [ERP.mrpPoLine(l, true)] }) }, 'MRP') }], lineIds, { maxH: '260px' }),
           o.orphan > 0 ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 품번이 일치하지 않는 포장 실적 ' + F.n(o.orphan) + ' set 이 있습니다. 포장일보의 코드를 PO 품번과 같게 입력하세요.', '⚠ Có ' + F.n(o.orphan) + ' set đóng gói không khớp mã hàng nào của PO. Hãy nhập mã trùng với mã hàng của PO.')) : null),
         h('div', h('h3', L('포장 실적 (생산일보)', 'Kết quả đóng gói (báo cáo ngày)')), packs.length ? ERP.simpleTable([{ label: L('일자', 'Ngày'), render: r => F.md(r.date) }, { label: L('품번', 'Mã hàng'), render: r => h('span', { style: codes.has(String(r.code)) ? null : { color: '#C77700' } }, r.code || '') }, { label: L('설비', 'Máy'), render: r => r.machine_no || '' }, { label: 'set', num: 1, render: r => F.n(r.ok_qty) }], packs.slice(0, 10), { maxH: '220px' }) : h('div', { class: 'sub' }, L('이 PO 번호의 포장일보가 아직 없습니다. (포장일보에 PO 번호 + 품번 입력)', 'Chưa có báo cáo đóng gói cho PO này. (nhập số PO + mã hàng)'))),
         h('div', { class: 'actions' },
