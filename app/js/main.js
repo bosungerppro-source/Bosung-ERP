@@ -6,6 +6,7 @@
   const NAV = [
     { id: 'dashboard', ko: '종합 현황', vi: 'Tổng quan', icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
     { id: 'orders', ko: '수주 관리', vi: 'Đơn hàng (PO)', icon: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 12h6M9 16h6' },
+    { id: 'plan', ko: '생산 계획', vi: 'Kế hoạch SX', icon: 'M4 5h16v15H4zM4 9h16M8 3v4M16 3v4M8 13h3M8 16h6' },   // 19차 (v1.14.0): 수주 → 계획 → 생산 (12차 메뉴: 생산 관리 다음은 품목 · 현장 재고 · 원부자재 재고)
     { id: 'production', ko: '생산 관리', vi: 'Sản xuất', icon: 'M3 20V11l6 4v-4l6 4V5h4v15z' },
     { id: 'items', ko: '품목', vi: 'Mặt hàng', icon: 'M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h11' },
     { id: 'floor', ko: '현장 재고', vi: 'Tồn hiện trường', icon: 'M12 3l9 4-9 4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4' },

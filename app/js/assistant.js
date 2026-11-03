@@ -37,6 +37,7 @@
     '- MRP: if `warnings` contains NO_COMPONENTS or NO_BOM, the requirement could NOT be calculated — say so; never say "no shortage". STOCK_UNKNOWN = some raw materials are not matched to the stock master. kind=semi shortages often only mean semi-finished stock is not recorded.',
     '- Packing (PCK) is counted in sets (good_sets) and as pcs (good_pcs); PO quantities are in sets. "set" is the sales unit (e.g. a Mini set = 24 pencils); pcs = pieces.',
     '- A PO can have several item lines; its progress is the sum over its lines (packing is matched by po_no + item code).',
+    '- Production plan (`production_plan`, same as the 생산 계획 screen): an estimate at average speed from the last 3 months of production reports (or the planner\'s own daily capacity). Its judge "late" means the line is EXPECTED to miss its due date — not the overdue "late" PO above; "past" = due date already passed. Lines without a PO number are "PO미정" (not confirmed): scope all includes them (default) — say so, and use scope firm when the user asks about confirmed POs only. Mention items in `check` that affect the answer.',
     'FORMAT (the chat window renders Markdown tables)',
     '- Start with one short bold title line (e.g. **납기 경과 PO — 26건**).',
     '- Whenever the answer has more than two items or numbers (POs, items/materials, processes, machines, days), put them in a Markdown table (| col | col |, header separator row) with only the useful columns: code, name, quantity with unit, date, %. At most 12 rows; if there are more, say how many more under the table.',
@@ -344,7 +345,7 @@
   let panel, msgBox, input, modeEl, titleEl, built = false;
   const scroll = () => { if (msgBox) msgBox.scrollTop = msgBox.scrollHeight; };
   const TOOL_LABEL = { briefing: ['브리핑 준비', 'Chuẩn bị bản tin'], overview: ['현황 확인', 'Xem tổng quan'], find_orders: ['수주 조회', 'Tra cứu PO'], get_po: ['PO 상세 조회', 'Chi tiết PO'], material_stock: ['자재 재고 조회', 'Tra cứu tồn NVL'],
-    production_summary: ['생산 실적 집계', 'Tổng hợp sản xuất'], quality_downtime: ['불량·정지 집계', 'Tổng hợp lỗi/dừng máy'], reorder: ['발주 필요 확인', 'Kiểm tra cần đặt hàng'], mrp: ['자재 소요량 계산', 'Tính nhu cầu NVL'] };
+    production_summary: ['생산 실적 집계', 'Tổng hợp sản xuất'], quality_downtime: ['불량·정지 집계', 'Tổng hợp lỗi/dừng máy'], reorder: ['발주 필요 확인', 'Kiểm tra cần đặt hàng'], mrp: ['자재 소요량 계산', 'Tính nhu cầu NVL'], production_plan: ['생산 계획 계산', 'Tính kế hoạch sản xuất'] };
 
   // ---------- rich answers: built-in mode blocks · AI-mode Markdown (tables, lists, ※ comments). DOM only (no innerHTML) ----------
   const NUMV = /^[-+−]?[\d.,]+\s*(%|pcs|set|kg|건|종|개|CT|PCS|SET|đơn|mã|phút|분)?$/i;

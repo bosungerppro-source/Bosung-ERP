@@ -81,6 +81,9 @@ const TABLE = [
   ['52-0712-0-009 재고', 'material', 'ko'], ['52-0712-0-009', 'orders'], ['모자란 자재', 'low_stock', 'ko'], ['chất lượng tuần này', 'qd', 'vi'], ['phế phẩm tháng này', 'qd', 'vi'], ['hàng hỏng hôm qua', 'qd', 'vi'],
   ['máy nào dừng nhiều nhất', 'qd', 'vi'], ['sử dụng máy', 'production', 'vi'], ['tình hình sử dụng máy tuần này', 'production', 'vi'], ['설비 가동 현황', 'production', 'ko'],
   ['PO tạm ngưng', 'orders', 'vi'], ['보류된 수주', 'orders', 'ko'], ['취소된 PO', 'orders', 'ko'], ['dừng máy hôm qua', 'qd', 'vi'],
+  // 19차: 생산 계획 (언제 끝나 · 늦어질 · 병목 → plan, 모자랄 · 수주 대비 → plan_mat — "모자란 자재" 는 그대로 안전재고)
+  ['언제 끝나?', 'plan', 'ko'], ['늦어질 수주', 'plan', 'ko'], ['병목 공정', 'plan', 'ko'], ['생산 계획', 'plan', 'ko'], ['모자랄 자재', 'plan_mat', 'ko'], ['수주 대비 부족할 원료', 'plan_mat', 'ko'],
+  ['PO nào sẽ trễ', 'plan', 'vi'], ['khi nào xong', 'plan', 'vi'], ['vật tư sẽ thiếu', 'plan_mat', 'vi'], ['which orders will be late', 'plan'],
   // Korean
   ['오늘 브리핑', 'briefing', 'ko'], ['오늘 현황 요약해줘', 'briefing', 'ko'], ['전체 현황', 'briefing', 'ko'], ['현황', 'briefing', 'ko'],
   ['납기 위험 PO', 'deadline', 'ko'], ['납기 경과 PO', 'deadline', 'ko'], ['지연된 수주', 'deadline', 'ko'], ['7일 내 납기', 'deadline', 'ko'], ['납기 임박한 수주', 'deadline', 'ko'], ['오래된 지연 PO', 'deadline', 'ko'],
@@ -469,7 +472,7 @@ const TABLE = [
     eq('도구 호출 → 결과를 근거로 답변', r.a, '진행 중 PO ' + r.aOpen + '건');
     ok('도구 결과가 모델에 전달됨 (tool_use_id 일치)', r.toolIdMatch === 'tu1' && r.aCalls === 2 && r.aSteps.join() === 'overview', r);
     eq('대화 기록: 질문·도구호출·결과·답변 4건', r.aHist, 4);
-    eq('도구 9개 전달', r.toolNames.slice().sort(), ['briefing', 'find_orders', 'get_po', 'material_stock', 'mrp', 'overview', 'production_summary', 'quality_downtime', 'reorder']);
+    eq('도구 10개 전달 (19차: production_plan)', r.toolNames.slice().sort(), ['briefing', 'find_orders', 'get_po', 'material_stock', 'mrp', 'overview', 'production_plan', 'production_summary', 'quality_downtime', 'reorder']);
     ok('읽기 전용 (쓰기·삭제 도구 없음)', !r.toolNames.some(n => /delete|update|create|write|set_|add_|remove/.test(n)), r.toolNames);
     ok('시스템 프롬프트: 공장·오늘 날짜·화면 언어', /BOSUNG VINA/.test(r.sys) && r.sys.includes(r.today) && /Korean/.test(r.sys), r.sys.slice(-400));
     ok('시스템 프롬프트: 비서 이름·호칭', /Your name is "소미"/.test(r.sys) && /Address the user as "박 팀장님"/.test(r.sys), r.sys.slice(-500));
@@ -596,7 +599,7 @@ const TABLE = [
     const c1 = upstream.calls[0], c2 = upstream.calls[1];
     ok('서버가 저장된 키로 호출', c1.headers['x-api-key'] === KEY && c1.headers['anthropic-version'] === '2023-06-01', c1.headers);
     ok('시스템 프롬프트에 비서 이름·지침 포함', /Your name is "소미"/.test(sysText(c1.body.system)) && /서리/.test(sysText(c1.body.system)));
-    ok('도구 정의 9개 전송', c1.body.tools.length === 9);
+    ok('도구 정의 10개 전송 (19차: production_plan)', c1.body.tools.length === 10);
     const tr = c2.body.messages[c2.body.messages.length - 1].content[0];
     ok('두 번째 호출에 briefing 결과가 실림', tr.type === 'tool_result' && tr.tool_use_id === 'toolu_b1' && JSON.parse(tr.content).orders && JSON.parse(tr.content).materials, short(tr.content));
     const stale = await ev(() => ERP.ai.history.length); eq('대화 기록 4건', stale, 4);
@@ -677,7 +680,7 @@ const TABLE = [
     await D.page.waitForFunction(() => Array.from(document.querySelectorAll('#aiPanel .b.a')).some(e => e.textContent.includes('DEMO-STUB OK')), null, { timeout: 20000 });
     const s0 = seen[0] || {};
     ok('데모: 브라우저에서 직접 호출 (키·버전·브라우저 직접 접근 헤더)', s0.headers && s0.headers['x-api-key'] === 'sk-ant-demo-KEY-9999' && s0.headers['anthropic-version'] === '2023-06-01' && s0.headers['anthropic-dangerous-direct-browser-access'] === 'true', s0.headers);
-    ok('데모: 모델과 도구 전달', s0.body && s0.body.model && s0.body.tools && s0.body.tools.length === 9, s0.body && s0.body.model);
+    ok('데모: 모델과 도구 전달 (도구 10개)', s0.body && s0.body.model && s0.body.tools && s0.body.tools.length === 10, s0.body && s0.body.model);
     await D.page.reload(); await D.page.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready && document.getElementById('aiFab'), null, { timeout: 60000 }); await sleep(300);
     ok('데모: 새로 고치면 키는 없어짐 (내장 모드)', await dev(() => !ERP.ai.hasKey && !ERP.ai.useAI()));
     ok('데모 실행 중 오류 없음', !derr.length, derr);

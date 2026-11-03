@@ -574,6 +574,104 @@
       note: need ? L('생산일을 읽지 못한 줄이 있습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Có dòng không đọc được ngày — hãy nhập ngày.') : '' }];
   });
 
+  // ---------------- 19차 (v1.14.0): 생산계획_기준자료_양식 (사용자 2026-11-03 "채워넣긴했는데 어떻게 해야될지 모르겠다. 생산일보 보면서 너가 생각해줘" → "네, 만들어 줘") ----------------
+  // 1 설비 → 설비 마스터 (조당 표준 · 필요 인원 · 사용) · 2 조 설정 · 4 인원 · 7 불량 → 생산 계획 · 공정 기준 · 3 근무 달력 → 근무 달력 (일요일만 쉬는 기본과 다른 날만)
+  // 5 공정 사이 → 공정 사이 · 6 자재 → 품목 리드타임 (지금 값과 다를 때만). 안내 시트 · 일보 참고 칸 · 외주 · 입고 예정은 읽지 않는다
+  const planProc = (v) => { const t = String(v === null || v === undefined ? '' : v).split('/')[0].trim(); if (!t) return null;
+    if (/^원료|^raw$/i.test(t) || /^nh[aậ]p/i.test(t)) return 'RAW'; if (/^출고|^out$/i.test(t) || /^xu[aấ]t/i.test(t)) return 'OUT';
+    const p = ERP.PROC.find(x => norm(x.ko) === norm(t) || norm(x.vi) === norm(t) || x.id === t.toUpperCase()); return p ? p.id : null; };
+  const planCols = (M, hi, defs) => { const out = {}; (M[hi] || []).forEach((x, ci) => { if (typeof x !== 'string') return; Object.keys(defs).forEach(k => { if (out[k] === undefined && defs[k].test(x)) out[k] = ci; }); }); return out; };
+  const planHdr = (M, re) => findRow(M, r => hasCell(r, re), 0, 4);
+  const PLAN_LBL = (ko, vi) => L('생산 계획 기준 자료 · ' + ko, 'Dữ liệu chuẩn KHSX · ' + vi);
+  // 양식의 머리는 "한국어 (처음 값 · 입력) / 베트남어" — ERP 가 내보낸 생산 계획 표 (머리 = 칸 이름) 는 여기서 잡지 않고 일반 표 인식으로 간다
+  const isPlanBook = (M) => hasCell(M[0] || [], /^공정|^날짜|^앞 공정|^품목코드/) && hasCell(M[0] || [], /\((처음 값|입력)[^)]*\) \//);
+  D('plan_info', (n, M) => /^안내/.test(String(n)) && hasCell(M[0] || [], /생산 계획 기준 자료/), () => [{ table: null, rows: [], label: PLAN_LBL('안내', 'hướng dẫn'), skip: L('안내 시트 — 읽을 값이 없습니다.', 'Trang hướng dẫn — không có dữ liệu để đọc.') }]);
+  D('plan_mach', (n, M) => isPlanBook(M) && planHdr(M, /조당 표준 생산량/) >= 0 && planHdr(M, /설비 번호/) >= 0, (M) => {
+    const hi = planHdr(M, /조당 표준 생산량/); const c = planCols(M, hi, { proc: /^공정/, fam: /조립 품목군/, no: /설비 번호/, name: /설비 이름/, divs: /만들 수 있는 품목군/, std: /조당 표준/, people: /필요 인원/, status: /가동 상태/, mold: /금형 교체/, note: /^비고/ });
+    const rows = [];
+    for (let i = hi + 1; i < M.length; i++) {
+      const r = M[i]; if (!r) continue; const proc = planProc(S(r, c.proc)); const no = T(S(r, c.no)); if (!proc || proc === 'RAW' || proc === 'OUT' || !no || !String(no).trim()) continue;
+      const st = String(S(r, c.status) || '').trim(); const active = /가동|chạy|chay|run/i.test(st) ? true : /수리|정지|sửa|sua|dừng|dung|stop/i.test(st) ? false : undefined;
+      const mold = N(S(r, c.mold)); const note = [T(S(r, c.note)), active === false ? st : null, mold > 0 ? L('금형 교체 ' + mold + '분', 'Thay khuôn ' + mold + ' phút') : null].filter(x => x && String(x).trim()).join(' · ');
+      rows.push(pick({ process: proc, machine_no: String(no).trim(), name: T(S(r, c.name)), division: proc === 'ASM' ? fixDiv(T(S(r, c.fam))) : T(S(r, c.divs)), per_shift: N(S(r, c.std)), people: N(S(r, c.people)), active, note: note || null }));
+    }
+    return [{ table: 'machines', rows, mode: 'plan', label: PLAN_LBL('설비 (조당 표준 · 인원 · 사용)', 'máy (SL chuẩn · người · đang dùng)'), modes: () => ({ plan: L('설비 갱신 · 추가 (공정 · 조립 품목군 · 번호 기준)', 'Cập nhật · thêm máy (công đoạn · nhóm · số)') }),
+      note: L('가동 상태가 비어 있는 새 설비는 "사용 안 함" 으로 넣습니다 (설비 기준 최대에서 빠짐).', 'Máy mới không ghi tình trạng sẽ là "không dùng".'), apply: applyPlanMach }];
+  });
+  function applyPlanMach(job) {
+    const DB = ERP.db; const fam = (m) => (m.process === 'ASM' ? String(ERP.plan ? ERP.plan.fam(m.division) : m.division || '').toLowerCase() : '');
+    const key = (m) => [String(m.process || '').toUpperCase(), fam(m), String(m.machine_no === undefined || m.machine_no === null ? '' : m.machine_no).trim().toLowerCase()].join('|');
+    const idx = new Map(); DB.rows('machines').forEach(m => idx.set(key(m), m)); let added = 0, updated = 0; const add = [];
+    job.rows.forEach(r => { const e = idx.get(key(r));
+      if (e) { const p = {}; ['per_shift', 'people', 'active'].forEach(k => { if (r[k] !== undefined) p[k] = r[k]; }); if (r.name && !e.name) p.name = r.name; if (r.division && (!e.division || r.process !== 'ASM')) p.division = r.division; if (r.note && !String(e.note || '').includes(r.note)) p.note = [e.note, r.note].filter(Boolean).join(' · ');
+        Object.assign(e, p); delete e._ex; updated++; }
+      else { add.push(Object.assign({ active: r.active === undefined ? false : r.active }, r)); added++; } });
+    if (add.length) DB.addMany('machines', add); else DB.touch('machines');
+    return { added, updated };
+  }
+  D('plan_shift', (n, M) => isPlanBook(M) && planHdr(M, /기본 조 수/) >= 0 && planHdr(M, /근무 시간/) >= 0, (M) => {
+    const hi = planHdr(M, /기본 조 수/); const c = planCols(M, hi, { proc: /^공정/, n: /기본 조 수/, day: /주간 조 근무 시간/, night: /야간 조 근무 시간/, brk: /휴식 분/, note: /^비고/ });
+    const rows = []; for (let i = hi + 1; i < M.length; i++) { const r = M[i]; if (!r) continue; const proc = planProc(S(r, c.proc)); if (!proc || proc === 'RAW' || proc === 'OUT') continue;
+      const o = pick({ process: proc, shifts: N(S(r, c.n)), day_h: N(S(r, c.day)), night_h: N(S(r, c.night)), break_min: N(S(r, c.brk)), note: T(S(r, c.note)) }); if (Object.keys(o).length > 1) rows.push(o); }
+    return [{ table: 'plan_proc', rows, mode: 'upsert', keys: ['process', 'division'], label: PLAN_LBL('조 설정', 'ca làm việc'), modes: () => ({ upsert: L('공정마다 갱신 · 추가', 'Cập nhật · thêm theo công đoạn') }) }];
+  });
+  D('plan_people', (n, M) => isPlanBook(M) && planHdr(M, /가용 인원/) >= 0, (M) => {
+    const hi = planHdr(M, /가용 인원/); const c = planCols(M, hi, { proc: /^공정/, shift: /^조/, have: /가용 인원/, per: /필요 인원/, common: /공통 인원/, note: /^비고/ });
+    const by = new Map();
+    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; if (!r) continue; const proc = planProc(S(r, c.proc)); if (!proc || proc === 'RAW' || proc === 'OUT') continue;
+      const night = /야간|đêm|dem|night|^n$/i.test(String(S(r, c.shift) || '').trim()); const o = by.get(proc) || { process: proc }; by.set(proc, o);
+      const have = N(S(r, c.have)), per = N(S(r, c.per)), common = N(S(r, c.common)), note = T(S(r, c.note));
+      if (have !== null) o[night ? 'people_night' : 'people_day'] = have; if (per !== null && (o.people_per === undefined || !night)) o.people_per = per;
+      if (common !== null) o.people_common = (o.people_common || 0) + common; if (note && String(note).trim()) o.note = [o.note, note].filter(Boolean).join(' · '); }
+    const rows = Array.from(by.values()).filter(o => Object.keys(o).length > 1);
+    return [{ table: 'plan_proc', rows, mode: 'upsert', keys: ['process', 'division'], label: PLAN_LBL('인원', 'nhân lực'), modes: () => ({ upsert: L('공정마다 갱신 · 추가', 'Cập nhật · thêm theo công đoạn') }),
+      note: rows.length ? '' : L('인원 칸이 비어 있습니다 — 넣으면 다음에 올릴 때 반영됩니다.', 'Ô nhân lực đang trống.') }];
+  });
+  D('plan_defect', (n, M) => isPlanBook(M) && planHdr(M, /불량률 기준/) >= 0, (M) => {
+    const hi = planHdr(M, /불량률 기준/); const c = planCols(M, hi, { proc: /^공정/, pct: /불량률 기준/ });
+    const rows = []; let outs = 0, inOut = false;
+    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; if (!r) continue; if (hasCell(r, /^외주 공정/)) { inOut = true; continue; }
+      if (inOut) { if (r.some(x => x !== null && String(x).trim())) outs++; continue; }
+      const proc = planProc(S(r, c.proc)); const v = N(S(r, c.pct)); if (!proc || proc === 'RAW' || proc === 'OUT' || v === null) continue; rows.push({ process: proc, defect_pct: v }); }
+    return [{ table: 'plan_proc', rows, mode: 'upsert', keys: ['process', 'division'], label: PLAN_LBL('불량률', 'tỷ lệ lỗi'), modes: () => ({ upsert: L('공정마다 갱신 · 추가', 'Cập nhật · thêm theo công đoạn') }),
+      note: outs ? L('외주 ' + outs + '줄은 아직 읽지 않습니다.', 'Chưa đọc ' + outs + ' dòng gia công ngoài.') : '' }];
+  });
+  D('plan_wait', (n, M) => isPlanBook(M) && planHdr(M, /기다리는 날/) >= 0 && planHdr(M, /앞 공정/) >= 0, (M) => {
+    const hi = planHdr(M, /앞 공정/); const c = planCols(M, hi, { from: /앞 공정/, to: /다음 공정/, days: /기다리는 날/, lot: /최소 생산 단위/, note: /^비고/ });
+    const rows = []; for (let i = hi + 1; i < M.length; i++) { const r = M[i]; if (!r) continue; const a = planProc(S(r, c.from)), b = planProc(S(r, c.to)); if (!a || !b || a === 'OUT' || b === 'RAW') continue;
+      const o = pick({ from: a, to: b, days: N(S(r, c.days)), min_lot: N(S(r, c.lot)), note: T(S(r, c.note)) }); if (Object.keys(o).length > 2) rows.push(o); }
+    return [{ table: 'plan_wait', rows, mode: 'upsert', keys: ['from', 'to'], label: PLAN_LBL('공정 사이 기다리는 날', 'thời gian chờ'), modes: () => ({ upsert: L('앞 · 다음 공정마다 갱신 · 추가', 'Cập nhật · thêm theo cặp công đoạn') }) }];
+  });
+  D('plan_cal', (n, M) => isPlanBook(M) && planHdr(M, /근무 O\/X/) >= 0, (M) => {
+    const hi = planHdr(M, /근무 O\/X/); const defs = { date: /^날짜/, work: /근무 O\/X/, memo: /휴일|메모/, ot: /잔업/ }; ERP.PROC.forEach(p => { defs['sh_' + p.id.toLowerCase()] = new RegExp('^' + p.ko + ' 조 수'); });
+    const c = planCols(M, hi, defs); const rows = []; let lo = '', hiD = '';
+    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; if (!r) continue; const d = ERP.fmt.parseDate(S(r, c.date)); if (!d) continue; if (!lo || d < lo) lo = d; if (!hiD || d > hiD) hiD = d;
+      const wv = String(S(r, c.work) === null ? '' : S(r, c.work)).trim(); const work = /^(o|ㅇ|y|yes|1|근무|일함|làm|lam)$/i.test(wv) ? true : /^(x|n|no|0|휴무|휴일|쉼|nghỉ|nghi)$/i.test(wv) ? false : undefined;
+      const sunday = new Date(d + 'T00:00:00').getDay() === 0; const o = { date: d };
+      if (work !== undefined && work === sunday) o.work = work;   // 기본 (일요일만 쉼) 과 다를 때만
+      const memo = T(S(r, c.memo)); if (memo && String(memo).trim()) o.memo = String(memo).trim();
+      ['inj', 'ref', 'asm', 'wrp', 'pck'].forEach(k => { const v = N(S(r, c['sh_' + k])); if (v !== null && v >= 0) o['sh_' + k] = v; });
+      const ot = N(S(r, c.ot)); if (ot) o.ot_h = ot;
+      if (Object.keys(o).length > 1) rows.push(o); }
+    return [{ table: 'plan_cal', rows, mode: 'range', from: lo, to: hiD, label: PLAN_LBL('근무 달력 (' + (lo || '–') + ' ~ ' + (hiD || '–') + ')', 'lịch làm việc'), modes: () => ({ range: L('양식 날짜 범위를 바꾸기 (그 사이 다른 날 줄은 지움)', 'Thay khoảng ngày của file'), upsert: L('같은 날짜만 갱신 · 추가', 'Chỉ cập nhật · thêm ngày trùng') }),
+      note: L('일요일만 쉬는 기본과 다른 날 · 메모 · 조 수 · 잔업이 있는 날 ' + rows.length + '일', rows.length + ' ngày khác mặc định (chỉ nghỉ Chủ nhật)'), apply: applyPlanCal }];
+  });
+  function applyPlanCal(job) {
+    const DB = ERP.db; if (job.mode !== 'range') { const r = DB.upsert('plan_cal', job.rows, ['date']); return { added: r.added, updated: r.updated }; }
+    const n0 = DB.rows('plan_cal').length; DB.t.plan_cal = DB.rows('plan_cal').filter(r => !(r.date >= job.from && r.date <= job.to)); const removed = n0 - DB.t.plan_cal.length;
+    DB.addMany('plan_cal', job.rows); return { added: job.rows.length, removed };
+  }
+  D('plan_mat', (n, M) => isPlanBook(M) && planHdr(M, /리드타임 일/) >= 0 && planHdr(M, /품목코드/) >= 0, (M) => {
+    const hi = planHdr(M, /품목코드/); const c = planCols(M, hi, { code: /^품목코드/, lead: /리드타임/, moq: /최소 발주량/, vendor: /^거래처/, inDate: /입고 예정 날짜/, inQty: /입고 예정 수량/ });
+    const IT = ERP.inv ? ERP.inv.items() : null; const rows = []; let other = 0, noItem = 0;
+    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; if (!r) continue; const code = String(S(r, c.code) === null ? '' : S(r, c.code)).trim(); if (!code || /^\(|^필요량/.test(code)) continue;
+      if ([c.moq, c.vendor, c.inDate, c.inQty].some(ci => ci !== undefined && S(r, ci) !== null && String(S(r, ci)).trim())) other++;
+      const lead = N(S(r, c.lead)); if (!(lead > 0)) continue; const it = IT ? IT.get(code) : null; if (!it) { noItem++; continue; }
+      const cur = ERP.plan ? ERP.plan.leadOf(it) : null; if (cur === Math.round(lead)) continue; rows.push({ code: it.code, lead_days: Math.round(lead) }); }
+    return [{ table: 'items', rows, mode: 'update', label: PLAN_LBL('자재 리드타임', 'thời gian giao vật tư'), modes: () => ({ update: L('리드타임만 갱신 (있는 품목, 지금 값과 다를 때)', 'Chỉ cập nhật thời gian giao (mã có sẵn, khi khác)') }),
+      note: [rows.length ? '' : L('지금 ERP 값과 다른 리드타임이 없습니다.', 'Không có thời gian giao khác giá trị ERP.'), noItem ? L('품목에 없는 코드 ' + noItem + '개', noItem + ' mã không có trong danh mục') : '', other ? L('최소 발주량 · 거래처 · 입고 예정 ' + other + '줄은 읽지 않습니다 (입고 예정은 원부자재 재고 → 해외 주문에서).', 'Chưa đọc ' + other + ' dòng đặt tối thiểu · NCC · sắp nhập.') : ''].filter(Boolean).join(' · ') }];
+  });
+
   // generic (own template / localized export)
   XL.detectSheet = function (name, wsFull) {
     const head = matrix(wsFull, 14, 60); if (!head.some(r => r.some(x => x !== null))) return [];

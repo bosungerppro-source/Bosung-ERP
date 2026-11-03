@@ -102,6 +102,10 @@
     // 설비 사용 · 가동 현황 ("sử dụng máy") 은 정지가 아니라 생산 실적 (공정별 가동 설비 수 포함)
     machUse: [/설비\s*(사용|가동|활용)|가동\s*(률|현황|대수)|돌아간\s*설비/, /su dung may|cong suat may|may (dang )?chay|van hanh may|utilization|machine usage/],
     mrp: [/소요량|필요\s*(자재|원료|원부자재)|자재\s*(소요|필요)|원료\s*(소요|필요)/, /nhu cau (nvl|vat tu|nguyen)|\bmrp\b|can bao nhieu|vat tu can|material requirement/],
+    // 19차 (v1.14.0): 생산 계획 — 언제 끝나 · 출고 가능 · 늦어질 수주 · 병목 · 능력 / 수주 대비 모자랄 자재 (production_plan)
+    plan: [/언제\s*(쯤\s*)?(끝나|끝날|끝내|완료|다\s*만들|나와|나올|출고|선적|마무리)|완료\s*(예정|예상)|출고\s*(가능|예정)|생산\s*계획|작업\s*(계획|일정)|병목|케파|캐파|생산\s*능력|공정\s*(부하|능력)|며칠\s*(걸|더\s*걸)|늦어질|지연\s*(예상|될)|납기\s*(를\s*)?(못|안)\s*(맞|지키)/,
+      /khi nao (thi )?(xong|hoan thanh|lam xong|giao|xuat)|bao gio (thi )?(xong|hoan thanh|giao|xuat)|du kien (xong|hoan thanh|giao|xuat|tre)|se (bi )?tre|ke hoach (san xuat|sx)|nang luc (san xuat|sx|cong doan)|\bnghen\b|nut that|bottleneck|capacity|production plan|when (will|can) .*(finish|be done|ship|be ready)|will be late/],
+    planMat: [/모자랄|부족할|모자라게\s*될|부족하게\s*될|수주\s*(대비|에\s*비해)|발주\s*마감|언제까지\s*(발주|주문)/, /se thieu|thieu cho (don|po)|han dat hang|will run short|run out for (the )?orders/],
     help: [/도움말|도와|뭘\s*(할|물어)|무엇을|기능|사용법/, /giup|lam duoc gi|huong dan|\bhelp\b|what can you/],
     greet: [/^(안녕|하이|반가|헬로)/, /^(xin chao|chao|hello|hi|hey)\b/],
     thanks: [/고마|감사/, /cam on|thanks|thank you/],
@@ -134,6 +138,7 @@
   function decide(q) {
     const k = q.k;
     if (!q.raw) return { name: 'help' };
+    if (k.plan && (q.po || q.item) && !k.mrp) return { name: 'plan', query: q.po || q.item };   // 19차: "5100363914 언제 끝나?" = 생산 계획의 그 줄
     if (q.po) return k.mrp ? { name: 'mrp', po: q.po } : { name: 'po', po: q.po };
     if (q.item) {
       if (k.mrp) return { name: 'mrp', item: q.item };
@@ -141,6 +146,8 @@
       return { name: 'orders', query: q.item, status: 'all', title: 'item' };
     }
     if (q.matCode) return { name: 'material', query: q.matCode };
+    if (k.planMat) return { name: 'plan_mat' };
+    if (k.plan) return { name: 'plan' };
     if (k.brief) return { name: 'briefing' };
     // 보류 · 취소 PO ("PO tạm ngưng", "보류된 수주") — '멈춤(ngưng)' 이 있어도 설비 정지가 아님
     if ((k.hold || k.cancel) && (k.orders || !k.downtime)) return { name: 'orders', query: q.customer || '', status: k.cancel && !k.hold ? 'cancel' : 'hold', title: 'list' };
@@ -408,8 +415,59 @@
   function fmtHelp(c, pre) {
     const { s } = c, X = [];
     if (pre) X.push(B.p(pre));
-    X.push(B.p(s('이렇게 물어보세요:', 'Bạn có thể hỏi:')), B.list(s('오늘 브리핑|납기 위험 PO / 납기 경과 PO / 오래된 지연 PO|PO번호 (예: 5100356783) 또는 품번|안전재고 미달 자재 / HDPE 재고 / 발주 필요한 자재|어제 생산 요약 / 이번 주 포장 실적 / 조립 지난주 실적|어제 불량률 / 설비 정지 시간|5100356783 자재 소요량',
-      'Bản tin hôm nay|PO sắp đến hạn / PO quá hạn / PO quá hạn lâu|Số PO (vd: 5100356783) hoặc mã hàng|NVL dưới tồn an toàn / tồn HDPE / NVL cần đặt hàng|Sản lượng hôm qua / đóng gói tuần này / lắp ráp tuần trước|Tỷ lệ lỗi hôm qua / thời gian dừng máy|Nhu cầu NVL của PO 5100356783').split('|')));
+    X.push(B.p(s('이렇게 물어보세요:', 'Bạn có thể hỏi:')), B.list(s('오늘 브리핑|납기 위험 PO / 납기 경과 PO / 오래된 지연 PO|PO번호 (예: 5100356783) 또는 품번|안전재고 미달 자재 / HDPE 재고 / 발주 필요한 자재|어제 생산 요약 / 이번 주 포장 실적 / 조립 지난주 실적|어제 불량률 / 설비 정지 시간|5100356783 자재 소요량|5100356783 언제 끝나? / 늦어질 수주 / 병목 공정 / 모자랄 자재',
+      'Bản tin hôm nay|PO sắp đến hạn / PO quá hạn / PO quá hạn lâu|Số PO (vd: 5100356783) hoặc mã hàng|NVL dưới tồn an toàn / tồn HDPE / NVL cần đặt hàng|Sản lượng hôm qua / đóng gói tuần này / lắp ráp tuần trước|Tỷ lệ lỗi hôm qua / thời gian dừng máy|Nhu cầu NVL của PO 5100356783|PO 5100356783 khi nào xong? / PO sẽ trễ / công đoạn nghẽn / vật tư sẽ thiếu').split('|')));
+    return X;
+  }
+
+  // ---------- 19차: 생산 계획 (production_plan) ----------
+  const jName = (j, c) => { const x = ERP.plan && ERP.plan.JUDGE[j]; return x ? c.s(x[0], x[1]) : j; };
+  const jTone = (j) => (j === 'late' || j === 'past' ? 'bad' : j === 'tight' ? 'warn' : j === 'ok' ? 'ok' : '');
+  const mName = (j, c) => { const x = ERP.plan && ERP.plan.MJUDGE[j]; return x ? c.s(x[0], x[1]) : j; };
+  const dOut = (d, c) => (!d ? '–' : d === 'capacity_unknown' ? c.s('능력 모름', 'chưa biết NL') : d === 'beyond_horizon' ? c.s('800일 넘음', '> 800 ngày') : d);
+  const procOf = (id, c) => { const [p, f] = String(id || '').split('|'); return c.pname(p) + (p === 'ASM' ? ' · ' + (f || c.s('(품목군 없음)', '(chưa có nhóm)')) : ''); };
+  const planBasis = (c) => B.note(c.s('대강의 계획입니다: 최근 3개월 생산 일보 실적 (평균 속도) 으로 납기 순으로 쌓았습니다. 금형 교체 · 설비 배정 · 인원은 아직 보지 않습니다.', 'Kế hoạch sơ bộ: theo tốc độ trung bình của báo cáo 3 tháng gần nhất, xếp theo hạn giao. Chưa tính thay khuôn · phân máy · nhân lực.'));
+  const poTxt = (x, c) => (x.po_not_fixed ? c.s('PO미정', 'Chưa có PO') : x.po_no);   // PO미정 글자는 화면 언어로 와서 질문 언어로 바꾼다
+  const lineTable = (rows, c, o) => B.table([{ l: 'PO' }, { l: c.s('품번', 'Mã hàng') }, { l: c.s('남은 set', 'Còn (bộ)'), num: 1 }, { l: c.s('납기', 'Hạn') }, { l: c.s('출고 가능', 'Xuất được') }, { l: c.s('여유', 'Dư'), num: 1 }, { l: c.s('판정', 'Đánh giá') }, { l: c.s('막는 공정', 'Công đoạn') }], rows, Object.assign({
+    line: (x) => '▸ ' + poTxt(x, c) + ' ' + x.item_no + ': ' + c.s('납기 ', 'hạn ') + (x.due || '–') + ' → ' + c.s('출고 가능 ', 'xuất được ') + dOut(x.ship_date, c) + (x.slack_days === null ? '' : ' (' + (x.slack_days >= 0 ? '+' : '') + x.slack_days + c.s('일', ' ngày') + ')') + ' · ' + jName(x.judge, c),
+    cell: (x) => [{ v: poTxt(x, c), b: 1 }, x.item_no, c.n(x.remaining_sets), x.due || '–', { v: dOut(x.ship_date, c), b: 1 }, x.slack_days === null ? '–' : { v: c.n(x.slack_days), tone: x.slack_days < 0 ? 'bad' : '' }, { v: jName(x.judge, c), tone: jTone(x.judge) }, x.limiting_process ? c.pname(x.limiting_process) : ''] }, o || {}));
+  function fmtPlan(r, c) {
+    const { s } = c, X = [B.h(s('생산 계획', 'Kế hoạch sản xuất') + ' · ' + (r.scope === 'firm' ? s('확정 PO 만', 'chỉ PO đã chốt') : s('PO미정 포함', 'gồm PO chưa có số')))];
+    if (r.error) { X.push(B.p(r.error)); return X; }
+    X.push(B.p(s(`진행 중 수주 ${c.n(r.open_lines)}줄 · 남은 ${c.n(r.remaining_sets)} set → 전부 출고 가능 ${r.all_shipped_by || '–'} (계산).`, `${c.n(r.open_lines)} dòng PO đang mở · còn ${c.n(r.remaining_sets)} bộ → xuất hết ${r.all_shipped_by || '–'} (dự kiến).`)));
+    const b = r.bottleneck; if (b) X.push(B.p(s(`가장 막히는 공정: ${procOf(b.process, c)} — 남은 ${c.n(b.remaining_pcs)} pcs ÷ 하루 ${c.n(b.per_day)} = ${b.work_days} 근무일 (끝 ${dOut(b.finish, c)}).`, `Công đoạn nghẽn nhất: ${procOf(b.process, c)} — còn ${c.n(b.remaining_pcs)} pcs ÷ ${c.n(b.per_day)}/ngày = ${b.work_days} ngày làm (xong ${dOut(b.finish, c)}).`)));
+    X.push(B.sec(s(`지연 예상 ${r.counts.late} · 빠듯함 ${r.counts.tight} · 여유 ${r.counts.ok} · 이미 납기 지남 ${r.counts.past}`, `Dự kiến trễ ${r.counts.late} · sát hạn ${r.counts.tight} · còn dư ${r.counts.ok} · đã quá hạn ${r.counts.past}`)));
+    const late = (r.late || []).slice(0, 10);
+    if (late.length) X.push(lineTable(late, c, { title: s('지연 예상 수주', 'PO dự kiến trễ'), more: moreTxt(r.counts.late, late.length, c), cmt: s('납기 순으로 앞 수주부터 만든다고 보고 계산했습니다. 끝을 정한 공정의 하루 능력을 늘리거나 순서를 바꾸면 달라집니다.', 'Tính với giả định làm theo thứ tự hạn giao. Tăng năng lực công đoạn quyết định hoặc đổi thứ tự sẽ thay đổi kết quả.') }));
+    else X.push(B.p(s('납기를 못 맞출 것으로 보이는 수주가 없습니다.', 'Không có PO nào dự kiến trễ hạn.')));
+    if (r.materials_short) X.push(B.note(s(`수주 대비 모자랄 자재 ${c.n(r.materials_short)}종 (급함 ${c.n(r.materials_urgent)}) — "모자랄 자재" 로 물어보세요.`, `${c.n(r.materials_short)} vật tư sẽ thiếu (gấp ${c.n(r.materials_urgent)}) — hỏi "vật tư sẽ thiếu".`)));
+    // 확인할 것 글은 화면 언어로 만들어져 있다 — 질문 언어가 같을 때만 그대로, 다르면 탭을 가리킨다
+    const chk = r.check || [];
+    if (chk.length && c.lang === ERP.lang) chk.slice(0, 3).forEach(t => X.push(B.note('⚠ ' + t)));
+    else if (chk.length) X.push(B.note(s(`⚠ 확인할 것 ${chk.length}개 — 생산 계획 화면의 "확인할 것" 탭을 보세요.`, `⚠ Có ${chk.length} mục cần kiểm tra — xem tab "Cần kiểm tra" ở màn hình Kế hoạch SX.`)));
+    X.push(planBasis(c));
+    return X;
+  }
+  function fmtPlanLine(r, q, c) {
+    const { s } = c, X = [B.h(s('언제 끝나나 · ', 'Khi nào xong · ') + q)];
+    if (!r.matches || !r.matches.length) { X.push(B.p(s(`진행 중인 수주에서 "${q}" 를 찾지 못했습니다 (끝난 · 취소 · 보류 수주는 계획하지 않습니다).`, `Không tìm thấy "${q}" trong PO đang mở (PO đã xong · hủy · tạm dừng không được lập kế hoạch).`))); return X; }
+    X.push(lineTable(r.matches, c, { cmt: s('여유 = 납기 − 출고 가능일. 판정이 지연 예상이면 막는 공정의 일을 먼저 봐야 합니다.', 'Dư = hạn − ngày xuất được. Nếu dự kiến trễ, xem công đoạn quyết định trước.') }));
+    const o = r.matches[0]; const f = o.finish; const po = poTxt(o, c);
+    X.push(B.p(s(`${po} ${o.item_no} 공정별 끝: 사출 ${dOut(f.injection, c)} · 리필 ${dOut(f.refill, c)} · 조립 ${dOut(f.assembly, c)} · 권취 ${dOut(f.wrapping, c)} · 포장 ${dOut(f.packing, c)}`, `${po} ${o.item_no} xong: ép ${dOut(f.injection, c)} · lõi ${dOut(f.refill, c)} · lắp ráp ${dOut(f.assembly, c)} · quấn ${dOut(f.wrapping, c)} · đóng gói ${dOut(f.packing, c)}`)));
+    if (o.po_not_fixed) X.push(B.note(s('PO 번호가 없는 (PO미정) 줄입니다.', 'Dòng chưa có số PO.')));
+    X.push(planBasis(c));
+    return X;
+  }
+  function fmtPlanMat(r, c) {
+    const { s } = c, X = [B.h(s('수주 대비 모자랄 자재', 'Vật tư sẽ thiếu cho PO') + ' — ' + s(`${c.n(r.materials_short)}종`, `${c.n(r.materials_short)} mã`))];
+    const rows = (r.materials || []).slice(0, 15);
+    if (!rows.length) { X.push(B.p(s('진행 중 수주를 모두 만들어도 모자라는 자재가 없습니다 (BOM 으로 계산한 것만).', 'Làm hết PO đang mở cũng không thiếu vật tư nào (chỉ tính theo BOM).'))); X.push(planBasis(c)); return X; }
+    const noLead = rows.filter(m => !m.lead_days).length;
+    X.push(B.table([{ l: s('코드', 'Mã') }, { l: s('품명', 'Tên') }, { l: s('모자람', 'Thiếu'), num: 1 }, { l: s('필요한 날', 'Ngày cần') }, { l: s('발주 마감', 'Hạn đặt') }, { l: s('판정', 'Đánh giá') }], rows, { more: moreTxt(r.materials_short, rows.length, c),
+      cmt: s('납기 순으로 쌓은 필요량이 재고 + 입고 예정을 넘는 날이 필요한 날입니다.', 'Ngày cần = ngày lượng cần cộng dồn vượt tồn + sắp nhập.') + (noLead ? s(` 리드타임이 없는 ${noLead}종은 발주 마감을 모릅니다 (생산 계획 → 자재에서 넣기).`, ` ${noLead} mã chưa có thời gian giao nên chưa có hạn đặt.`) : ''),
+      line: (m) => '▸ ' + m.code + ' ' + (m.name || '') + ': ' + s('모자람 ', 'thiếu ') + c.n(m.short, 1) + ' ' + (m.unit || '') + ' · ' + s('필요 ', 'cần ') + (m.need_date || '–') + (m.order_by ? s(' · 발주 마감 ', ' · hạn đặt ') + m.order_by : '') + ' · ' + mName(m.judge, c),
+      cell: (m) => [{ v: m.code, b: 1 }, String(m.name || '').slice(0, 26), { v: c.n(m.short, 1) + ' ' + (m.unit || ''), tone: 'bad' }, m.need_date || '–', m.order_by || '–', { v: mName(m.judge, c), tone: m.judge === 'late' ? 'bad' : m.judge === 'week' || m.judge === 'nolead' ? 'warn' : '' }] }));
+    X.push(planBasis(c));
     return X;
   }
 
@@ -426,7 +484,9 @@
     const pages = {
       orders: act(c, '수주 관리 열기', 'Mở Đơn hàng', go('orders')), materials: act(c, '원부자재 재고 열기', 'Mở Tồn NVL', () => ERP.goStock('mat')), floor: act(c, '현장 재고 열기', 'Mở Tồn hiện trường', () => ERP.goStock('floor')),
       reorder: act(c, '발주 필요 목록 열기', 'Mở danh sách cần đặt', () => { ERP.state.reo = Object.assign(ERP.state.reo || {}, { view: 'list' }); ERP.goStock('reorder'); }),
-      production: act(c, '생산 관리 열기', 'Mở Sản xuất', go('production')), dashboard: act(c, '종합 현황 열기', 'Mở Tổng quan', go('dashboard')) };
+      production: act(c, '생산 관리 열기', 'Mở Sản xuất', go('production')), dashboard: act(c, '종합 현황 열기', 'Mở Tổng quan', go('dashboard')),
+      plan: act(c, '생산 계획 열기', 'Mở Kế hoạch SX', go('plan', () => { ERP.state.plan = Object.assign(ERP.state.plan || {}, { tab: 'orders' }); })),
+      planMat: act(c, '생산 계획 → 자재 열기', 'Mở Kế hoạch SX → Vật tư', go('plan', () => { ERP.state.plan = Object.assign(ERP.state.plan || {}, { tab: 'mats' }); })) };
     // 12차: 재고는 메뉴가 둘 (원부자재 재고 / 현장 재고) — 첫 품목이 속한 쪽을 연다
     const stockPage = (rows) => { const it = rows && rows[0] && ERP.inv.item(rows[0].code); return it && ERP.inv.groupOf(Object.assign({ m: it }, ERP.inv.info(it))) === 'floor' ? pages.floor : pages.materials; };
     switch (I.name) {
@@ -449,7 +509,16 @@
         const o = { query: I.customer || '' };
         X = fmtDeadline(T.find_orders(Object.assign({ status: 'late', limit: 10 }, o)), T.find_orders(Object.assign({ status: 'due_soon', limit: 10 }, o)), T.find_orders(Object.assign({ status: 'stale', limit: 10 }, o)), I.view, c, I.customer);
         actions = [pages.orders, pages.dashboard]; break; }
-      case 'low_stock': { const r = T.material_stock({ only_low: true, include_near: false, limit: 15 }); X = fmtStockList(r, s('안전재고 미달 자재', 'NVL dưới tồn an toàn'), c, s(`안전재고를 설정한 품목만 판단합니다. 발주 권장량은 "발주 필요한 자재"로 물어보세요.`, `Chỉ kiểm tra mã đã cài tồn an toàn. Hỏi "NVL cần đặt hàng" để xem đề xuất.`)); actions = [pages.reorder, pages.materials]; break; }
+      case 'low_stock': { const r = T.material_stock({ only_low: true, include_near: false, limit: 15 }); X = fmtStockList(r, s('안전재고 미달 자재', 'NVL dưới tồn an toàn'), c, s(`안전재고를 설정한 품목만 판단합니다. 발주 권장량은 "발주 필요한 자재"로 물어보세요.`, `Chỉ kiểm tra mã đã cài tồn an toàn. Hỏi "NVL cần đặt hàng" để xem đề xuất.`)); actions = [pages.reorder, pages.materials];
+        // 19차: 수주를 만들 때 모자랄 자재 (생산 계획) 도 한 줄로 — "뭐가 모자라?" 는 둘 다 궁금할 수 있다
+        const pl = T.production_plan ? T.production_plan({ view: 'materials', limit: 3 }) : null;
+        if (pl && !pl.error && pl.materials_short) { X.push(B.note(s(`수주 대비 앞으로 모자랄 자재: ${c.n(pl.materials_short)}종 (급함 ${c.n(pl.materials_urgent)}) — "모자랄 자재" 로 물어보면 자세히 봅니다.`, `Vật tư sẽ thiếu cho PO: ${c.n(pl.materials_short)} mã (gấp ${c.n(pl.materials_urgent)}) — hỏi "vật tư sẽ thiếu" để xem chi tiết.`))); actions.push(pages.planMat); }
+        break; }
+      case 'plan': {
+        if (I.query) { const r = T.production_plan({ query: I.query, limit: 8 }); X = fmtPlanLine(r, I.query, c); actions = [pages.plan]; if (r.matches && r.matches[0]) { const m0 = r.matches[0]; actions.unshift(act(c, poTxt(m0, c) + ' 열기', 'Mở ' + poTxt(m0, c), openPo(m0.po_no))); } }
+        else { X = fmtPlan(T.production_plan({ limit: 10 }), c); actions = [pages.plan, pages.planMat]; }
+        break; }
+      case 'plan_mat': X = fmtPlanMat(T.production_plan({ view: 'materials', limit: 15 }), c); actions = [pages.planMat]; break;
       case 'material': {
         let r = T.material_stock({ query: I.query, limit: 12 }), used = I.query;
         if (!r.total && I.parts && I.parts.length > 1) for (const p of I.parts.slice().sort((a, b) => b.length - a.length)) { const t = T.material_stock({ query: p, limit: 12 }); if (t.total) { r = t; used = p; break; } }

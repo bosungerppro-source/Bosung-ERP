@@ -428,6 +428,47 @@
       { k: 'name', ko: '설비명', vi: 'Tên máy', t: 't', list: 1 },
       { k: 'division', ko: '품목군', vi: 'Nhóm', t: 't', list: 1 },
       { k: 'active', ko: '사용', vi: 'Đang dùng', t: 'b', list: 1 },
+      // 19차 (v1.14.0): 생산 계획의 설비 기준 최대 = 사용 설비의 조당 표준 × 조 수 (생산 계획 · 공정 기준)
+      { k: 'per_shift', ko: '조당 표준 생산량', vi: 'SL chuẩn / ca', t: 'n', list: 1 },
+      { k: 'people', ko: '설비당 필요 인원', vi: 'Số người / máy', t: 'n', list: 1 },
+      { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
+    ] },
+
+    // ---- 19차 (v1.14.0) 생산 계획 기준 자료 (사용자 2026-11-03 "채워넣긴했는데 어떻게 해야될지 모르겠다. 생산일보 보면서 너가 생각해줘" → "네, 만들어 줘") ----
+    // 생산 계획 화면 (p_plan.js) 의 기준 자료 탭에서 고치고, 생산계획_기준자료_양식 엑셀을 올리면 채워진다 (xl.js). 계산은 plan.js
+    // 공정 줄 (품목군 빈칸) = 조 · 근무 시간 · 불량률 · 인원 · 하루 능력, 조립 품목군 줄 (division) = 그 품목군의 하루 능력만
+    plan_proc: { ko: '생산 계획 · 공정 기준', vi: 'Kế hoạch SX · chuẩn công đoạn', nat: ['process', 'division'], sort: ['process', 1], cols: [
+      { k: 'process', ko: '공정', vi: 'Công đoạn', t: 's', opts: procOpts, list: 1, req: 1 },
+      { k: 'division', ko: '조립 품목군 (하루 능력만)', vi: 'Nhóm lắp ráp (chỉ năng lực)', t: 't', list: 1 },
+      { k: 'shifts', ko: '조 수', vi: 'Số ca', t: 'n', list: 1 },
+      { k: 'day_h', ko: '주간 근무 시간', vi: 'Giờ ca ngày', t: 'n', list: 1 },
+      { k: 'night_h', ko: '야간 근무 시간', vi: 'Giờ ca đêm', t: 'n', list: 1 },
+      { k: 'break_min', ko: '휴식 분', vi: 'Nghỉ (phút)', t: 'n', list: 1 },
+      { k: 'defect_pct', ko: '불량률 %', vi: 'Tỷ lệ lỗi %', t: 'n', list: 1 },
+      { k: 'cap_day', ko: '하루 능력 (직접 · 비우면 일보 실적)', vi: 'Năng lực / ngày (nhập · trống = báo cáo)', t: 'n', list: 1 },
+      { k: 'people_day', ko: '주간 가용 인원', vi: 'Số người ca ngày', t: 'n', list: 1 },
+      { k: 'people_night', ko: '야간 가용 인원', vi: 'Số người ca đêm', t: 'n', list: 1 },
+      { k: 'people_per', ko: '설비 · 라인당 필요 인원', vi: 'Số người / máy · chuyền', t: 'n', list: 1 },
+      { k: 'people_common', ko: '공통 인원 (반장 · 검사)', vi: 'Người chung (tổ trưởng · QC)', t: 'n' },
+      { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
+    ] },
+    // 기본 = 일요일만 쉼 (설정 planSunOff). 그와 다른 날 · 조 수나 잔업이 다른 날만 줄로 둔다
+    plan_cal: { ko: '생산 계획 · 근무 달력', vi: 'Kế hoạch SX · lịch làm việc', nat: ['date'], sort: ['date', 1], cols: [
+      { k: 'date', ko: '날짜', vi: 'Ngày', t: 'd', list: 1, req: 1 },
+      { k: 'work', ko: '근무 (일함)', vi: 'Làm việc', t: 'b', list: 1 },
+      { k: 'memo', ko: '휴일 · 메모', vi: 'Ngày nghỉ · ghi chú', t: 't', list: 1 },
+      { k: 'sh_inj', ko: '사출 조 수', vi: 'Số ca ép nhựa', t: 'n' },
+      { k: 'sh_ref', ko: '리필 성형 조 수', vi: 'Số ca ép lõi', t: 'n' },
+      { k: 'sh_asm', ko: '조립 조 수', vi: 'Số ca lắp ráp', t: 'n' },
+      { k: 'sh_wrp', ko: '종이 권취 조 수', vi: 'Số ca quấn giấy', t: 'n' },
+      { k: 'sh_pck', ko: '포장 조 수', vi: 'Số ca đóng gói', t: 'n' },
+      { k: 'ot_h', ko: '잔업 시간', vi: 'Tăng ca (giờ)', t: 'n', list: 1 },
+    ] },
+    plan_wait: { ko: '생산 계획 · 공정 사이', vi: 'Kế hoạch SX · thời gian chờ', nat: ['from', 'to'], sort: ['from', 1], cols: [
+      { k: 'from', ko: '앞 공정', vi: 'Công đoạn trước', t: 's', opts: () => [{ v: 'RAW', ko: '원료 · 부자재 입고', vi: 'Nhập NL · vật tư' }].concat(procOpts()), list: 1, req: 1 },
+      { k: 'to', ko: '다음 공정', vi: 'Công đoạn sau', t: 's', opts: () => procOpts().concat([{ v: 'OUT', ko: '출고 · 검사', vi: 'Xuất · kiểm' }]), list: 1, req: 1 },
+      { k: 'days', ko: '기다리는 날 (근무일)', vi: 'Số ngày chờ (ngày làm)', t: 'n', list: 1 },
+      { k: 'min_lot', ko: '최소 생산 단위', vi: 'Lô tối thiểu', t: 'n', list: 1 },
       { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
     ] },
   };

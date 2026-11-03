@@ -178,6 +178,31 @@
         stock_unknown: unknownStock.slice(0, 10).map(r => ({ code: r.code, name: r.name, need: r1(r.need), unit: r.unit })) };
     },
 
+    /** 19차 (v1.14.0): 생산 계획 (plan.js — 생산 계획 화면과 같은 숫자). query = PO 번호 · 품번이면 그 줄만 */
+    production_plan(a) {
+      const PL = ERP.plan; if (!PL) return { error: 'production plan is not available in this version' };
+      const scope = a.scope === 'firm' ? 'firm' : 'all'; const R = PL.run(scope); const lim = clampLim(a.limit, 10);
+      const dOut = (d) => (validDate(d) ? d : d ? (d === 'nocap' ? 'capacity_unknown' : 'beyond_horizon') : null);
+      const line = (o) => { const x = { po_no: o.po, item_no: o.item, kind: o.kind || undefined, customer: clean(o.customer) || undefined, remaining_sets: o.rem, due: o.due || null, ship_date: dOut(o.ship),
+        slack_days: o.slack === undefined ? null : o.slack, judge: o.judge, limiting_process: o.limit || null,
+        finish: { injection: dOut(o.F.INJ), refill: dOut(o.F.REF), assembly: dOut(o.asmEff), wrapping: dOut(o.wrpEff), packing: dOut(o.pckEff) }, basis: o.acc.how };
+        if (o.none) x.po_not_fixed = true; return x; };
+      const mat = (m) => ({ code: m.code, name: clean(m.name), unit: m.unit, process: m.via, need: r1(m.need), stock: r1(m.stock), incoming: m.inc ? r1(m.inc) : undefined, short: r1(m.short),
+        first_short_po: m.first ? m.first.po + ' ' + m.first.item : null, need_date: m.first ? m.first.date : null, lead_days: m.lead, order_by: m.orderBy, judge: m.judge, arrives_if_ordered_now: m.arrive || undefined });
+      const out = { today: R.today, scope, capacity_from_reports: { from: R.cap.from || null, to: R.cap.to || null }, open_lines: R.orders.length, remaining_sets: R.remSets, all_shipped_by: R.lastShip,
+        counts: R.counts, bottleneck: R.bottle ? { process: R.bottle.id, name: PL.loadName(R.bottle.id), remaining_pcs: Math.round(R.bottle.load), per_day: Math.round(R.bottle.perDay), work_days: r1(R.bottle.days), finish: dOut(R.bottle.end) } : null,
+        materials_short: R.short.length, materials_urgent: R.urgent.length };
+      const q = clean(a.query);
+      if (q) { const hits = PL.find(R, q); out.matches = hits.slice(0, lim).map(line); if (!hits.length) out.error = 'no open order line matches "' + q + '" (finished / cancelled lines are not planned' + (scope === 'firm' ? '; scope firm leaves out lines without a PO number' : '') + ')'; return out; }
+      const view = ['orders', 'loads', 'materials'].indexOf(a.view) >= 0 ? a.view : 'summary';
+      if (view === 'summary' || view === 'orders') { out.late = R.orders.filter(o => o.judge === 'late').slice(0, lim).map(line); out.tight = R.orders.filter(o => o.judge === 'tight').slice(0, lim).map(line);
+        if (view === 'orders') out.lines = R.orders.slice(0, clampLim(a.limit, 30)).map(line); out.past_due_open = R.counts.past; }
+      if (view === 'summary' || view === 'loads') out.loads = R.loads.filter(r => r.load > 0 || view === 'loads').map(r => ({ process: r.id, name: PL.loadName(r.id), remaining_pcs: Math.round(r.load), per_day: Math.round(r.perDay || 0), capacity_source: r.src, work_days: r.days === null ? null : r1(r.days), finish: dOut(r.end), machine_max_per_day: r.mach ? Math.round(r.mach) : undefined }));
+      if (view === 'summary' || view === 'materials') out.materials = R.short.slice(0, clampLim(a.limit, 15)).map(mat);
+      out.check = R.notes.filter(x => x.tone === 'bad' || x.tone === 'warn').slice(0, 8).map(x => x.title + ': ' + x.text);
+      return out;
+    },
+
     /** one-call daily briefing bundle (used by the built-in mode and by the AI) */
     briefing() {
       const today = F.today(), ov = IMPL.overview(), ref = C.latestProdDate();
@@ -224,5 +249,7 @@
     { name: 'mrp', description: 'Material requirement from the BOM / recipes, netted against stock. Give lines[] (item code, qty, unit) or a po_no (all unfinished lines of that PO). READ warnings: NO_COMPONENTS / NO_BOM mean the requirement could NOT be calculated (never report that as "no shortage"); STOCK_UNKNOWN means some raw materials are not matched to the stock master. kind: raw (kg), semi (pcs), asm.', input_schema: S({
       lines: { type: 'array', items: S({ code: { type: 'string' }, qty: { type: 'number' }, unit: { type: 'string', enum: ['set', 'pcs', 'ea'] } }, ['code', 'qty']) },
       po_no: { type: 'string', description: 'alternative to lines' }, only_short: { type: 'boolean', description: 'only rows with a shortage (default true)' } }) },
+    { name: 'production_plan', description: 'Production plan — the same numbers as the 생산 계획 (production plan) screen. Rough-cut capacity: open order lines in due-date order, the BOM exploded per process (INJ injection, REF refill, ASM assembly per product family, WRP paper wrapping, PCK packing; floor stock used by the earliest orders first), daily capacity = last 3 months of production reports (or the planner\'s own value), so per line: finish date per process, ship_date, slack_days = due − ship_date, judge (late = will miss the due date | tight = 0–6 days spare | ok | past = due date already passed | nodue | na = cannot calculate), limiting_process; plus the bottleneck and materials that will run short (first order that runs short, need_date, order_by = need_date − lead_days). Use for "when will PO X / item Y be finished or shipped", "which orders will be late", "bottleneck / capacity / workload", "what will run short for the orders". query = PO no or item no (only that order). scope: all (default — includes lines without a PO number, shown as PO미정) | firm (confirmed POs only). view: summary (default) | orders (every line) | loads | materials. It is an estimate at average speed (no mould changes, machine assignment or staffing), say so briefly; READ check[] for data problems.', input_schema: S({
+      query: { type: 'string', description: 'PO no or item no' }, scope: { type: 'string', enum: ['all', 'firm'] }, view: { type: 'string', enum: ['summary', 'orders', 'loads', 'materials'] }, limit: { type: 'integer' } }) },
   ];
 })();
