@@ -49,7 +49,7 @@
       try { fi.value = ''; } catch (e) { /* ignore */ }
       st.jobs = [];
       for (const f of files) {
-        try { const wb = await XL.readFile(f); const jobs = XL.analyze(wb, { file: f.name }); jobs.forEach(j => { j.file = f.name; if (j.S && !j.S.file) j.S.file = f.name; if (j.table && !j.mode) j.mode = 'upsert'; if (typeof j.onFile === 'function') j.onFile(j); }); st.jobs.push(...jobs); }
+        try { const wb = await XL.readFile(f); const jobs = XL.analyze(wb, { file: f.name }); jobs.forEach(j => { j.file = f.name; if (j.S && !j.S.file) j.S.file = f.name; if (j.table && !j.mode) j.mode = 'upsert'; if (j.table === 'prod_log') j.mode = 'range'; if (typeof j.onFile === 'function') j.onFile(j); }); st.jobs.push(...jobs); }
         catch (e) { console.error(e); ERP.toast(f.name + ': ' + e.message, 'bad'); }
       }
       st.jobs.forEach(j => { if (typeof j.onBatch === 'function') j.onBatch(st.jobs, j); });   // j = 화면이 쓰는 작업 (XL.analyze 가 복사본을 만든다)   // 14차: 같이 올린 파일끼리 (예: 창고 입출고장 + ECOUNT 재고현황 → 보완)
@@ -60,7 +60,7 @@
       const M = MODES();
       const rows = jobs.map(j => {
         const cb = h('input', { type: 'checkbox', checked: !!j.include, disabled: !j.table || !j.rows.length, onchange: (e) => { j.include = e.target.checked; sum(); } });
-        const modes = j.modes ? j.modes() : M;
+        const modes = j.modes ? j.modes() : j.table === 'prod_log' ? { range: M.range } : M;   // 1.13.20: 생산 일보는 기간 교체만 (키가 없어 덮어쓰기 = 끝에 추가 → 두 배)
         const sel = j.table ? h('select', { class: 'inp', onchange: (e) => { j.mode = e.target.value; show(); } }, Object.keys(modes).map(k => h('option', { value: k, selected: j.mode === k }, modes[k]))) : null;
         const extra = [];
         if (j.table === 'prod_log') extra.push(h('input', { class: 'inp', type: 'date', title: L('이 날짜 이후만 반영', 'Chỉ áp dụng từ ngày'), value: j.since || '', onchange: (e) => { j.since = e.target.value; } }));
@@ -79,7 +79,7 @@
         }
         if (j.table === 'prod_log' && (j.needDate || (ds.length && ds[0] === ds[ds.length - 1]))) {
           const setDate = (d) => { j.rows.forEach(r => { r.date = d; }); if (j.needDate) { j.needDate = false; j.include = true; j.note = ''; } show(); };
-          const di = h('input', { class: 'inp', type: 'date', value: ds[0] || '', onchange: (e) => { if (e.target.value) setDate(e.target.value); } });
+          const di = h('input', { class: 'inp', type: 'date', max: today, value: ds[0] || '', onchange: (e) => { if (e.target.value) setDate(e.target.value); } });   // 1.13.20: 오늘까지만
           dateCell = [di, fd && fd !== ds[0] ? h('div', { class: 'help', style: { color: '#C77700' } }, L('⚠ 파일명 날짜(' + fd + ')와 다름 ', '⚠ Khác ngày trong tên file (' + fd + ') '), h('button', { class: 'btn sm', onclick: () => setDate(fd) }, L('파일명 날짜 적용', 'Dùng ngày tên file'))) : null];
         }
         // 같은 날짜 · 공정의 누적 시트(Ho_so) 행이 있으면: 기본은 일보를 건너뛰고, 고르면 일보로 바꾼다
@@ -104,6 +104,9 @@
     }
     async function apply() {
       const sel = st.jobs.filter(j => j.include && j.table && j.rows.length); if (!sel.length) { ERP.toast(L('반영할 항목이 없습니다', 'Chưa chọn mục nào'), 'warn'); return; }
+      // 1.13.20: 오늘 뒤 날짜의 생산 일보는 반영하지 않는다 (11-03: 10-29 권취 일보가 손으로 고른 11-27 로 들어감)
+      const fut = sel.filter(j => j.table === 'prod_log' && j.rows.some(r => r.date && String(r.date) > F.today()));
+      if (fut.length) { ERP.toast(L('생산일자가 오늘 뒤입니다 — 날짜를 고치세요: ', 'Ngày sản xuất sau hôm nay — hãy sửa ngày: ') + fut.map(j => j.sheet + ' (' + j.rows.map(r => r.date).filter(Boolean).sort().pop() + ')').join(', '), 'warn'); return; }
       if (sel.some(j => j.mode === 'replace') && !(await ERP.confirm(L('"전체 교체"가 선택되어 있습니다. 기존 데이터가 삭제됩니다. 계속할까요?', 'Đã chọn "Thay toàn bộ" – dữ liệu cũ sẽ bị xóa. Tiếp tục?')))) return;
       const noScope = sel.filter(j => j.custom === 'stock' && !j.scope); if (noScope.length) { ERP.toast(L('재고현황의 범위(창고/공장)를 고르세요', 'Hãy chọn phạm vi cho file tồn kho'), 'warn'); return; }
       const reopen = sel.filter(j => (j.custom === 'stock' || j.custom === 'whopen') && j.mode === 'open' && DB.rows('stock_open').some(r => r.scope === j.scope && r.grp !== 'floor'));
@@ -125,7 +128,7 @@
         try {
           const r = XL.apply(j); log.push([j.sheet, j.label || j.table, r]);
           const ds = j.rows.map(x => x.date).filter(Boolean).sort();
-          DB.add('uploads', Object.fromEntries(Object.entries({ at, kind: jobKind(j), file: j.file, scope: j.scope ? ERP.scopeName(j.scope) : undefined, date: j.date || ds[ds.length - 1], mode: j.mode, rows: j.rows.length, added: r.added || 0, changed: r.updated || 0, removed: r.removed || 0, note: [j.label, r.missing ? L('파일에 없음 ', 'thiếu ') + r.missing : '', r.skipped ? L('건너뜀 ', 'bỏ qua ') + r.skipped : '', r.conv ? L('환산 ', 'quy đổi ') + r.conv : ''].filter(Boolean).join(' · ') }).filter(([, v]) => v !== undefined && v !== '')));
+          DB.add('uploads', Object.fromEntries(Object.entries({ at, kind: jobKind(j), file: j.file, scope: j.scope ? ERP.scopeName(j.scope) : undefined, date: j.date || ds[ds.length - 1], mode: j.mode, rows: j.rows.length, added: r.added || 0, changed: r.updated || 0, removed: r.removed || 0, note: [j.label, r.missing ? L('파일에 없음 ', 'thiếu ') + r.missing : '', r.skipped ? L('건너뜀 ', 'bỏ qua ') + r.skipped : '', r.conv ? L('환산 ', 'quy đổi ') + r.conv : '', r.locked ? L('고친 칸 그대로 ', 'giữ ô đã sửa ') + r.locked : ''].filter(Boolean).join(' · ') }).filter(([, v]) => v !== undefined && v !== '')));
         } catch (e) { console.error(e); log.push([j.sheet, j.label || j.table, { error: e.message }]); }
       });
       st.jobs = [];
@@ -134,7 +137,8 @@
       const undoBtn = h('button', { class: 'btn', onclick: async () => { if (!st.undo) return; if (!(await ERP.confirm(L('방금 반영한 내용을 되돌릴까요?', 'Hoàn tác lần áp dụng vừa rồi?')))) return; Object.keys(st.undo.tables).forEach(t => DB.replace(t, st.undo.tables[t])); DB.add('uploads', { at: F.now(), kind: 'undo', note: L('되돌리기', 'Hoàn tác'), rows: 0 }); st.undo = null; ERP.toast(L('되돌렸습니다', 'Đã hoàn tác'), 'ok'); ERP.render(); } }, L('되돌리기', 'Hoàn tác'));
       out.replaceChildren(h('div', { class: 'card', style: { marginTop: '14px' } }, h('div', { class: 'card-head' }, h('h3', { style: { margin: 0 } }, L('반영 결과', 'Kết quả')), h('div', { class: 'toolbar', style: { margin: 0 } }, undoBtn, dest ? h('button', { class: 'btn', onclick: () => (dest[0] === 'buy' ? ERP.goStock('buy') : ERP.goto(dest[0])) }, dest[1]) : null)),
         ERP.simpleTable([{ label: L('시트', 'Sheet'), render: x => x[0] }, { label: L('대상', 'Bảng'), render: x => x[1] }, { label: L('추가', 'Thêm'), num: 1, render: x => F.n(x[2].added || 0) }, { label: L('갱신', 'Cập nhật'), num: 1, render: x => F.n(x[2].updated || 0) }, { label: L('삭제(교체)', 'Xóa (thay)'), num: 1, render: x => F.n(x[2].removed || 0) },
-          { label: L('비고', 'Ghi chú'), render: x => x[2].error ? ERP.chip('bad', x[2].error) : [x[2].unmapped ? ERP.chip('warn', L('코드 미매핑 ' + x[2].unmapped, 'Chưa khớp mã ' + x[2].unmapped)) : null, x[2].skipped ? ERP.chip('warn', L('건너뜀 ' + x[2].skipped, 'Bỏ qua ' + x[2].skipped)) : null, x[2].missing ? ERP.chip('warn', L('파일에 없음(숨김 후보) ' + x[2].missing, 'Không có trong file ' + x[2].missing)) : null, x[2].conv ? ERP.chip('info', L('환산 비율 ' + x[2].conv, 'Quy đổi ' + x[2].conv)) : null] }], log)));
+          { label: L('비고', 'Ghi chú'), render: x => x[2].error ? ERP.chip('bad', x[2].error) : [x[2].unmapped ? ERP.chip('warn', L('코드 미매핑 ' + x[2].unmapped, 'Chưa khớp mã ' + x[2].unmapped)) : null, x[2].skipped ? ERP.chip('warn', L('건너뜀 ' + x[2].skipped, 'Bỏ qua ' + x[2].skipped)) : null, x[2].missing ? ERP.chip('warn', L('파일에 없음(숨김 후보) ' + x[2].missing, 'Không có trong file ' + x[2].missing)) : null, x[2].conv ? ERP.chip('info', L('환산 비율 ' + x[2].conv, 'Quy đổi ' + x[2].conv)) : null,
+            x[2].locked ? ERP.chip('info', L('ERP 에서 고친 칸 그대로 ' + x[2].locked + '줄', 'Giữ ô đã sửa trong ERP ' + x[2].locked + ' dòng')) : null] }], log)));   // 1.13.20: 수주 줄의 lock 칸
       ERP.toast(L('엑셀 데이터를 반영했습니다', 'Đã áp dụng dữ liệu Excel'), 'ok');
     }
     host.append(h('h3', { style: { marginTop: 0 } }, L('자료 올리기 안내', 'Hướng dẫn tải dữ liệu')), guide, drop, out);

@@ -185,13 +185,15 @@
     replace(n, rows) { DB.t[n] = rows.map(r => r._id ? r : Object.assign({ _id: uid() }, r)); DB.touch(n); },
     /** upsert by natural key columns; returns {added, updated, changes}
         1.13.11: opt.keep = 이미 있는 줄에서 바꾸지 않을 칸, opt.defaults = 새 줄에만 채울 값, opt.dry = 아무것도 바꾸지 않고 셈만 (미리보기)
+        1.13.20: 줄의 lock (예: 'color,cs') 칸도 바꾸지 않는다 — ERP 에서 고친 값을 파일이 되돌리지 않게. locked = 그래서 그대로 둔 줄 수
         changes = 갱신 줄 중 값이 바뀌는 것 [{ row, diff: [[칸, 전, 뒤]] }] */
     upsert(n, rows, keys, opt) {
       opt = opt || {}; keys = keys && keys.length ? keys : (ERP.TABLES[n].nat || []);
-      const cur = DB.rows(n); let added = 0, updated = 0; const changes = []; const keep = new Set(opt.keep || []);
-      const put = (e, r) => { const diff = [];
-        Object.keys(r).forEach(k => { if (keep.has(k)) return; if (String(e[k] === undefined ? '' : e[k]) !== String(r[k] === undefined ? '' : r[k])) diff.push([k, e[k], r[k]]); if (!opt.dry) e[k] = r[k]; });
-        if (!opt.dry) delete e._ex; if (diff.length) changes.push({ row: r, diff }); updated++; };
+      const cur = DB.rows(n); let added = 0, updated = 0, locked = 0; const changes = []; const keep = new Set(opt.keep || []);
+      const sv = (v) => String(v === undefined ? '' : v);
+      const put = (e, r) => { const diff = []; const lk = e.lock ? String(e.lock).split(',').map(s => s.trim()) : null; let held = false;
+        Object.keys(r).forEach(k => { if (keep.has(k)) return; if (lk && lk.includes(k)) { if (sv(e[k]) !== sv(r[k])) held = true; return; } if (sv(e[k]) !== sv(r[k])) diff.push([k, e[k], r[k]]); if (!opt.dry) e[k] = r[k]; });
+        if (!opt.dry) delete e._ex; if (diff.length) changes.push({ row: r, diff }); if (held) locked++; updated++; };
       const fresh = (r) => Object.assign({ _id: uid() }, opt.defaults || {}, r);
       if (!keys.length) { if (!opt.dry) DB.addMany(n, rows); return { added: rows.length, updated: 0, changes }; }
       const kf = (r) => keys.map(k => String(r[k] === undefined || r[k] === null ? '' : r[k]).trim().toLowerCase()).join('\u0001');
@@ -203,7 +205,7 @@
           const k = kf(r); const i = seen.get(k) || 0; seen.set(k, i + 1); const e = (lists.get(k) || [])[i];
           if (e) put(e, r); else { if (!opt.dry) cur.push(fresh(r)); added++; }
         });
-        if (!opt.dry) DB.touch(n); return { added, updated, changes };
+        if (!opt.dry) DB.touch(n); return { added, updated, changes, locked };
       }
       const idx = new Map(); cur.forEach(r => idx.set(kf(r), r));
       rows.forEach(r => {
@@ -211,7 +213,7 @@
         if (e) put(e, r);
         else { const nr = fresh(r); if (!opt.dry) cur.push(nr); idx.set(kf(nr), nr); added++; }
       });
-      if (!opt.dry) DB.touch(n); return { added, updated, changes };
+      if (!opt.dry) DB.touch(n); return { added, updated, changes, locked };
     },
 
     // ---------- persistence ----------

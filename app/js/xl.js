@@ -246,6 +246,11 @@
   // 1.13.11: PO 번호가 있는 수주 줄은 PO 번호 + PO 번호2 + 품번으로 같은 줄을 찾는다 — 수주서로 먼저 넣은 줄과 생산관리 파일의 줄이
   //          구분2 · 색상수 · 수주일 표기가 달라도 두 줄이 되지 않게 (같은 PO · 품번이 여러 줄이면 예전처럼 순번으로 맞춤). PO 번호 없는 줄은 예전 키 (TABLES.po.nat)
   const PO_KEYS = ['po_no', 'po_no2', 'item_no'];
+  // 1.13.20: ERP 에서 BOM 에 맞게 고친 수주 줄은 lock 칸 (예: 'color,cs') 을 파일이 덮지 않는다 (DB.upsert). 색상수를 지키면 pcs = 세트 × 색상수 —
+  //          11-03 08:36 생산관리 파일이 10-30 에 고친 44줄을 되돌림 (파일의 색상수 9 · 카톤 = set ÷ 12). pcs 0 줄 (취소 · 보류) 은 그대로
+  const lockPcs = () => { const DB = ERP.db; let n = 0;
+    DB.rows('po').forEach(p => { if (!p.lock || !String(p.lock).split(',').includes('color')) return; const c = N(p.color), s = N(p.sets); if (!c || s === null || !(N(p.pcs) > 0) || N(p.pcs) === s * c) return; p.pcs = s * c; n++; });
+    if (n) DB.touch('po'); };
   D('po', (n, M) => findRow(M, r => hasCell(r, /^Po No$/i) && hasCell(r, /^kind goods$/i), 0, 6) >= 0, (M) => {
     const hi = findRow(M, r => hasCell(r, /^Po No$/i), 0, 6); const rows = [];
     for (let i = hi + 1; i < M.length; i++) {
@@ -254,8 +259,8 @@
         rfid: T(S(r, 11)), kind2: T(S(r, 12)), color2: T(S(r, 13)), pcs: N(S(r, 14)) || 0, sets: N(S(r, 15)) || 0, cs: N(S(r, 16)) || 0, due: T(S(r, 17)), rate: N(S(r, 18)), packed: N(S(r, 19)) || 0, diff: N(S(r, 20)), yn: T(S(r, 21)), mark: T(S(r, 22)) }));
     }
     const noPo = rows.filter(r => !String(r.po_no || '').trim());
-    const out = [{ table: 'po', rows: rows.filter(r => String(r.po_no || '').trim()), mode: 'upsert', keys: PO_KEYS, label: L('수주 (PO) 목록', 'Danh sách PO') }];
-    if (noPo.length) out.push({ table: 'po', rows: noPo, mode: 'upsert', label: L('수주 (PO) 목록 — PO 번호 없는 줄', 'Danh sách PO — dòng không có số PO') });
+    const out = [{ table: 'po', rows: rows.filter(r => String(r.po_no || '').trim()), mode: 'upsert', keys: PO_KEYS, after: lockPcs, label: L('수주 (PO) 목록', 'Danh sách PO') }];
+    if (noPo.length) out.push({ table: 'po', rows: noPo, mode: 'upsert', after: lockPcs, label: L('수주 (PO) 목록 — PO 번호 없는 줄', 'Danh sách PO — dòng không có số PO') });
     return out;
   });
 
@@ -329,14 +334,21 @@
   const hdrIdx = (M, re1, re2, re3) => findRow(M, r => hasCell(r, re1) && (!re2 || hasCell(r, re2)) && (!re3 || hasCell(r, re3)), 0, 4);
   const hist = (id, hre, mapRow, proc, label) => D(id, (n, M) => hdrIdx(M, hre[0], hre[1], hre[2]) >= 0, (M, ctx) => {
     const since = ctx.since || '2026-01-01'; const rows = []; const hi = hdrIdx(M, hre[0], hre[1], hre[2]);
-    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; const d = S(r, 0); if (!d || !isoRe.test(String(d)) || d < since) continue; const o = mapRow(r); if (o) rows.push(Object.assign({ date: d, process: proc, shift: 'D', source: 'history' }, pick(o))); }
+    // 1.13.20: 머리 이름 → 칸 번호 (없으면 d) — 양식마다 칸이 다를 때 (2026 생산관리 파일의 사출 시트)
+    const H = M[hi] || [], C = {}; const col = (re, d) => { const k = String(re); if (!(k in C)) { const i = H.findIndex(x => typeof x === 'string' && re.test(x.trim())); C[k] = i >= 0 ? i : d; } return C[k]; };
+    for (let i = hi + 1; i < M.length; i++) { const r = M[i]; const d = S(r, 0); if (!d || !isoRe.test(String(d)) || d < since) continue; const o = mapRow(r, col); if (o) rows.push(Object.assign({ date: d, process: proc, shift: 'D', source: 'history' }, pick(o))); }
     rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; if (o.ng_qty === undefined) o.ng_qty = 0; ERP.fillDiv(o); });
     return [{ table: 'prod_log', rows, mode: 'range', proc, label, hasSince: true }];
   });
-  hist('h-inj', [/^Machine No\.$/, /product classification/i], (r) => {
-    if (!S(r, 1) || !N(S(r, 12))) return null;
-    return { machine_no: T(S(r, 1)), division: fixDiv(T(S(r, 2))), part: T(S(r, 3)), name: T(S(r, 3)), code: T(S(r, 3)), work_min: N(S(r, 4)) ? N(S(r, 4)) * 60 : null, cavity: N(S(r, 5)), shots: N(S(r, 11)), ct: N(S(r, 8)), weight_kg: N(S(r, 9)),
-      ok_qty: N(S(r, 12)) || 0, raw_material: T(S(r, 18)), raw_kg: N(S(r, 19)), machine: T(S(r, 7)) };
+  hist('h-inj', [/^Machine No\.$/, /product classification/i], (r, col) => {
+    // 1.13.20: 2026 생산관리 파일의 사출 시트는 칸이 더 있다 (Column2 · Column3 · 캐비티2 · injection시간). 예전 칸 번호로 읽으면 양품 = injection시간 (11-03 08:36 업로드: 1월 5,937만 → 3만 5천)
+    //          → Division · 수량 머리가 있으면 머리 이름으로 읽고, 예전 양식은 예전 칸 번호 그대로
+    const nw = col(/^Division$/i, -1) >= 0 && col(/^수량$/, -1) >= 0; const c = (re, old) => (nw ? col(re, -1) : old);
+    const mi = c(/^Machine No\.$/, 1), qi = c(/^수량$/, 12), pi = c(/product classification/i, 3);
+    if (!S(r, mi) || !N(S(r, qi))) return null;
+    const wh = N(S(r, c(/^가동시간$/, 4)));
+    return { machine_no: T(S(r, mi)), division: fixDiv(T(S(r, c(/^Division$/i, 2)))), part: T(S(r, pi)), name: T(S(r, pi)), code: T(S(r, pi)), work_min: wh ? wh * 60 : null, cavity: N(S(r, c(/^캐비티$/, 5))), shots: N(S(r, c(/^Shot\s*수$/i, 11))), ct: N(S(r, c(/^CT$/i, 8))), weight_kg: N(S(r, c(/^중량\s*\(kg\)$/i, 9))),
+      ok_qty: N(S(r, qi)) || 0, raw_material: T(S(r, c(/^원료$/, 18))), raw_kg: N(S(r, c(/^원료\s*사용량/, 19))), machine: T(S(r, c(/^톤수$/, 7))) };
   }, 'INJ', L('이력: 사출 (Injection)', 'Lịch sử: Ép nhựa'));
   hist('h-ref', [/^Refill Code$/, /^Machine No$/], (r) => {
     if (!N(S(r, 10))) return null;
@@ -474,8 +486,10 @@
   /** 같은 날짜 · 공정의 누적 시트(history) 행이 있는 일보 행 수 (미리보기 안내 · 기본 건너뜀) */
   XL.overlapOf = (rows) => { if (!ERP.db) return 0; const hist = new Set(); ERP.db.rows('prod_log').forEach(r => { if (r.source === 'history') hist.add(r.date + '|' + r.process); }); return (rows || []).filter(r => r.source !== 'history' && hist.has(r.date + '|' + r.process)).length; };
   const okRow = (r, i) => S(r, i) !== null && String(S(r, i)) !== '0';
+  const fileDateNote = (d) => L('생산일자 칸을 읽지 못해 파일 이름의 날짜 (' + d + ') 를 씁니다 — 맞는지 확인하세요.', 'Không đọc được ô ngày sản xuất — dùng ngày trong tên file (' + d + '), hãy kiểm tra.');
   D('daily', (n, M) => !!dailyKind(M), (M, ctx) => {
-    const kind = dailyKind(M); const date = dailyDate(M) || ''; const shift = ctx.shift || shiftOfName(ctx.sheet) || 'D'; const workplace = dailyPlace(M); const rows = [];
+    // 1.13.20: 생산일자 칸을 못 읽으면 파일 이름의 날짜 (예: "Báo cáo quấn giấy29-10-26.xlsx") — 11-03 에 날짜를 손으로 고르다 10-29 일보가 11-27 로 들어감
+    const kind = dailyKind(M); const date0 = dailyDate(M); const date = date0 || XL.fileDate(ctx.file) || ''; const shift = ctx.shift || shiftOfName(ctx.sheet) || 'D'; const workplace = dailyPlace(M); const rows = [];
     // 1.13.16 (사용자 2026-10-28 "생산관리에서 핫포일 스탬핑 전부 삭제 생산 품목에 넣지 않는다"): 핫포일 스탬핑 일보는 올리지 않는다 (까닭만 보임)
     if (kind === 'STP') return [{ table: null, rows: [], proc: kind, include: false, label: L('핫포일 스탬핑 일보 ', 'Báo cáo in chuyển (Hot foil) ') + date,
       skip: L('핫포일 스탬핑은 생산 관리에서 뺀 공정이라 올리지 않습니다 — 핫포일은 원부자재 (소모품) 재고에서 입출고로만 관리합니다.', 'Không tải: in chuyển (Hot foil) không còn là công đoạn sản xuất — giấy nhũ quản lý ở tồn NVL (vật tư tiêu hao) bằng nhập / xuất.') }];
@@ -505,7 +519,7 @@
     rows.forEach(o => { if (o.ok_ea === undefined) o.ok_ea = o.ok_qty; ERP.fillDiv(o); });   // 1.13.13: 종이 권취 일보에는 품목군 칸이 없음 → Glass
     const label = L('생산 일보 · ', 'Báo cáo SX · ') + ERP.procName(kind) + ' ' + (date || L('(날짜 없음)', '(chưa có ngày)')) + (shift === 'N' ? L(' · 야간', ' · ca đêm') : '') + (workplace ? ' · ' + workplace : '');
     return [{ table: 'prod_log', rows, mode: 'range', proc: kind, label, hasShift: true, date, needDate: !date, include: rows.length > 0 && !!date, overlap: XL.overlapOf(rows),
-      note: date ? '' : L('생산일자를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày sản xuất — hãy nhập ngày để áp dụng.') }];
+      note: date0 ? '' : date ? fileDateNote(date) : L('생산일자를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày sản xuất — hãy nhập ngày để áp dụng.') }];
   });
 
   // 1.13.15 (사용자 2026-10-28): 사출 생산일보 ('사 출 생 산 현 황' — 머리글 줄 호기 · 종류품명 · 품명 · 색상명 · 중량(kg) · 중량수량 …, 날짜 A1). 칸은 머리글 이름으로 찾고 오른쪽 요약 (Q 칸 ~) 은 읽지 않는다.
@@ -513,11 +527,11 @@
   const injHead = (r) => hasCell(r, /^호기$/) && hasCell(r, /^종류품명$/) && hasCell(r, /^중량수량$/);
   const RAW_OF_INJ = { BARREL: 'PP', NOSECONE: 'PP', NOSE: 'PP', CASE: 'PP', SPOON: 'PS', HOLDER: 'HDPE', CORE: 'LDPE' };   // 사용자 "spoon-ps / nose cone-pp / case-pp / barrel-pp / holder-hdpe / core-ldpe"
   const INJ_WHY = { part: ['품목 단계를 모르는 부품', 'chưa có công đoạn của chi tiết'], none: ['품목에 없는 색', 'không có mã màu này'], many: ['같은 색이 여러 개', 'nhiều mã cùng màu'], raw: ['색 칸이 원료 이름', 'ô màu là tên NL'], nocolor: ['색 없음', 'không có màu'] };
-  D('inj-daily', (n, M) => findRow(M, injHead, 0, 12) >= 0, (M) => {
+  D('inj-daily', (n, M) => findRow(M, injHead, 0, 12) >= 0, (M, ctx) => {
     const hi = findRow(M, injHead, 0, 12); const hd = M[hi]; const at = (re) => hd.findIndex(x => typeof x === 'string' && re.test(x.trim())); const V = (r, i) => (i >= 0 ? S(r, i) : null);
     const c = { no: at(/^호기$/), div: at(/^종류품명$/), part: at(/^품명$/), color: at(/^색상명$/), run: at(/^가동시간$/), cav: at(/^캐비티$/), cav2: at(/^캐비티\s*2$/), ton: at(/^톤수$/), ct: at(/^CT$/i), kg: at(/^중량\s*\(kg\)$/i),
       inj: at(/^사출시간$/), shots: at(/^Shot\s*수$/i), qty: at(/^수량$/), fix: at(/^수리현황$/), wq: at(/^중량수량$/) };
-    const date = ERP.fmt.parseDate(S(M[0], 0)) || dailyDate(M) || ''; const rows = [], miss = [], noRaw = new Set();
+    const date0 = ERP.fmt.parseDate(S(M[0], 0)) || dailyDate(M); const date = date0 || XL.fileDate(ctx.file) || ''; const rows = [], miss = [], noRaw = new Set();   // 1.13.20: 못 읽으면 파일 이름의 날짜
     const cap = (s) => { const t = String(s === null || s === undefined ? '' : s).trim(); return t ? t.charAt(0).toUpperCase() + t.slice(1) : null; };
     for (let i = hi + 1; i < M.length; i++) { const r = M[i]; const no = N(V(r, c.no)); if (no === null) continue;   // 합계 · 주간 · 야간 줄은 호기가 없다
       const wq = Math.round(N(V(r, c.wq)) || 0), kg = N(V(r, c.kg)) || 0; if (!wq && !kg) continue;   // 생산이 없는 줄. 중량수량은 수식 (중량 ÷ 개당 g) 이라 소수 → 엑셀에 보이는 대로 반올림
@@ -532,7 +546,7 @@
     }
     rows.forEach(o => ERP.fillDiv(o));
     const note = [miss.length ? L('품목을 못 맞춘 줄 ' + miss.length + '개 (생산 일보에는 들어가고 재고에는 안 들어감): ', miss.length + ' dòng chưa khớp mã (vào báo cáo, không vào tồn): ') + miss.join(' / ') : '',
-      noRaw.size ? L('원료를 모르는 부품: ', 'Chi tiết chưa rõ NL: ') + Array.from(noRaw).join(' · ') : '', date ? '' : L('날짜 (A1) 를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày (A1) — hãy nhập ngày.')].filter(Boolean).join(' · ');
+      noRaw.size ? L('원료를 모르는 부품: ', 'Chi tiết chưa rõ NL: ') + Array.from(noRaw).join(' · ') : '', date0 ? '' : date ? fileDateNote(date) : L('날짜 (A1) 를 읽지 못했습니다 — 날짜를 넣으면 반영할 수 있습니다.', 'Không đọc được ngày (A1) — hãy nhập ngày.')].filter(Boolean).join(' · ');
     return [{ table: 'prod_log', rows, mode: 'range', proc: 'INJ', label: L('사출 생산일보 · ', 'Báo cáo ép nhựa · ') + (date || L('(날짜 없음)', '(chưa có ngày)')), hasShift: true, date, needDate: !date, include: rows.length > 0 && !!date, overlap: XL.overlapOf(rows), note }];
   });
 
@@ -604,7 +618,8 @@
   function applyTable(job) {
     const DB = ERP.db; const t = job.table; let rows = job.rows.slice(); let res = { added: 0, updated: 0, removed: 0 };
     if (job.since && job.table === 'prod_log') rows = rows.filter(r => r.date >= job.since);
-    const mode = job.mode;
+    // 1.13.20: 생산 일보는 키가 없어 "덮어쓰기/추가" 가 곧 "끝에 추가" — 같은 이력을 다시 올리면 두 배 (11-03 08:36 조립 6,828줄). 언제나 기간 교체
+    const mode = t === 'prod_log' ? 'range' : job.mode;
     if (mode === 'replace') { res.removed = DB.rows(t).length; DB.replace(t, rows); res.added = rows.length; }
     else if (mode === 'append') { DB.addMany(t, rows); res.added = rows.length; }
     else if (mode === 'range' && t === 'prod_log' && rows.length && rows.every(r => r.source === 'daily-report' || r.source === 'template')) {
@@ -640,7 +655,7 @@
       const idx = new Map(DB.rows(t).map(r => [String(r.code), r])); let u = 0;
       rows.forEach(r => { const e = idx.get(String(r.code)); if (e) { Object.assign(e, r); u++; } }); DB.touch(t); res.updated = u; res.skipped = rows.length - u;
     }
-    else { const r2 = DB.upsert(t, rows, job.keys, { keep: job.keep, defaults: job.defaults }); res.added = r2.added; res.updated = r2.updated; }   // 1.13.11: 묶음마다 기준 칸 · 그대로 둘 칸
+    else { const r2 = DB.upsert(t, rows, job.keys, { keep: job.keep, defaults: job.defaults }); res.added = r2.added; res.updated = r2.updated; if (r2.locked) res.locked = r2.locked; }   // 1.13.11: 묶음마다 기준 칸 · 그대로 둘 칸 (1.13.20: 줄의 lock 칸도)
     return res;
   }
 })();

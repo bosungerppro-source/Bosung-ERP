@@ -17,6 +17,8 @@
    7-15 MRP: 카톤 BOM 의 set · pcs 환산 (카톤 = 세트 ×12 → 세트 수로 나눔, 낱개 카톤 · 세트 안 세트 · 직접 만든 BOM 은 예전처럼) · 원재료 환산은 그대로 ·
         진행 중 수주에서 가져오기를 처음 · 중간 · 여러 번 해도 한 번만 (지금 남은 set 으로 바꿈 · 끝난 수주는 뺌 · 손으로 고친 수량 · 예전 줄) · 수주 화면 MRP 단추는 같은 품번을 합침 (1.13.18)
    7-16 PO 번호가 없는 수주 줄 = PO미정 (빈칸 · 칸 없음 · "PO미정" 글자, 월 합계 줄은 수주 아님) · 저장 자료 그대로 · 수주 목록 · 라인 · 편집 · MRP 가져오기 · 통합 검색 · 베트남어 Chưa có PO (1.13.19)
+   7-17 생산관리 파일 다시 올리기: 사출 이력 새 양식 (머리 이름으로 칸) · 예전 양식 그대로 · 생산 일보는 기간 교체만 (덮어쓰기로 두 번 올려도 두 배 아님) · 생산일자를 못 읽은 일보 = 파일 이름 날짜 ·
+        오늘 뒤 날짜는 반영 안 함 · ERP 에서 고친 수주 칸 (lock) 은 파일이 덮지 않음 (pcs = 세트 × 색상수) (1.13.20)
    8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
@@ -937,6 +939,60 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('베트남어: PO 번호 없는 줄 = Chưa có PO (한글 없음)', await ev(() => Array.from(new Set(ERP.calc.orders().filter(o => o.p.item_no !== 'N-A').map(o => o.p.po_no)))), ['Chưa có PO']);
     await ev(async (k) => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.setLang('ko'); const DB = ERP.db; DB.replace('po', k.po); DB.replace('prod_log', k.prod_log); DB.setSetting('mrpLines', k.lines); await DB.saveMeta(); await DB.flush();
       ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.state.bomTab = null; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-17. 생산관리 파일을 다시 올려도 자료가 망가지지 않음 — 사출 이력 새 양식 · 생산 일보는 기간 교체만 · 날짜 못 읽은 일보 · 오늘 뒤 날짜 · ERP 에서 고친 수주 칸 (1.13.20, 11-03 08:36 업로드, 사용자 "네, 고쳐줘")', async () => {
+    const keep = await ev(() => { const c = (t) => ERP.db.rows(t).map(r => Object.assign({}, r)); return { po: c('po'), prod_log: c('prod_log') }; });
+    await ev(async () => { const DB = ERP.db; DB.replace('prod_log', []); DB.replace('po', []); await DB.flush(); ERP.setLang('ko'); });
+    const book = (sheets) => ev((sh) => { const X = window.XLSX; const wb = X.utils.book_new(); sh.forEach(s => X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(s[1]), s[0]));
+      ERP.state.v1720 = X.read(X.write(wb, { bookType: 'xlsx', type: 'array' }), { type: 'array', cellDates: false, cellNF: true }); return true; }, sheets);
+    // ① 사출 이력: 2026 생산관리 파일은 칸이 더 있다 (Column2 · Column3 · 캐비티2 · injection시간) → 머리 이름으로 읽는다. 예전 양식 (칸 번호) 은 그대로
+    const NEW = ['Date', 'Machine No.', 'Column2', 'Division', 'product classification', 'Column3', '가동시간', '캐비티', '캐비티2', '톤수', 'CT', '중량(kg)', 'injection시간', 'Shot수', '수량', '수리현황', '중량수량', 'Column1', '원료', '원료사용량kg'];
+    const OLD = ['Date', 'Machine No.', 'product classification', 'Part', 'Hours', 'Cavity', 'Cavity 2', 'Machine', 'CT', 'Weight', 'Inj time', 'Shots', 'Qty', null, null, null, null, null, 'Raw', 'Raw kg'];
+    await book([['Injection', [NEW, ['2026-10-15', 2, null, 'Pencil', 'Barrel', null, 8, 64, 60, 'E280', 29, 121.2, 28, 515, 30900, null, 30606, null, 'PP', 121.2],
+      ['2026-10-15', 4, null, 'Dail', 'Barrel', null, 12, 48, 44, 'A220', 26, 98.5, 20, 561, 24684, null, 24375, null, 'PP', 98.5], ['2026-10-16', 15, null, 'Mini', 'Barrel', null, null, 64, 60, 'F250', 18, null, 15, null, 0, null, 0, null, 'PP', 0]]],
+      ['Injection old', [OLD, ['2026-10-14', 3, 'Pencil', 'Barrel', 8, 64, 64, 'SX350', 26, 112, 18, 461, 29504, null, null, null, null, null, 'PP', 112]]]]);
+    const inj = await ev(() => ERP.xl.analyze(ERP.state.v1720, {}).filter(j => j.id === 'h-inj').map(j => j.rows.map(o => [o.date, o.machine_no, o.division, o.part, o.work_min, o.cavity, o.machine, o.ct, o.weight_kg, o.shots, o.ok_qty, o.raw_material, o.raw_kg])));
+    eq('사출 이력 새 양식: 양품 = 수량 칸 (injection시간 칸 아님) · 품목군 = Division (Dail → Dial) · 부품 = product classification · 수량 0 줄은 뺌', inj[0], [
+      ['2026-10-15', '2', 'Pencil', 'Barrel', 480, 64, 'E280', 29, 121.2, 515, 30900, 'PP', 121.2], ['2026-10-15', '4', 'Dial', 'Barrel', 720, 48, 'A220', 26, 98.5, 561, 24684, 'PP', 98.5]]);
+    eq('사출 이력 예전 양식 (칸 번호) 은 예전 그대로', inj[1], [['2026-10-14', '3', 'Pencil', 'Barrel', 480, 64, 'SX350', 26, 112, 461, 29504, 'PP', 112]]);
+    // ② 생산 일보는 언제나 기간 교체: 조립 이력을 "덮어쓰기/추가" 로 골라 두 번 올려도 두 배가 되지 않음 (11-03 조립 6,828줄이 한 번 더 들어감)
+    const ASM = [['Date', 'Dep', 'Machine No', 'Machine', 'Code', 'Name', 'Division', 'Plan', 'x', 'OK'], ['2026-10-20', 'A', 1, 'L1', 'BM01015', 'Lime Green', 'Mini', null, null, 1000], ['2026-10-21', 'A', 2, 'L2', 'BR1010', 'Pink', 'Dial', null, null, 500]];
+    await book([['Assembly', ASM]]);
+    eq('조립 이력을 "덮어쓰기/추가" 로 두 번 올려도 2줄 (두 배 아님)', await ev(async () => { const DB = ERP.db; const n = [];
+      for (let k = 0; k < 2; k++) { const j = ERP.xl.analyze(ERP.state.v1720, {}).find(x => x.id === 'h-asm'); j.mode = 'upsert'; ERP.xl.apply(j); n.push(DB.rows('prod_log').filter(r => r.process === 'ASM').length); }
+      await DB.flush(); return n; }), [2, 2]);
+    await ev(() => { ERP.state.imp = { jobs: ERP.xl.analyze(ERP.state.v1720, {}), files: [] }; ERP.state.dataTab = 'import'; ERP.goto('data'); ERP.render(); }); await settle();
+    eq('자료 올리기: 생산 일보 시트의 반영 방식은 "기간 교체" 하나', await ev(() => { const t = Array.from(document.querySelectorAll('main table.tbl')).find(x => { const th = x.querySelector('thead th'); return th && th.textContent.trim() === '반영'; });
+      const s = t && t.querySelector('tbody tr select'); return s ? Array.from(s.options).map(o => o.textContent) : null; }), ['기간 교체 (같은 날짜 범위)']);
+    // ③ 생산일자를 읽지 못한 일보 → 파일 이름의 날짜 (11-03: 10-29 권취 일보가 손으로 고른 11-27 로 들어감)
+    const WRP = (date) => [[null, 'BÁO CÁO SẢN XUẤT HÀNG NGÀY'], [null, '1. 작업장명 Tên công đoạn', null, null, 'Paper wrapped pencils Quấn giấy bọc bút chì', null, null, '2. 생산일자 Ngày sản xuất', date],
+      [null, '① MC', '② MC No.', '③ Target product', '④ Products Color', '⑤ Product Code', '⑥ PO No.', '⑦ PO Qty(ea)', '⑧ qty/set', '⑨-1 Plan qty(ea)', '⑨-2 Plan qty(set)', '⑩-1 OK qty(ea)'], [null, '① Tên thiết bị'],
+      [null, 'WR', 1, null, 'White', 'PC001', '2026-5', 1468800, null, 5600, null, 5300, null, null, 350, 610, 0.5, 15, 'D']];
+    await book([['Sheet1', WRP(null)]]);
+    const dj = await ev(() => { const j = ERP.xl.analyze(ERP.state.v1720, { file: 'Báo cáo quấn giấy29-10-26.xlsx' }).find(x => x.table === 'prod_log'); return { date: j.date, rows: j.rows.map(r => r.date), include: j.include, needDate: !!j.needDate, label: j.label, note: j.note }; });
+    ok('생산일자 칸이 비면 파일 이름의 날짜 (29-10-26 → 2026-10-29) · 고를 수 있음 · 알림', dj.date === '2026-10-29' && dj.rows.join() === '2026-10-29' && dj.include && !dj.needDate && /2026-10-29/.test(dj.label) && /파일 이름/.test(dj.note), dj);
+    // ④ 오늘 뒤 날짜의 생산 일보는 반영하지 않음 (날짜 칸도 오늘까지만)
+    await book([['Sheet1', WRP(null)]]);
+    const fut = await ev(async () => { const DB = ERP.db, F = ERP.fmt; const n0 = DB.rows('prod_log').length; const jobs = ERP.xl.analyze(ERP.state.v1720, {}).filter(j => j.table === 'prod_log');
+      const d = F.addDays(F.today(), 30); jobs.forEach(j => { j.rows.forEach(r => { r.date = d; }); j.needDate = false; j.include = true; j.date = d; });
+      ERP.state.imp = { jobs, files: [] }; ERP.state.dataTab = 'import'; ERP.goto('data'); ERP.render(); await new Promise(r => setTimeout(r, 200));
+      const inp = Array.from(document.querySelectorAll('main table.tbl tbody input[type=date]'))[0];
+      const btn = Array.from(document.querySelectorAll('main button')).find(b => b.textContent.trim() === '선택 항목 모두 반영'); btn.click(); await new Promise(r => setTimeout(r, 300));
+      return { max: inp ? inp.max : null, today: F.today(), added: DB.rows('prod_log').length - n0, toast: Array.from(document.querySelectorAll('#toasts .toast')).map(t => t.textContent).join(' | ') }; });
+    ok('오늘 뒤 날짜 (30일 뒤) 일보는 반영 안 함 · 알림 · 날짜 칸은 오늘까지', fut.added === 0 && /오늘 뒤/.test(fut.toast) && fut.max === fut.today, fut);
+    await ev(() => { ERP.state.imp = { jobs: [], files: [] }; });
+    // ⑤ ERP 에서 고친 수주 칸 (lock) 은 생산관리 파일이 덮지 않음 — 색상수를 지키면 pcs = 세트 × 색상수 (세트가 바뀌어도), 다른 칸 · 고치지 않은 줄은 파일 값
+    await ev(async () => { const DB = ERP.db; DB.replace('po', [{ po_no: 'L-1', item_no: 'LK-1', customer: 'T', kind: 'Pencil', color: '18', pcs: 1800, sets: 100, cs: 9, due: '2026-12-01', lock: 'color,cs' },
+      { po_no: 'L-2', item_no: 'LK-2', customer: 'T', kind: 'Pencil', color: '18', pcs: 1800, sets: 100, cs: 9, due: '2026-12-01' }]); await DB.flush(); });
+    const PH = ['Date', 'Condition', 'Customer', 'Country', 'Market', 'Po No', 'Po No 2', 'Item No', 'Manila No', 'kind goods', 'color', 'RFID', 'kind 2', 'color 2', 'Pcs', 'Set', 'Cs', 'Due', 'Rate', 'Packed', 'Diff', 'Y/N', 'Mark'];
+    const prow = (po, item) => ['2026-10-21', '', 'T', 'USA', '', po, '', item, '0', 'Pencil', '9', '0', '', '', 1080, 120, 10, '2026-12-15', '', 0, 0, '', ''];
+    await book([['PO', [PH, prow('L-1', 'LK-1'), prow('L-2', 'LK-2')]]]);
+    const lk = await ev(async () => { const DB = ERP.db; const jobs = ERP.xl.analyze(ERP.state.v1720, {}).filter(j => j.table === 'po'); const res = jobs.map(j => ERP.xl.apply(j)); await DB.flush();
+      return { rows: DB.rows('po').map(p => [p.po_no, p.color, p.pcs, p.sets, p.cs, p.due, p.lock || '']).sort(), locked: res.reduce((a, r) => a + (r.locked || 0), 0) }; });
+    eq('고친 줄 L-1: 색상수 18 · 카톤 9 그대로, 세트 120 · 납기는 파일 값, pcs = 120 × 18 · 고치지 않은 줄 L-2 는 파일 값 그대로 · 결과에 지킨 줄 1', lk, {
+      rows: [['L-1', '18', 2160, 120, 9, '2026-12-15', 'color,cs'], ['L-2', '9', 1080, 120, 10, '2026-12-15', '']], locked: 1 });
+    await ev(async (k) => { const DB = ERP.db; DB.replace('po', k.po); DB.replace('prod_log', k.prod_log); await DB.flush(); ERP.state.v1720 = null; ERP.state.imp = { jobs: [], files: [] }; ERP.state.dataTab = null; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {
