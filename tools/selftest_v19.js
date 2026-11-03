@@ -283,6 +283,43 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('요약: PO미정 포함 · 확정 PO 만 두 칸 · 가장 막히는 공정', [sum[0][1], sum[0][2], sum[3][1].slice(0, 2)], ['PO미정 포함', '확정 PO 만', '포장']);
   });
 
+  await sec('11-2. 해외 주문: 권장 주문량 = 수주 MRP + 안전재고 − 합계 · 주문 파일 칸 (1.14.1)', async () => {
+    // 사용자 "발주 주문량은 수주관리에 들어있는 오더를 만들량을 mrp로 계산해서 부족한거 전부 주문할수있게 해줘" · "자재구매 파일 만들때 F줄 safety stock/ L줄 kg/month~ P줄 Average 는 삭제해줘"
+    await ev(async () => { const DB = ERP.db; const set = (code, p) => { const it = DB.rows('items').find(i => i.code === code); DB.update('items', it._id, p); };
+      set('RES-1', { buy: true, buy_cat: 'Resin', buy_unit: 'kg', safety: 50 }); set('CASE-M', { buy: true, buy_cat: 'Case' }); set('CTN-M', { buy: true, buy_cat: 'Carton', safety: 100, buy_step: 50 });
+      DB.add('items', { code: 'WAX-9', name: 'WAX', stage: 'RM', unit: 'kg', buy: true, buy_cat: 'Wax', safety: 100, src: 'test' }); DB.replace('buy_orders', []); DB.setSetting('buyMrpScope', 'all'); await DB.flush(); });
+    const rowsOf = () => ev(() => Object.fromEntries(ERP.buy.rows().map(r => [r.code, [r.byMrp, r.mrpNeed === null ? null : Math.round(r.mrpNeed * 100) / 100, r.total, r.status, r.sug]])));
+    eq('수주에 쓰는 품목: 원료 (180.48 + 50 − 5 → 10 단위 230) · 케이스 (3,960 − 1,000 = 2,960) · 카톤 (330 + 100 → 50 단위 450) / 수주에 안 쓰는 WAX-9 = 예전 (안전재고 100)', await rowsOf(),
+      { 'CASE-M': [true, 3960, 1000, 'need', 2960], 'CTN-M': [true, 330, 0, 'need', 450], 'RES-1': [true, 180.48, 5, 'need', 230], 'WAX-9': [false, null, 0, 'need', 100] });
+    await ev(async () => { ERP.db.setSetting('buyMrpScope', 'firm'); await ERP.db.flush(); });
+    eq('확정 PO 만: 원료 168.96 → 220 · 케이스 3,720 → 2,720', await rowsOf(), { 'CASE-M': [true, 3720, 1000, 'need', 2720], 'CTN-M': [true, 310, 0, 'need', 450], 'RES-1': [true, 168.96, 5, 'need', 220], 'WAX-9': [false, null, 0, 'need', 100] });
+    await ev(async () => { ERP.db.setSetting('buyMrpScope', 'all'); ERP.db.add('buy_orders', { date: '2026-01-02', code: 'RES-1', qty: 200, unit: 'kg', status: 'open', src: 'erp' }); await ERP.db.flush(); });
+    eq('입고 대기 주문 200 kg 이 합계에 들어감 → 원료 180.48 + 50 − 205 = 25.48 → 30', (await rowsOf())['RES-1'], [true, 180.48, 205, 'need', 30]);
+    await ev(async () => { ERP.db.replace('buy_orders', []); await ERP.db.flush(); });
+    // 화면: 해외 주문 탭 — 수주 필요 (MRP) 칸 · 수주 범위 고르기
+    await ev(() => { ERP.setLang('ko'); ERP.goStock('buy'); }); await A.waitForFunction(() => !!document.querySelector('main table.buy-tbl'), null, { timeout: 15000 }); await settle();
+    const cell = () => ev(() => { const hd = Array.from(document.querySelectorAll('main table.buy-tbl thead th')).map(t => t.innerText.replace(/\s+/g, ' ').trim()); const tr = Array.from(document.querySelectorAll('main table.buy-tbl tbody tr')).find(x => x.children[1].innerText.trim() === 'RES-1');
+      const at = (name) => tr.children[hd.indexOf(name)].innerText.trim(); return { mrp: at('수주 필요 (MRP)'), st: at('상태'), sug: at('권장 주문량'), before: hd[hd.indexOf('상태') - 1] }; });
+    eq('RES-1 줄: 수주 필요 180.48 · 주문 필요 · 권장 230 (상태 바로 앞 칸)', await cell(), { mrp: '180.48', st: '주문 필요', sug: '230', before: '수주 필요 (MRP)' });
+    await A.selectOption('main select[data-buy-scope]', 'firm'); await settle();
+    eq('수주 범위 → 확정 PO 만 (설정 저장 · 권장 220)', [await ev(() => ERP.db.setting('buyMrpScope')), (await cell()).sug], ['firm', '220']);
+    await A.selectOption('main select[data-buy-scope]', 'all'); await settle();
+    // 주문 파일: 부족한 것 전부 (수주 3 + 안전재고 1) 를 오늘 칸에 넣고 Safety stock · 월 사용량 칸 없이
+    await ev(() => { window.__book = null; ERP.__save = ERP.xl.saveBook; ERP.xl.saveBook = (wb, name) => { window.__book = { wb, name }; }; });
+    await A.click('main button:has-text("주문 파일 만들기")');
+    for (let i = 0; i < 20; i++) { await A.waitForTimeout(150); const m = await A.$('.modal .modal-foot button:last-child'); if (m) { await m.click(); break; } }
+    await A.waitForTimeout(500);
+    const f = await ev(() => { const b = window.__book; ERP.xl.saveBook = ERP.__save; if (!b) return null; const X = window.XLSX; const ws = b.wb.Sheets[b.wb.SheetNames[0]]; const M = X.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+      const i = M.findIndex(r => r && r[2] === 'RES-1'); const tot = ws['J' + (i + 1)];
+      const re = ERP.xl.analyze(b.wb, { file: b.name }); const j = re.find(q => q.kind === 'buy_items'), o = re.find(q => q.kind === 'buy_orders');
+      return { head: M[3], res: M[i], tot: tot && tot.f, orders: ERP.db.rows('buy_orders').map(x => [x.code, x.qty]).sort(), re: j ? [j.rows.length, o ? o.rows.length : null] : null }; });
+    eq('주문 파일 머리: Safety stock · kg/month ~ Average 없음 (B ~ H · 주문일 · Total)', f && f.head.map(x => (typeof x === 'number' ? 'date' : x)), [null, 'Category', 'Item Code', 'Item Name', 'Item Name Kr', 'Unit', 'Inventory', '입고예정', 'date', 'Total']);
+    eq('RES-1 줄 (7행): 단위 · 재고 5 · 오늘 칸 230 · Total 235 (수식 = 재고 G 부터 주문일 I 까지)', f && [f.res.slice(1, 10), f.tot], [['Resin', 'RES-1', 'RESIN', null, 'kg', 5, null, 230, 235], 'SUM(G7:I7)']);
+    eq('부족한 것 전부 주문 (수주 3품목 + 안전재고 1품목)', f && f.orders, [['CASE-M', 2960], ['CTN-M', 450], ['RES-1', 230], ['WAX-9', 100]]);
+    eq('만든 파일을 다시 올려도 자재구매 파일로 인식 (품목 4 · 주문 4)', f && f.re, [4, 4]);
+    await ev(async () => { const DB = ERP.db; DB.replace('buy_orders', []); DB.replace('items', DB.rows('items').filter(i => i.code !== 'WAX-9').map(i => (i.buy ? Object.assign({}, i, { buy: undefined, buy_cat: undefined, buy_unit: undefined, safety: undefined, buy_step: undefined }) : i))); DB.setSetting('buyMrpScope', 'all'); await DB.flush(); });
+  });
+
   await sec('12. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => { ERP.setLang('vi'); ERP.state.plan = { tab: 'orders' }; location.hash = '#/plan'; ERP.render(); }); await settle();
     for (const t of [1, 2, 3, 4, 5]) { await A.click('.tabs .tab:nth-child(' + t + ')'); await settle(); }
