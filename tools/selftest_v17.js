@@ -16,6 +16,7 @@
    7-14 핫포일 스탬핑은 생산 관리에서 뺌 (공정 목록 · 일보 입력 · ERP 일보 양식 · 현장 일보의 스탬핑 시트 안 올림) · 생산 반영 안 함 · 스탬핑 배럴 · 스탬핑 BOM 없음 · 핫포일은 원부자재 입출고로만 (1.13.16)
    7-15 MRP: 카톤 BOM 의 set · pcs 환산 (카톤 = 세트 ×12 → 세트 수로 나눔, 낱개 카톤 · 세트 안 세트 · 직접 만든 BOM 은 예전처럼) · 원재료 환산은 그대로 ·
         진행 중 수주에서 가져오기를 처음 · 중간 · 여러 번 해도 한 번만 (지금 남은 set 으로 바꿈 · 끝난 수주는 뺌 · 손으로 고친 수량 · 예전 줄) · 수주 화면 MRP 단추는 같은 품번을 합침 (1.13.18)
+   7-16 PO 번호가 없는 수주 줄 = PO미정 (빈칸 · 칸 없음 · "PO미정" 글자, 월 합계 줄은 수주 아님) · 저장 자료 그대로 · 수주 목록 · 라인 · 편집 · MRP 가져오기 · 통합 검색 · 베트남어 Chưa có PO (1.13.19)
    8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
@@ -892,6 +893,50 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     ok('베트남어: 가져오기 창에 한글 없음', !/[가-힣]/.test(vt), vt.match(/.{0,20}[가-힣]+.{0,20}/g));
     await ev(async (k) => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.setLang('ko'); const DB = ERP.db; ['items', 'bom_lines', 'po', 'prod_log', 'stock_open'].forEach(n => DB.replace(n, k[n])); DB.setSetting('mrpLines', k.lines);
       if (k.scope === null) delete DB.meta.mrpPoScope; else DB.meta.mrpPoScope = k.scope; await DB.saveMeta(); await DB.flush(); ERP.state.bomTab = null; ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-16. PO 번호가 없는 수주 줄 = PO미정 (1.13.19, 사용자 "수주에 PO번호 없는줄은 PO미정 으로 표기하면된다")', async () => {
+    const keep = await ev(() => ({ po: ERP.db.rows('po').map(r => Object.assign({}, r)), prod_log: ERP.db.rows('prod_log').map(r => Object.assign({}, r)), lines: ERP.db.setting('mrpLines', null) }));
+    // 수주: 보통 PO 1 · PO 빈칸 · PO 칸 없음 · PO 칸에 "PO미정" 글자 · 품번도 PO 도 없는 월 합계 줄 (예전 생산관리 파일)
+    await ev(async () => { const DB = ERP.db, F = ERP.fmt; const d = (n) => F.addDays(F.today(), n);
+      DB.replace('po', [{ po_no: 'X-1', item_no: 'N-A', sets: 100, due: d(10), date: d(-5), customer: 'CUST-A', kind: 'Mini' },
+        { po_no: '', item_no: 'N-B', sets: 200, due: d(20), date: d(-3), customer: 'CUST-B', kind: 'Mini', condition: 'PO 미정' },
+        { item_no: 'N-C', sets: 50, due: d(30), date: d(-3), customer: 'CUST-C', kind: 'Pencil' },
+        { po_no: 'PO미정', item_no: 'N-D', sets: 30, due: d(40), date: d(-2), customer: 'CUST-D', kind: 'Dial' },
+        { date: '2025-01-01', kind: 'Dial', pcs: 600192, sets: 0, cs: 0, due: '2025-01-01', packed: 0, rate: 1 }]);
+      DB.replace('prod_log', []); DB.setSetting('mrpLines', null); await DB.saveMeta(); await DB.flush(); ERP.setLang('ko'); });
+    const ord = () => ev(() => ERP.calc.orders().map(o => [o.p.po_no, o.p.item_no, o.st]).sort((a, b) => String(a[1]).localeCompare(String(b[1]))));
+    const saved = () => ev(() => ERP.db.rows('po').filter(p => p.item_no).map(p => [p.item_no, p.po_no === undefined ? null : p.po_no]));
+    eq('수주 줄: PO 번호가 없는 줄 (빈칸 · 칸 없음 · "PO미정" 글자) = PO미정 · 품번도 없는 월 합계 줄은 수주가 아님', await ord(), [['X-1', 'N-A', 'wait'], ['PO미정', 'N-B', 'wait'], ['PO미정', 'N-C', 'wait'], ['PO미정', 'N-D', 'wait']]);
+    eq('저장된 자료는 그대로 (빈 PO 는 빈 PO — 예전 버전 PC 가 올린 파일과도 맞게)', await saved(), [['N-A', 'X-1'], ['N-B', ''], ['N-C', null], ['N-D', 'PO미정']]);
+    eq('PO별: PO미정 하나에 3줄 · 세트 280 · 머리 거래처 = 첫 진행 중 줄', await ev(() => { const x = ERP.calc.poGroups().find(y => y.po_no === 'PO미정'); return x && { n: x.n, items: x.items, sets: x.sets, cust: x.p.customer }; }), { n: 3, items: ['N-B', 'N-C', 'N-D'], sets: 280, cust: 'CUST-B' });
+    const rowsText = () => ev(() => Array.from(document.querySelectorAll('main section.card.grow tbody tr')).map(tr => tr.innerText.replace(/\s+/g, ' ').trim()));
+    await ev(() => { ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.goto('orders'); ERP.render(); }); await settle();
+    ok('수주 목록 (PO별 보기) 에 PO미정', (await rowsText()).some(t => /^PO미정 /.test(t)), await rowsText());
+    await ev(() => { ERP.state.ord.view = 'line'; ERP.render(); }); await settle();
+    eq('품번 라인별 보기: PO미정 3줄', (await rowsText()).filter(t => /PO미정/.test(t)).length, 3);
+    // 수주 편집: PO미정 의 줄 3개 · 줄을 더해 저장해도 PO 칸은 빈칸 (= PO미정), 예전 줄은 그대로
+    await ev(() => { ERP.state.ord = { tab: 'open', sel: 'PO미정', view: 'po' }; ERP.render(); }); await settle();
+    await A.click('main .actions button:has-text("수주 편집")'); await A.waitForSelector('.modal input[list="dl_poitem"]');
+    eq('수주 편집 (PO미정): 품번 3줄', await ev(() => Array.from(document.querySelectorAll('.modal input[list="dl_poitem"]')).map(i => i.value)), ['N-B', 'N-C', 'N-D']);
+    await A.click('.modal button:has-text("품번 추가")'); await A.waitForTimeout(150);
+    await ev(() => { const ins = document.querySelectorAll('.modal input[list="dl_poitem"]'); const it = ins[ins.length - 1]; it.value = 'N-E'; it.dispatchEvent(new Event('change')); }); await A.waitForTimeout(150);
+    await ev(() => { const ins = document.querySelectorAll('.modal input[list="dl_poitem"]'); const tr = ins[ins.length - 1].closest('tr'); const n = tr.querySelector('input[type=number]'); n.value = '10'; n.dispatchEvent(new Event('change')); }); await A.waitForTimeout(150);
+    await A.click('.modal .modal-foot button.primary'); await settle();
+    eq('저장: 예전 줄은 그대로 · 새 줄 N-E 는 PO 빈칸 · PO미정 줄 4개', [await saved(), await ev(() => ERP.calc.orders().filter(o => o.p.po_no === 'PO미정').length)], [[['N-A', 'X-1'], ['N-B', ''], ['N-C', null], ['N-D', 'PO미정'], ['N-E', null]], 4]);
+    // MRP 진행 중 수주에서 가져오기 · 통합 검색
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.state.bomTab = 'mrp'; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await settle();
+    await A.click('main [data-act="import-po"]'); await A.waitForSelector('.modal [data-po]');
+    eq('MRP 진행 중 수주에서 가져오기: PO미정 줄 4개도 보임', await ev(() => Array.from(document.querySelectorAll('.modal [data-po]')).filter(r => r.dataset.po === 'PO미정').length), 4);
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.search(); }); await A.waitForSelector('.modal input.inp');
+    await A.fill('.modal input.inp', 'PO미정'); await A.waitForTimeout(300);
+    const found = await ev(() => document.querySelector('.modal').innerText);
+    ok('통합 검색 "PO미정" → PO 번호 없는 줄 (PO미정 · 거래처 · 품번)', /PO미정 · CUST-B · N-B/.test(found) && /PO미정 · CUST-C · N-C/.test(found) && !/undefined/.test(found), found.slice(0, 300));
+    // 베트남어: 한글 대신 Chưa có PO
+    await ev(() => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.setLang('vi'); });
+    eq('베트남어: PO 번호 없는 줄 = Chưa có PO (한글 없음)', await ev(() => Array.from(new Set(ERP.calc.orders().filter(o => o.p.item_no !== 'N-A').map(o => o.p.po_no)))), ['Chưa có PO']);
+    await ev(async (k) => { document.querySelectorAll('.modal-back').forEach(m => m.remove()); ERP.setLang('ko'); const DB = ERP.db; DB.replace('po', k.po); DB.replace('prod_log', k.prod_log); DB.setSetting('mrpLines', k.lines); await DB.saveMeta(); await DB.flush();
+      ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.state.bomTab = null; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {

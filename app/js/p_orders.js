@@ -18,7 +18,7 @@
   // ---- multi-line PO editor: one PO number, several item (품번) lines ----
   const POC = (k) => ERP.TABLES.po.cols.find(c => c.k === k);
   function poEditor(poNo) {
-    const exist = poNo ? DB.rows('po').filter(p => String(p.po_no) === String(poNo)) : [];
+    const exist = poNo ? DB.rows('po').filter(p => C.poNoOf(p) === String(poNo)) : [];   // 1.13.19: PO미정 = PO 번호가 없는 줄
     const head0 = exist[0] || {};
     const H = { po_no: poNo || '', customer: head0.customer || '', country: head0.country || '', market: head0.market || '', date: head0.date || F.today(), due: head0.due || '', condition: head0.condition || '', mark: head0.mark || '' };
     const H0 = Object.assign({}, H);   // 열었을 때 값 — 기존 줄에는 사용자가 바꾼 머리글 칸만 반영한다 (줄마다 다른 수주일 · 납기를 지키기 위해)
@@ -61,11 +61,11 @@
         H.po_no = String(H.po_no || '').trim(); const ls = lines.filter(l => l.item_no);
         if (!H.po_no) { ERP.toast(L('PO 번호를 입력하세요', 'Nhập số PO'), 'warn'); return false; }
         if (!ls.length) { ERP.toast(L('품번을 1개 이상 입력하세요', 'Nhập ít nhất 1 mã hàng'), 'warn'); return false; }
-        if (!poNo && DB.rows('po').some(p => String(p.po_no) === H.po_no)) { ERP.toast(L('이미 있는 PO 번호입니다. 목록에서 선택해 "수주 편집"으로 품번을 추가하세요.', 'PO đã tồn tại. Hãy chọn trong danh sách rồi Sửa PO để thêm mã.'), 'warn'); return false; }
+        if (!poNo && DB.rows('po').some(p => C.poNoOf(p) === H.po_no)) { ERP.toast(L('이미 있는 PO 번호입니다. 목록에서 선택해 "수주 편집"으로 품번을 추가하세요.', 'PO đã tồn tại. Hãy chọn trong danh sách rồi Sửa PO để thêm mã.'), 'warn'); return false; }
         const dup = ls.map(l => l.item_no).filter((v, i, a) => a.indexOf(v) !== i); if (dup.length) ERP.toast(L('같은 품번이 중복 입력되었습니다: ', 'Trùng mã hàng: ') + dup[0], 'warn');
         const keep = new Set(ls.filter(l => l._id).map(l => l._id)); DB.remove('po', exist.filter(x => !keep.has(x._id)).map(x => x._id));
         const lineOf = (l) => ({ item_no: l.item_no, kind: l.kind || undefined, color: l.color || undefined, sets: l.sets === '' ? undefined : l.sets, pcs: l.pcs === '' ? undefined : l.pcs, cs: l.cs === '' ? undefined : l.cs });
-        const clean = (l) => { const o = Object.assign({}, H, lineOf(l)); Object.keys(o).forEach(k => { if (o[k] === '' || o[k] === undefined) delete o[k]; }); return o; };
+        const clean = (l) => { const o = Object.assign({}, H, lineOf(l)); Object.keys(o).forEach(k => { if (o[k] === '' || o[k] === undefined) delete o[k]; }); if (C.isPoNone(o.po_no)) delete o.po_no; return o; };   // 1.13.19: PO미정 에 더한 줄은 PO 빈칸으로
         const changed = Object.keys(H).filter(k => k !== 'po_no' && String(H[k]) !== String(H0[k]));
         ls.filter(l => l._id).forEach(l => { const r = DB.rows('po').find(x => x._id === l._id); if (!r) return;
           const o = lineOf(l); changed.forEach(k => { o[k] = H[k]; });

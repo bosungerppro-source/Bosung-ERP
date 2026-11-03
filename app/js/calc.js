@@ -101,14 +101,24 @@
   };
   /** 진행 중(완료 · 취소 · 보류가 아님) */
   C.isOpen = (o) => o.st !== 'done' && o.st !== 'cancel' && o.st !== 'hold';
+  // 1.13.19 (사용자 2026-11-03 "수주에 PO번호 없는줄은 PO미정 으로 표기하면된다"): PO 번호가 없는 수주 줄 (품번 있음) = PO 'PO미정' (베트남어 'Chưa có PO').
+  //   저장된 자료는 그대로 (빈 PO) — 예전 버전 PC 가 올린 생산관리 파일 (PO 빈칸 줄은 날짜 · 품목군 · 색상수까지 키로 갱신) 과도 맞게. PO 칸에 'PO미정' 이라고 적은 줄도 같은 PO미정.
+  //   품번도 PO 도 없는 줄 (예전 생산관리 파일의 품목군별 월 합계) 은 수주 줄이 아니다.
+  C.poNone = () => L('PO미정', 'Chưa có PO');
+  const PO_NONE_RE = /^(po\s*미정|chưa có po)$/i;
+  /** PO 번호가 없음 (빈칸 · 'PO미정' 글자) */
+  C.isPoNone = (s) => { const t = String(s === undefined || s === null ? '' : s).trim(); return !t || PO_NONE_RE.test(t); };
+  /** 수주 줄의 PO 번호 (화면 · 묶음): 없으면 PO미정, 품번도 없으면 '' (수주 줄 아님) */
+  C.poNoOf = (p) => { if (!p) return ''; const s = String(p.po_no === undefined || p.po_no === null ? '' : p.po_no).trim(); if (!C.isPoNone(s)) return s; return s || String(p.item_no || '').trim() ? C.poNone() : ''; };
   // One PO number may hold several item (품번) lines. Each line = one row of table `po`.
   // Packing progress is matched per (PO no + item code); packing rows whose code matches no line are
   // attributed to the PO only when it has a single line, otherwise reported as `orphan`.
   C.orders = function () {
-    return DB.memo('orders', ['po', 'prod_log'], () => {
+    return DB.memo('orders:' + ERP.lang, ['po', 'prod_log'], () => {   // 1.13.19: 언어마다 (PO미정 · Chưa có PO)
       const live = new Map(), livePo = new Map();
       DB.rows('prod_log').forEach(r => { if (r.process === 'PCK' && r.po_no) { const po = String(r.po_no), k = po + '|' + (r.code === undefined ? '' : r.code); live.set(k, (live.get(k) || 0) + num(r.ok_qty)); livePo.set(po, (livePo.get(po) || 0) + num(r.ok_qty)); } });
-      const byPo = new Map(); DB.rows('po').forEach(p => { if (!p.po_no) return; const k = String(p.po_no); let a = byPo.get(k); if (!a) byPo.set(k, a = []); a.push(p); });
+      // 1.13.19: PO 번호가 없는 줄은 PO미정 — 그 줄은 po_no 만 바꾼 사본 (저장된 줄은 그대로, 고칠 때는 _id 로)
+      const byPo = new Map(); DB.rows('po').forEach(p => { const k = C.poNoOf(p); if (!k) return; let a = byPo.get(k); if (!a) byPo.set(k, a = []); a.push(String(p.po_no === undefined || p.po_no === null ? '' : p.po_no).trim() === k ? p : Object.assign({}, p, { po_no: k })); });
       const today = F.today(); const out = [];
       byPo.forEach((lines, po) => {
         const keyRows = new Map(); lines.forEach(p => { const k = po + '|' + (p.item_no === undefined ? '' : p.item_no); let a = keyRows.get(k); if (!a) keyRows.set(k, a = []); a.push(p); });
@@ -134,16 +144,17 @@
   };
   /** PO-level view: one entry per PO number, shaped like an order line (p = representative row). */
   C.poGroups = function () {
-    return DB.memo('poGroups', ['po', 'prod_log'], () => {
+    return DB.memo('poGroups:' + ERP.lang, ['po', 'prod_log'], () => {
       const m = new Map(); C.orders().forEach(o => { const k = String(o.p.po_no); let a = m.get(k); if (!a) m.set(k, a = []); a.push(o); });
       const today = F.today(); const out = [];
       m.forEach((lines, po) => {
-        const first = lines[0].p;
         // 취소 · 보류 줄은 PO 진행 · 수량에서 뺀다 (모든 줄이 취소 · 보류면 PO 도 취소 · 보류)
         const act = lines.filter(o => o.st !== 'cancel' && o.st !== 'hold'); const use = act.length ? act : lines;
         const sets = use.reduce((a, o) => a + o.sets, 0); const packed = use.reduce((a, o) => a + Math.min(o.packed, o.sets || o.packed), 0);
         const pcs = use.reduce((a, o) => a + num(o.p.pcs), 0);
         const openL = act.filter(o => o.st !== 'done'); const dues = (openL.length ? openL : use).map(o => o.p.due).filter(Boolean).sort();
+        // 머리 (거래처 등) = 첫 줄. 1.13.19: PO미정 은 여러 거래처 · 날짜가 섞이므로 첫 진행 중 줄
+        const first = (po === C.poNone() ? (openL[0] || use[0] || lines[0]) : lines[0]).p;
         const due = dues[0] || first.due; const done = act.length > 0 && openL.length === 0;
         let st = 'wait'; if (!act.length) st = lines.some(o => o.st === 'hold') ? 'hold' : 'cancel'; else if (done) st = 'done'; else if (openL.some(o => o.st === 'late')) st = 'late'; else if (act.some(o => o.packed > 0)) st = 'prod';
         const dd = due ? F.diffDays(due, today) : null; const items = Array.from(new Set(lines.map(o => o.p.item_no).filter(Boolean)));

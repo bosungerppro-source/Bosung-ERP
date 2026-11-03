@@ -138,12 +138,14 @@ const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.s
   {
     const r = await ev(() => { const C = ERP.calc; if (!C.poCond) return null; const lines = C.orders(); const bad = lines.filter(o => C.poCond(o.p) && (o.st === 'late' || o.st === 'prod' || o.st === 'wait' || o.soon));
       const groups = C.poGroups(); const allCancel = groups.filter(g => g.lines.every(l => C.poCond(l.p) === 'cancel'));
-      return { conds: ['Cancle', 'cancle', 'Di hold', '취소', 'hủy', 'HOLD', 'ok', ''].map(c => C.poCond({ condition: c })), bad: bad.length, nCancel: lines.filter(o => o.st === 'cancel').length, nHold: lines.filter(o => o.st === 'hold').length, mism: lines.filter(o => C.poCond(o.p) && o.st !== C.poCond(o.p)).length,
+      // 1.13.19: PO 번호가 없는 줄도 수주 (PO미정) — 예시 자료의 PO 없는 Di hold 8줄. 예전 기대값 (PO 번호가 있는 줄) 은 PO미정 을 빼고 셈
+      const none = (o) => !!C.poNone && o.p.po_no === C.poNone(); const withPo = lines.filter(o => !none(o));
+      return { conds: ['Cancle', 'cancle', 'Di hold', '취소', 'hủy', 'HOLD', 'ok', ''].map(c => C.poCond({ condition: c })), bad: bad.length, nCancel: withPo.filter(o => o.st === 'cancel').length, nHold: withPo.filter(o => o.st === 'hold').length, nHoldNone: lines.filter(o => none(o) && o.st === 'hold').length, mism: lines.filter(o => C.poCond(o.p) && o.st !== C.poCond(o.p)).length,
         groupSt: Array.from(new Set(allCancel.map(g => g.st))), sample: allCancel.length ? allCancel[0].po_no : null }; });
     ok('C.poCond 있음', !!r);
     if (r) {
       eq('Condition 해석', r.conds, ['cancel', 'cancel', 'hold', 'cancel', 'cancel', 'hold', '', '']);
-      eq('취소·보류 줄은 대기/생산/지연/임박이 아님', r.bad, 0); ok('취소 · 보류 표시가 이긴다 (PO 번호가 있는 줄: 취소 19 · 보류 10, 포장이 끝난 취소 줄 포함)', r.mism === 0 && r.nCancel === 19 && r.nHold === 10, r);
+      eq('취소·보류 줄은 대기/생산/지연/임박이 아님', r.bad, 0); ok('취소 · 보류 표시가 이긴다 (PO 번호가 있는 줄: 취소 19 · 보류 10, 포장이 끝난 취소 줄 포함 · 1.13.19 부터 PO미정 보류 8줄도 보류)', r.mism === 0 && r.nCancel === 19 && r.nHold === 10 && r.nHoldNone === 8, r);
       eq('모든 줄이 취소인 PO = 취소 상태', r.groupSt, ['cancel']);
       await ev(() => { ERP.state.bomTab = 'mrp'; ERP.state.params = {}; ERP.goto('bom'); ERP.render(); }); await page.waitForTimeout(300);
       await page.click('text=진행 중 수주에서 가져오기'); await page.waitForTimeout(300);

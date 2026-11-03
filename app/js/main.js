@@ -98,8 +98,9 @@
       const q = inp.value.trim().toLowerCase(); out.replaceChildren(); if (q.length < 2) return;
       const has = (...v) => v.some(x => x !== undefined && x !== null && String(x).toLowerCase().includes(q));
       const groups = [];
-      const po = DB.rows('po').filter(p => has(p.po_no, p.item_no, p.customer)).slice(0, 8);
-      if (po.length) groups.push([L('수주', 'Đơn hàng'), po.map(p => [p.po_no + ' · ' + (p.customer || '') + ' · ' + (p.item_no || ''), F.d(p.due) || '', () => go('orders')])]);
+      const poOf = ERP.calc.poNoOf;   // 1.13.19: PO 번호가 없는 줄 = PO미정 (품번도 없는 월 합계 줄은 빼고)
+      const po = DB.rows('po').filter(p => poOf(p) && has(poOf(p), p.item_no, p.customer)).slice(0, 8);
+      if (po.length) groups.push([L('수주', 'Đơn hàng'), po.map(p => [poOf(p) + ' · ' + (p.customer || '') + ' · ' + (p.item_no || ''), F.d(p.due) || '', () => go('orders')])]);
       const mt = ERP.inv.search(q, 10);
       if (mt.length) groups.push([L('품목', 'Mặt hàng'), mt.map(m => { const s = ERP.calc.stock().get(m.code); return [m.code + ' · ' + (m.name || ''), (m.erp_code || '') + (s ? ' · ' + F.n(s.bal, s.prim === 'kg' ? 1 : 0) + ' ' + s.prim : ''), () => { document.querySelector('.modal-back') && document.querySelector('.modal-back').remove(); ERP.itemDetail(m.code); }]; })]);
       const rt = Array.from(new Set(DB.rows('bom').filter(b => has(b.retail_no, b.color_code, b.color_name)).map(b => b.retail_no))).slice(0, 8);
