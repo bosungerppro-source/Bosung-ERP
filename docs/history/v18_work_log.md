@@ -736,3 +736,12 @@
 - Release v1.13.20: Claude 가 실행 (Actions #19 성공, 10:26, `releases/latest` = v1.13.20, `b362d7d`). `ColorPencil-ERP-Setup-1.13.20.exe` 114,213,012 bytes · SHA-256 `52c331e194b290c222bb166ccfcf5460c33774cc28b880eca73ccb10830fe430` (GitHub 에서 빌드 — 작업 폴더 `02_installer` 에 받아 대조) · `ERP_Demo.html` (이 PC 데모와 같음) · `latest.json` (1.13.20, 크기 · 지문이 Release 설치 파일과 같음).
 - 이 PC (Soo) 의 ERP: 꺼져 있던 것을 켜서 10:28 에 1.13.19 → 1.13.20 (업데이트 확인 → 받기 → 설치) → 확인 (읽기만): 생산 일보 22,511줄 · 조립 1월 513줄 13,450,551 · 사출 1월 1,019줄 59,370,046 · 11월 권취 0 · 수주 lock 44 · 업로드 이력 "1.13.20 자료 고침" · 공유 켜짐 · 보낼 것 없음 · 화면 오류 0 → 다시 끔 (10:28:57).
 - 그사이 생산 계획 세션이 1.13.20 위에 1.14.0 (`1cf19a2`, 생산 계획) 을 main 에 올림 — 이 기록은 그 위에.
+
+### 실제 ERP 자료: 종이 권취 생산을 현장 재고에 (2026-11-03 10:47, Claude — 사용자 "네, 넣어줘")
+- 까닭: 생산관리 파일의 권취 이력 (Wrapping 시트) 에는 품목 코드가 없고 색 이름 (White · Red …) 만 있어 생산 반영 (`INV.postRows` 의 `itemOf`) 이 품목을 못 찾음. 코드가 있는 권취 일보 (PC001 · WHBNM …) 는 같은 날짜의 이력이 이겨 빠짐.
+- 방법: 코드는 그대로 두고 코드 연결 (`code_map`, 생산 반영 탭 "해결할 항목" 에서 하는 것과 같음) 에 `kind daily · proc WRP · src 색 이름 → item` 26줄. 이름이 똑같은 것만 — 대소문자 · 띄어쓰기 · 점 · `[Bút]` 같은 괄호 무시, Glass 라인 · WIP 단계 · 숨기지 않은 품목 중 하나뿐일 때 (White → PC001 WHITE · Red → PC002 · Black → PC012 · Yellow → PC004 · … · Red - BSK → RDBSK · Gum Gum - Orange → ORGG · LIGHT.BLUE → PC010 …). 권취 일보의 코드 · 색 (PC001 White · PC002 Red · PC007 Sky Blue · PC012 Black · PC015 Apricot) 과도 같음.
+- 그대로 둔 8개 (같은 이름의 품목 없음 — 오타 · 줄임말 · 품목 없는 색): Blue - Light · Ocher · Apricod · Blue · Gum Gum - Blue · Gum Gum - Light Green · Lt Green · WHITBSK. 모두 10-20 현장 실사 전 기록이라 지금 재고와 상관없고, 생산 반영 탭 해결할 항목에 남음 (사용자가 연결할 수 있음).
+- 스크립트 `08_erp_code/scripts/glass_map.js` (`--copy` 사본 + 저장소 코드로 먼저 → `--apply` 실제 ERP, 넣을 연결이 사본과 같을 때만). 백업 `05_backup/ERP_glass_map_2026-11-03/` (`tables_before/` · `glass_map.json` · `live_code_map_before.json`).
+- ERP 는 생산 계획 세션이 1.14.0 으로 올리고 꺼 둔 것을 10:46 에 켜서 넣음 → 구글로 보냄 (10:47:59) → 10:48 다시 끔.
+- 결과: 10-20 실사 뒤 권취 생산 입고 0 → 162줄 771,750개 · Glass 펜 현장 재고 0 → 771,750 (PC001 WHITE 480,300 · PC012 BLACK 112,650 · PC002 RED 84,200 · PC007 SKY BLUE 53,100 · PC013 PINK 36,300 · PC004 YELLOW 5,200). PC 계열에는 BOM 이 없어 심 (RWP) 은 빠지지 않음. 해결할 항목 (권취) 34 → 8. 화면 오류 0.
+- 새 색 이름이 이력에 나오면 생산 반영 탭 해결할 항목에 보임 → 코드 연결.
