@@ -154,7 +154,7 @@
         [['', L('기본', 'Mặc định')], ['0', L('쉼 (X)', 'Nghỉ (X)')], ['1', L('일함 (O)', 'Làm (O)')]].map(o => h('option', { value: o[0], selected: wv(r) === o[0] }, o[1]))) },
       { label: L('휴일 · 메모', 'Ngày nghỉ · ghi chú'), render: r => h('input', { class: 'inp', value: r.memo || '', onchange: (e) => DB.update('plan_cal', r._id, { memo: e.target.value.trim() || undefined }) }) },
       { label: L('잔업 시간', 'Tăng ca (giờ)'), render: r => nIn(r.ot_h, v => { DB.update('plan_cal', r._id, { ot_h: setOrDrop(v) }); redraw(); }, { style: { width: '60px' } }) },
-      { label: L('조 수가 다른 공정', 'Công đoạn khác số ca'), render: r => h('small', { class: 'muted' }, P.PROCS.filter(p => num(r[SH[p]]) > 0).map(p => ERP.procName(p) + ' ' + r[SH[p]]).join(' · ')) },
+      { label: L('조 수가 다른 공정', 'Công đoạn khác số ca'), render: r => h('small', { class: 'muted' }, P.PROCS.filter(p => P.shiftSet(r, p)).map(p => ERP.procName(p) + ' ' + num(r[SH[p]]) + (num(r[SH[p]]) === 0 ? L(' (쉼)', ' (nghỉ)') : '')).join(' · ')) },   // 0 = 그날 그 공정은 쉼 (1.14.2)
       { label: '', render: r => h('button', { class: 'icon-btn', title: L('지우기', 'Xóa'), onclick: () => { DB.remove('plan_cal', r._id); redraw(); } }, '×') },
     ], calRows, { maxH: '42vh' });
     const d1 = h('input', { class: 'inp', type: 'date' }), d2 = h('input', { class: 'inp', type: 'date', title: L('까지 (비우면 하루)', 'Đến (trống = 1 ngày)') });

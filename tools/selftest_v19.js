@@ -7,6 +7,8 @@
    1 일보 → 하루 능력 (똑같은 줄 · 누적 이력과 같은 날 일보 · 앞날 줄 빼기, Regular = Dial) · 2 BOM 풀이 · 공정별 부하 · 현장 재고 · 3 끝나는 날 · 출고 가능일 · 판정 · 병목
    4 확정 PO 만 · 5 자재 (처음 모자라는 수주 · 필요한 날 · 리드타임 · 입고 예정) · 6 기준 자료 (조 수 · 하루 능력 직접 · 쉬는 날 · 기다리는 날 · 불량률) · 7 확인할 것
    8 화면 (탭 · 범위 · 판정 거르기 · 리드타임 칸 · 기준 자료 칸 · 쉬는 날 넣기) · 9 생산계획_기준자료_양식 올리기 · 10 AI 비서 (도구 · 내장 모드) · 11 엑셀 · 12 베트남어 · 오류 없음
+   13 Codex 검토 (1.14.2): 하루씩 공정을 같이 돌리기 (앞 공정이 내준 만큼만 · 아직 못 하는 수주는 뒤 수주를 막지 않음) · 불량률이 부품 · 자재로 · 달력 조 수 0 · 오늘 전 필요한 날
+      · (고친 코드의 Codex 검토) 조립 품목군이 둘인 수주의 자재는 그 품목군 진행으로 · 800 근무일 안에 다 못 쓴 나머지도 셈
    사용:  npm run test:v19   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -109,7 +111,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('X: 포장 내일 → 출고 모레 · 이미 납기 지남', [by['PO-X'].pckEff, by['PO-X'].ship, by['PO-X'].judge, by['PO-X'].slack], [D(1), D(2), 'past', -12]);
     eq('G: 권취 +19 → 포장 +20 → 출고 +21 · 지연 예상 · 끝 = 권취', [by['PO-G'].F.WRP, by['PO-G'].pckEff, by['PO-G'].ship, by['PO-G'].judge, by['PO-G'].limit], [D(19), D(20), D(21), 'late', 'WRP']);
     eq('C: 조립 Dial +14 → 포장 +15 → 출고 +16 · 끝 = 조립', [by['PO-C'].F.ASM, by['PO-C'].pckEff, by['PO-C'].ship, by['PO-C'].judge, by['PO-C'].limit], [D(14), D(15), D(16), 'late', 'ASM']);
-    eq('B: 사출 +5 · 리필 +11 · 조립 +27 · 포장 +35 → 출고 +36 · 지연 예상 · 끝 = 포장', [by['PO-B'].F.INJ, by['PO-B'].F.REF, by['PO-B'].F.ASM, by['PO-B'].pckEff, by['PO-B'].ship, by['PO-B'].judge, by['PO-B'].limit], [D(5), D(11), D(27), D(35), D(36), 'late', 'PCK']);
+    eq('B: 사출 +5 · 리필 +11 · 조립 +28 (사출 · 리필이 낸 것은 다음 날부터 — 첫날 쉼) · 포장 +35 → 출고 +36 · 지연 예상 · 끝 = 포장', [by['PO-B'].F.INJ, by['PO-B'].F.REF, by['PO-B'].F.ASM, by['PO-B'].pckEff, by['PO-B'].ship, by['PO-B'].judge, by['PO-B'].limit], [D(5), D(11), D(28), D(35), D(36), 'late', 'PCK']);
     eq('PO미정: 출고 +38 · 납기 +40 → 빠듯함 (2일)', [by['PO미정'].ship, by['PO미정'].judge, by['PO미정'].slack], [D(38), 'tight', 2]);
     eq('A: 출고 +50 · 납기 +60 → 여유 (10일)', [by['PO-A'].ship, by['PO-A'].judge, by['PO-A'].slack], [D(50), 'ok', 10]);
     eq('판정 수 · 전부 출고 · 남은 set', [R1.counts, R1.last, R1.rem], [{ late: 3, tight: 1, ok: 1, past: 1, nodue: 0, na: 0 }, D(50), 4660]);
@@ -123,18 +125,18 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
   await sec('5. 자재: 처음 모자라는 수주 · 필요한 날 · 리드타임 · 입고 예정', async () => {
     const m = Object.fromEntries(R1.mats.map(x => [x.code, x]));
-    eq('케이스: 필요 3,960 · 재고 1,000 · 처음 모자람 = B 의 포장 시작 (+11) · 리드타임 없음', [m['CASE-M'].need, m['CASE-M'].stock, m['CASE-M'].short, m['CASE-M'].first, m['CASE-M'].judge], [3960, 1000, 2960, ['PO-B', D(11)], 'nolead']);
+    eq('케이스: 필요 3,960 · 재고 1,000 · 처음 모자람 = B 포장이 쓴 케이스가 재고를 넘는 날 (+20, 하루씩 쓴 양) · 리드타임 없음', [m['CASE-M'].need, m['CASE-M'].stock, m['CASE-M'].short, m['CASE-M'].first, m['CASE-M'].judge], [3960, 1000, 2960, ['PO-B', D(20)], 'nolead']);
     eq('카톤: 재고 0 → X 의 포장 시작 (오늘)', [m['CTN-M'].need, m['CTN-M'].first], [330, ['PO-X', T0]]);
     eq('원료: 사출 원료 180.48 kg (B · PO미정 · A) · 재고 5', [m['RES-1'].via, m['RES-1'].need, m['RES-1'].stock, m['RES-1'].first], ['INJ', 180.48, 5, ['PO-B', T0]]);
     // 리드타임 → 판정
     const judge = async (lead) => { await ev(async (v) => { const DB = ERP.db; const it = DB.rows('items').find(i => i.code === 'CASE-M'); DB.update('items', it._id, { lead_days: v }); await DB.flush(); }, lead); return (await run('all')).mats.find(x => x.code === 'CASE-M'); };
-    let x = await judge(3); eq('리드타임 3 → 발주 마감 +8 · 여유', [x.lead, x.orderBy, x.judge], [3, D(8), 'ok']);
-    x = await judge(5); eq('리드타임 5 → 발주 마감 +6 · 이번 주 발주', [x.orderBy, x.judge], [D(6), 'week']);
-    x = await judge(20); eq('리드타임 20 → 늦음 · 지금 발주하면 +20 도착', [x.orderBy, x.judge, x.arrive], [D(-9), 'late', D(20)]);
+    let x = await judge(3); eq('리드타임 3 → 발주 마감 +17 · 여유', [x.lead, x.orderBy, x.judge], [3, D(17), 'ok']);
+    x = await judge(15); eq('리드타임 15 → 발주 마감 +5 · 이번 주 발주', [x.orderBy, x.judge], [D(5), 'week']);
+    x = await judge(25); eq('리드타임 25 → 늦음 · 지금 발주하면 +25 도착', [x.orderBy, x.judge, x.arrive], [D(-5), 'late', D(25)]);
     // 입고 예정 (해외 주문: 도착 예정일까지 온 것만)
     await ev(async (o) => { const DB = ERP.db; DB.replace('buy_orders', [{ date: o.today, code: 'CASE-M', kind: 'inc', qty: 2000, unit: 'PCS', status: 'open', eta: o.eta, src: 'erp' }, { date: o.today, code: 'CASE-M', kind: 'inc', qty: 9999, unit: 'PCS', status: 'recv', eta: o.eta, src: 'erp' }]); await DB.flush(); }, { today: T0, eta: D(5) });
     x = (await run('all')).mats.find(y => y.code === 'CASE-M');
-    eq('입고 예정 2,000 (+5 도착, 받은 주문은 빼고) → 처음 모자람 = A 의 포장 시작 (+37) · 모자람 960', [x.inc, x.first, x.short], [2000, ['PO-A', D(37)], 960]);
+    eq('입고 예정 2,000 (+5 도착, 받은 주문은 빼고) → 처음 모자람 = A 포장이 쓴 케이스가 3,000 을 넘는 날 (+40) · 모자람 960', [x.inc, x.first, x.short], [2000, ['PO-A', D(40)], 960]);
     await ev(async () => { ERP.db.replace('buy_orders', []); await ERP.db.flush(); });
   });
 
@@ -142,7 +144,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const at = (R, po) => R.orders.find(o => o.po === po);
     await ev(async () => { const DB = ERP.db; DB.add('plan_proc', { process: 'ASM', shifts: 2 }); await DB.flush(); });
     let c = await cap(); eq('조립 2조 → Mini 4,000 · Dial 2,000 (일보 × 2 ÷ 1)', c.famDay, { Mini: 4000, Dial: 2000 });
-    let R = await run('all'); eq('C: 조립 Dial +7 (포장은 그대로 +11 → 출고 +12)', [at(R, 'PO-C').F.ASM, at(R, 'PO-C').ship], [D(7), D(12)]);
+    let R = await run('all'); eq('C: 조립 Dial +7 → 포장은 조립이 내주는 대로 +8 → 출고 +9', [at(R, 'PO-C').F.ASM, at(R, 'PO-C').ship], [D(7), D(9)]);
     await ev(async () => { const DB = ERP.db; DB.add('plan_proc', { process: 'ASM', division: 'Dial', cap_day: 3600 }); DB.add('plan_proc', { process: 'WRP', cap_day: 1000 }); await DB.flush(); });
     c = await cap(); eq('직접 넣은 하루 능력 (Dial 3,600 · 권취 1,000) 이 이김', [c.famDay.Dial, c.famSrc.Dial, c.perDay.WRP, c.src.WRP], [3600, 'manual', 1000, 'manual']);
     R = await run('all'); eq('G: 권취 +9 → 출고 +11', [at(R, 'PO-G').F.WRP, at(R, 'PO-G').ship], [D(9), D(11)]);
@@ -263,7 +265,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const r = await ev(() => { const T = ERP.ai.tools; return { s: T.production_plan({}), q: T.production_plan({ query: 'PO-B' }), none: T.production_plan({ query: 'ZZZ' }), firm: T.production_plan({ scope: 'firm', view: 'orders' }), mat: T.production_plan({ view: 'materials' }),
       def: ERP.ai.toolDefs.find(d => d.name === 'production_plan') }; });
     eq('요약: 줄 · 병목 · 판정 · 지연 줄', [r.s.open_lines, r.s.bottleneck.process, r.s.counts.late, r.s.late.map(x => x.po_no), r.s.all_shipped_by], [6, 'PCK', 3, ['PO-G', 'PO-C', 'PO-B'], D(50)]);
-    eq('PO-B 한 줄: 출고 · 여유 · 판정 · 막는 공정 · 공정별 끝', [r.q.matches.length, r.q.matches[0].ship_date, r.q.matches[0].slack_days, r.q.matches[0].judge, r.q.matches[0].limiting_process, r.q.matches[0].finish.assembly], [1, D(36), -26, 'late', 'PCK', D(27)]);
+    eq('PO-B 한 줄: 출고 · 여유 · 판정 · 막는 공정 · 공정별 끝', [r.q.matches.length, r.q.matches[0].ship_date, r.q.matches[0].slack_days, r.q.matches[0].judge, r.q.matches[0].limiting_process, r.q.matches[0].finish.assembly], [1, D(36), -26, 'late', 'PCK', D(28)]);
     ok('없는 PO → 오류 글 (지어내지 않음)', r.none.matches.length === 0 && /no open order line/.test(r.none.error), r.none);
     eq('확정 PO 만: 5줄 · PO미정 표시 없음', [r.firm.lines.length, r.firm.lines.some(x => x.po_not_fixed)], [5, false]);
     eq('자재: 모자라는 3종 · 케이스 처음 모자람 PO-B', [r.mat.materials.length, r.mat.materials.find(m => m.code === 'CASE-M').first_short_po], [3, 'PO-B CT-M']);
@@ -318,6 +320,54 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('부족한 것 전부 주문 (수주 3품목 + 안전재고 1품목)', f && f.orders, [['CASE-M', 2960], ['CTN-M', 450], ['RES-1', 230], ['WAX-9', 100]]);
     eq('만든 파일을 다시 올려도 자재구매 파일로 인식 (품목 4 · 주문 4)', f && f.re, [4, 4]);
     await ev(async () => { const DB = ERP.db; DB.replace('buy_orders', []); DB.replace('items', DB.rows('items').filter(i => i.code !== 'WAX-9').map(i => (i.buy ? Object.assign({}, i, { buy: undefined, buy_cat: undefined, buy_unit: undefined, safety: undefined, buy_step: undefined }) : i))); DB.setSetting('buyMrpScope', 'all'); await DB.flush(); });
+  });
+
+  await sec('13. Codex 검토 (1.14.2): 하루씩 같이 돌리기 · 불량률이 부품 · 자재로 · 달력 조 수 0 · 오늘 전 필요한 날', async () => {
+    // Codex 2026-11-04 지적 4개 (plan.js). 1번은 Codex 말대로 (앞 공정이 끝난 뒤 · 납기 순서 그대로) 고치면 지나쳐서, 하루씩 공정을 같이 돌리는 계산으로 고침
+    const at = (R, po) => R.orders.find(o => o.po === po);
+    // 13-1 권취가 느린 G (하루 100) 를 기다리는 동안 포장은 B 를 한다 — 예전 계산은 G 의 포장 10,000 을 먼저 세어 B 포장 +35 · 출고 +36
+    await ev(async () => { const DB = ERP.db; DB.add('plan_proc', { process: 'WRP', cap_day: 100 }); await DB.flush(); });
+    let R = await run('all');
+    eq('G: 권취 +99 → 포장 +100 → 출고 +101 · 끝 = 권취', [at(R, 'PO-G').F.WRP, at(R, 'PO-G').pckEff, at(R, 'PO-G').ship, at(R, 'PO-G').limit], [D(99), D(100), D(101), 'WRP']);
+    eq('B: 포장 +32 → 출고 +33 (권취를 기다리는 G 가 포장을 막지 않음)', [at(R, 'PO-B').pckEff, at(R, 'PO-B').ship], [D(32), D(33)]);
+    // 13-2 불량률만큼 더 만든 양이 부품 · 자재로도 내려감
+    await ev(async () => { const DB = ERP.db; DB.replace('plan_proc', [{ process: 'ASM', defect_pct: 10 }]); await DB.flush(); });
+    R = await run('all'); let m = Object.fromEntries(R.mats.map(x => [x.code, x]));
+    eq('조립 불량률 10% → B 의 사출 · 리필도 55,680 ÷ 0.9 = 61,866.67 · 원료 180.48 ÷ 0.9 = 200.53 kg', [at(R, 'PO-B').load.INJ, at(R, 'PO-B').load.REF, m['RES-1'].need], [61866.67, 61866.67, 200.53]);
+    await ev(async () => { const DB = ERP.db; DB.replace('plan_proc', [{ process: 'PCK', defect_pct: 10 }]); await DB.flush(); });
+    R = await run('all'); m = Object.fromEntries(R.mats.map(x => [x.code, x]));
+    eq('포장 불량률 10% → 케이스 3,960 ÷ 0.9 = 4,400 · 카톤 330 ÷ 0.9 = 366.67 · BOM 없는 G 의 권취도 11,111.11', [m['CASE-M'].need, m['CTN-M'].need, at(R, 'PO-G').load.WRP], [4400, 366.67, 11111.11]);
+    await ev(async () => { ERP.db.replace('plan_proc', []); await ERP.db.flush(); });
+    // 13-3 근무 달력의 공정 조 수 0 = 그날 그 공정은 쉼 (예전: 기본 조 수로 계산)
+    await ev(async (d) => { const DB = ERP.db; DB.add('plan_cal', { date: d, sh_pck: 0 }); await DB.flush(); }, D(1));
+    R = await run('all');
+    eq('내일 포장 조 수 0 → X 포장 +2 → 출고 +3', [at(R, 'PO-X').pckEff, at(R, 'PO-X').ship], [D(2), D(3)]);
+    await ev(() => { ERP.state.plan = { tab: 'base' }; location.hash = '#/plan'; ERP.render(); }); await settle();
+    ok('기준 자료 탭 근무 달력: 조 수가 다른 공정 = 포장 0', await ev((d) => Array.from(document.querySelectorAll('#main table tbody tr')).some(tr => tr.innerText.includes(d) && /포장 0/.test(tr.innerText)), D(1)));
+    await ev(async () => { ERP.db.replace('plan_cal', []); await ERP.db.flush(); ERP.state.plan = null; });
+    // 13-4 원료 입고 → 사출 기다리는 날이 있으면 필요한 날이 오늘보다 앞일 수 있음 (예전: 오늘에서 멈춤)
+    await ev(async () => { const DB = ERP.db; DB.add('plan_wait', { from: 'RAW', to: 'INJ', days: 3 }); await DB.flush(); });
+    R = await run('all');
+    eq('원료 → 사출 3일 → 원료가 필요한 날 = B 사출 시작 (오늘) 의 3 근무일 전', R.mats.find(x => x.code === 'RES-1').first, ['PO-B', D(-3)]);
+    await ev(async () => { ERP.db.replace('plan_wait', []); await ERP.db.flush(); });
+    // 13-5 · 13-6 (1.14.2 고친 코드의 Codex 검토): 조립 품목군이 둘인 수주 PO-MIX (세트 = Mini 색연필 200 + Dial 색연필 1, Dial 쪽에만 부품 DMAT · 재고 60)
+    await ev(async (o) => { const DB = ERP.db;
+      DB.addMany('items', [{ code: 'SET-X', name: 'MIX SET', stage: 'SG', line: 'MINI', unit: 'SET', src: 'test' }, { code: 'PEN-M2', name: 'MINI PEN 2', stage: 'WIP', line: 'MINI', unit: 'PCS', src: 'test' },
+        { code: 'PEN-D2', name: 'DIAL PEN 2', stage: 'WIP', line: 'REG', unit: 'PCS', src: 'test' }, { code: 'DMAT', name: 'DIAL PART', stage: 'SM', unit: 'PCS', src: 'test' }]);
+      DB.addMany('bom_lines', [{ parent: 'SET-X', child: 'PEN-M2', qty: 200, note: '조립' }, { parent: 'SET-X', child: 'PEN-D2', qty: 1, note: '조립' }, { parent: 'PEN-D2', child: 'DMAT', qty: 1, note: '조립' }]);
+      DB.add('stock_open', { date: o.EC, scope: 'WH', code: 'DMAT', qty: 60, unit: 'PCS' });
+      DB.add('po', { date: o.EC, customer: 'TEST', po_no: 'PO-MIX', item_no: 'SET-X', kind: 'Mini', color: 24, sets: 100, pcs: 2400, cs: 0, due: o.due, packed: 0 }); await DB.flush(); }, { EC: D(-60), due: D(-9) });
+    R = await run('all'); let mix = at(R, 'PO-MIX'); m = R.mats.find(x => x.code === 'DMAT');
+    eq('PO-MIX: 조립 Mini 20,000 (10일) · Dial 100 (오늘 끝)', [mix && mix.load.asm, mix && mix.F.ASM], [{ Mini: 20000, Dial: 100 }, D(9)]);
+    eq('DMAT 은 Dial 진행으로 씀 → 오늘 100 > 재고 60 → 필요한 날 오늘 (두 품목군을 합치면 +5 로 늦게 나옴)', [m.need, m.first], [100, ['PO-MIX', T0]]);
+    // 800 근무일 안에 다 못 쓴 나머지: Dial 하루 0.1 → 800일에 80 (재고 90 안) · 나머지 20 은 그 뒤 → 모자람 10 (예전: 충분)
+    await ev(async () => { const DB = ERP.db; const s = DB.rows('stock_open').find(r => r.code === 'DMAT'); DB.update('stock_open', s._id, { qty: 90 }); DB.add('plan_proc', { process: 'ASM', division: 'Dial', cap_day: 0.1 }); await DB.flush(); });
+    R = await run('all'); m = R.mats.find(x => x.code === 'DMAT');
+    eq('PO-MIX 조립 Dial = 800일 넘음 · DMAT 모자람 10 · 필요한 날 = 마지막 근무일 (+799) · 리드타임 없음', [at(R, 'PO-MIX').F.ASM, m.short, m.first, m.judge], ['over', 10, ['PO-MIX', D(799)], 'nolead']);
+    await ev(async () => { const DB = ERP.db; const del = (t, f) => DB.rows(t).filter(f).forEach(r => DB.remove(t, r._id));
+      del('po', r => r.po_no === 'PO-MIX'); del('items', r => ['SET-X', 'PEN-M2', 'PEN-D2', 'DMAT'].includes(r.code)); del('bom_lines', r => r.parent === 'SET-X' || r.parent === 'PEN-D2'); del('stock_open', r => r.code === 'DMAT');
+      DB.replace('plan_proc', []); await DB.flush(); });
+    eq('되돌리면 처음 계산과 같음', (await run('all')).counts, R1.counts);
   });
 
   await sec('12. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {

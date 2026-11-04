@@ -4,11 +4,12 @@
    대강의 능력 계획 (rough-cut) — 첫 계산 (D:\ERP\09_production_plan\scripts\plan_calc.js) 과 같은 규칙:
    1) 진행 중 수주 (C.orders · C.isOpen · 남은 set > 0) 를 납기 순 (납기 없는 줄은 맨 뒤). 범위 'all' = PO미정 포함 (수주 진행과 같음) · 'firm' = 확정 PO 만.
    2) 사용자 구성 BOM (bom_lines) 으로 풀기 — 줄 비고 = 그 품목을 만드는 공정 (사출 · 리필 · 조립 · 권취 · 포장 · 원료). 현장 재고 (반제품 · 조립품 · 세트) 는
-      납기 이른 수주부터 쓰고 (MRP 와 같은 재고: 반제품(세미) 재고 → 현재고), 불량률만큼 더 만든다. 수주 품번의 세트 · 색연필 수는 ERP.mrpUnits (1.13.18).
+      납기 이른 수주부터 쓰고 (MRP 와 같은 재고: 반제품(세미) 재고 → 현재고), 불량률만큼 더 만든다 (그만큼 부품 · 자재도 — 1.14.2). 수주 품번의 세트 · 색연필 수는 ERP.mrpUnits (1.13.18).
    3) 공정별 하루 능력 = 최근 3개월 생산 일보 실적 ÷ 공장이 일한 날 (조립은 품목군별) × 계획 조 수 ÷ 그동안 하루 조 수, 또는 기준 자료에 직접 넣은 하루 능력.
-   4) 공정마다 납기 순으로 쌓아 끝나는 근무일 → 사출 · 리필 → 조립 · 권취 → 포장 → 출고 사이에 기다리는 날 → 출고 가능일 · 납기 판정.
-   5) 자재: 납기 순으로 쌓은 필요량이 재고 + 입고 예정을 넘는 첫 수주 → 그 공정이 그 수주를 시작하는 날 (원료 입고 뒤 기다리는 날만큼 앞) = 필요한 날,
-      발주 마감 = 필요한 날 − 리드타임 (품목 리드타임, 해외 주문 품목은 기본 리드타임).
+   4) 하루씩 공정을 같이 돌린다 (1.14.2, Codex 검토 2026-11-04): 공정마다 그날 능력을 납기 순으로 나누되, 앞 공정 (사출 · 리필 → 조립 · 권취 → 포장) 이
+      기다리는 날 전까지 내준 만큼만 한다 — 앞 공정과 겹쳐 진행하고, 아직 못 하는 수주는 건너뛰어 뒤 수주를 막지 않는다. 포장 → 출고 사이 기다리는 날 → 출고 가능일 · 납기 판정.
+   5) 자재: 그 자재를 쓰는 공정이 그 수주를 한 만큼 날마다 쓴다고 보고, 납기 순으로 쌓은 양이 재고 + 그날까지 올 입고 예정을 넘는 첫날 = 필요한 날
+      (원료 입고 → 사출 · 리필 은 기다리는 날만큼 앞, 오늘 전일 수 있음) · 그날 쓰던 수주 = 처음 모자라는 수주. 발주 마감 = 필요한 날 − 리드타임 (품목 리드타임, 해외 주문 품목은 기본 리드타임).
    공정 안에서 품목마다 속도가 다른 것 · 금형 교체 · 설비 배정 · 인원은 아직 계산에 넣지 않는다 (평균 속도). 화면 (p_plan.js) · AI 비서 (production_plan) · 엑셀이 이 계산 하나를 쓴다. */
 (function () {
   'use strict';
@@ -74,11 +75,13 @@
     const r = base.cal.get(d); if (r && r.work !== undefined && r.work !== null && r.work !== '') return r.work === true || r.work === 'true' || r.work === 1 || /^(o|y|yes|1|true)$/i.test(String(r.work));
     return !(base.sunOff && new Date(d + 'T00:00:00').getDay() === 0);
   };
-  /** 그날 그 공정의 능력 배수: 달력의 조 수 ÷ 기본 조 수 × (1 + 잔업 ÷ (조당 일하는 시간 × 조 수)) */
+  /** 그날 그 공정의 능력 배수: 달력의 조 수 ÷ 기본 조 수 × (1 + 잔업 ÷ (조당 일하는 시간 × 조 수)). 달력의 조 수 0 = 그날 그 공정은 쉼 (1.14.2) */
   const SH_KEY = { INJ: 'sh_inj', REF: 'sh_ref', ASM: 'sh_asm', WRP: 'sh_wrp', PCK: 'sh_pck' };
+  P.SH_KEY = SH_KEY;
+  P.shiftSet = (r, p) => { const v = r ? r[SH_KEY[p]] : undefined; return typeof v === 'number' ? v >= 0 : num(v) > 0; };   // 달력 줄에 그 공정 조 수가 있나 (0 포함)
   function dayFactor(base, p, d) {
     const r = base.cal.get(d); if (!r) return 1; const s = base.shift[p]; const n = s.n || 1;
-    const sh = num(r[SH_KEY[p]]) > 0 ? num(r[SH_KEY[p]]) : n; const hrs = s.dayH ? Math.max(1, s.dayH - (s.breakM || 0) / 60) : 10;
+    const sh = P.shiftSet(r, p) ? num(r[SH_KEY[p]]) : n; const hrs = s.dayH ? Math.max(1, s.dayH - (s.breakM || 0) / 60) : 10;
     return (sh / n) * (1 + Math.max(0, num(r.ot_h)) / (hrs * n));
   }
 
@@ -168,10 +171,12 @@
     const poolOf = (c) => { if (!pool.has(c)) { const x = item(c); let q = 0; if (semi.has(c)) q = Math.max(0, semi.get(c)); else if (x && x.grp !== 'mat' && x.grp !== 'test' && st.has(x.code)) q = Math.max(0, num(st.get(x.code).bal)); pool.set(c, q); } return pool.get(c); };
     const dAllow = (p) => 1 / (1 - Math.min(50, base.defect[p] || 0) / 100);
     const famOfItem = (c) => { const x = item(c); return x && x.line ? P.fam(INV.LINE_DIV[x.line] || x.line) : ''; };
-    function explode(code, qty, depth, acc, via) {
+    // via = 그 자재를 쓰는 공정 (부모를 만드는 공정), fam = 그 공정이 조립이면 부모의 조립 품목군. 자재마다 by['공정' 또는 'ASM|품목군'] = 양 (1.14.2 — 자재가 필요한 날)
+    function explode(code, qty, depth, acc, via, fam) {
       if (depth > 10 || !(qty > 0)) return;
       const x = item(code); const ch = kids.get(code) || []; const mk = depth === 0 ? 'PCK' : (madeBy.get(code) || '');
-      if (depth > 0 && ((x && x.grp === 'mat') || mk === 'RAW' || (!x && !ch.length))) { const m = acc.mat[code] || (acc.mat[code] = { qty: 0, via }); m.qty += qty; return; }   // 원부자재 (또는 품목에 없는 코드)
+      if (depth > 0 && ((x && x.grp === 'mat') || mk === 'RAW' || (!x && !ch.length))) {   // 원부자재 (또는 품목에 없는 코드)
+        const m = acc.mat[code] || (acc.mat[code] = { qty: 0, via, by: {} }); m.qty += qty; const k = via === 'ASM' ? 'ASM|' + (fam || '') : via; m.by[k] = (m.by[k] || 0) + qty; return; }
       let net = qty;
       if (depth > 0) { const have = poolOf(code); const t = Math.min(have, qty); pool.set(code, have - t); net = qty - t; if (t) fromStock[code] = (fromStock[code] || 0) + t; }
       if (depth > 0 && net > 0) {
@@ -179,7 +184,9 @@
         else if (mk === 'INJ' || mk === 'REF' || mk === 'WRP') acc[mk] += net * dAllow(mk);
         else if (mk === '') acc.unknown[code] = (acc.unknown[code] || 0) + net;
       }
-      ch.forEach(k => explode(k.c, net * k.q * (1 + k.loss / 100), depth + 1, acc, depth === 0 ? 'PCK' : (mk || via)));
+      // 불량률만큼 더 만든 양이 아래 (부품 · 자재) 로도 내려간다 (1.14.2). 포장 불량률은 맨 위 품목에서 한 번만 (중간에 포장 공정 품목이 있어도)
+      const make = net * (depth === 0 ? dAllow('PCK') : (mk === 'ASM' || mk === 'INJ' || mk === 'REF' || mk === 'WRP') ? dAllow(mk) : 1);
+      ch.forEach(k => explode(k.c, make * k.q * (1 + k.loss / 100), depth + 1, acc, depth === 0 ? 'PCK' : (mk || via), depth === 0 ? '' : mk === 'ASM' ? famOfItem(code) : mk ? '' : fam));
     }
     const capFams = new Set(Object.keys(cap.famDay).filter(f => cap.famDay[f] > 0));
     const ASM_FAM = ['Mini', 'Dial', 'Pencil', 'Click pencil'];
@@ -197,7 +204,7 @@
       else if (u && u.pens > 0) { const pcs = o.rem * (pps || 1); acc.pck = pcs; explode(o.item, pcs / u.pens, 0, acc, 'PCK'); acc.how = L('BOM (낱개 카톤 ' + u.pens + '개)', 'BOM (thùng lẻ ' + u.pens + ' cây)'); }
       else {   // BOM 없음: 수주의 품목군 · pcs 로 조립 (Glass 는 종이 권취) · 포장만
         acc.bom = false; const pcs = o.rem * (pps || 0); acc.pck = pcs; const f = P.fam(o.kind);
-        if (f === 'Glass') acc.WRP += pcs * dAllow('WRP'); else if (ASM_FAM.indexOf(f) >= 0 || capFams.has(f)) acc.asm[f] = (acc.asm[f] || 0) + pcs * dAllow('ASM');
+        if (f === 'Glass') acc.WRP += pcs * dAllow('PCK') * dAllow('WRP'); else if (ASM_FAM.indexOf(f) >= 0 || capFams.has(f)) acc.asm[f] = (acc.asm[f] || 0) + pcs * dAllow('PCK') * dAllow('ASM');
         acc.how = L('BOM 없음 — 수주 품목군 ' + (o.kind || '없음') + ' · pcs 로 ', 'Không có BOM — theo nhóm ' + (o.kind || '-') + ' · pcs: ') + (f === 'Glass' ? L('종이 권취 · 포장', 'quấn giấy · đóng gói') : acc.asm[f] ? L('조립 · 포장', 'lắp ráp · đóng gói') : L('포장', 'đóng gói')) + (pps ? '' : L(' (pcs 없음)', ' (không có pcs)'));
       }
       acc.pck *= dAllow('PCK'); o.acc = acc;
@@ -207,29 +214,63 @@
     const WD = []; for (let d = today, i = 0; WD.length < P.HORIZON && i < P.HORIZON * 3; i++, d = F.addDays(d, 1)) if (P.isWork(base, d)) WD.push(d);
     const cumCap = (p, perDay) => { const a = []; let s = 0; WD.forEach(d => { s += perDay * dayFactor(base, p, d); a.push(s); }); return a; };
     const finishOf = (cum, load) => { if (!(load > 0)) return null; if (!cum || !(cum[cum.length - 1] > 0)) return 'nocap'; let lo = 0, hi = cum.length - 1; if (cum[hi] < load - 1e-9) return 'over'; while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] >= load - 1e-9) hi = m; else lo = m + 1; } return WD[lo]; };
-    const startOf = (cum, before) => { if (!cum || !(cum[cum.length - 1] > 0)) return null; let i = 0; while (i < cum.length - 1 && cum[i] <= before + 1e-9) i++; return WD[i]; };
-    const addWork = (d, n) => { if (!isDate(d)) return d; let i = WD.findIndex(x => x >= d); if (i < 0) i = WD.length - 1; return WD[Math.max(0, Math.min(WD.length - 1, i + n))]; };
+    // n 근무일 뒤 (앞). 오늘 전으로도 간다 — 원료가 필요한 날 (1.14.2)
+    const addWork = (d, n) => { if (!isDate(d)) return d; let i = WD.findIndex(x => x >= d); if (i < 0) i = WD.length - 1; const j = i + n;
+      if (j >= 0) return WD[Math.min(WD.length - 1, j)];
+      let x = WD[0], k = -j; for (let s = 0; k > 0 && s < 3660; s++) { x = F.addDays(x, -1); if (P.isWork(base, x)) k--; } return x; };
     const maxD = (...a) => a.find(x => x && !isDate(x)) || a.filter(isDate).sort().pop() || null;   // 능력 모름 · 800일 넘음이 하나라도 있으면 그것 (날짜를 지어내지 않음)
     const CUM = { INJ: cumCap('INJ', cap.perDay.INJ || 0), REF: cumCap('REF', cap.perDay.REF || 0), WRP: cumCap('WRP', cap.perDay.WRP || 0), PCK: cumCap('PCK', cap.perDay.PCK || 0) };
     const CUMF = {}; Object.keys(cap.famDay).forEach(f => { if (cap.famDay[f] > 0) CUMF[f] = cumCap('ASM', cap.famDay[f]); });
     const W = (a, b) => base.wait[a + '>' + b] || 0;
 
-    // 공정마다 납기 순으로 쌓기 → 끝나는 날 · 출고 가능일
-    const tot = { INJ: 0, REF: 0, WRP: 0, PCK: 0, asm: {} };
-    ord.forEach(o => { const a = o.acc; const before = { INJ: tot.INJ, REF: tot.REF, WRP: tot.WRP, PCK: tot.PCK, asm: Object.assign({}, tot.asm) };
+    // 하루씩 공정을 같이 돌리기 (1.14.2, Codex 검토 2026-11-04) — 예전에는 공정마다 오늘부터 따로 쌓고 끝나는 날만 max 로 맞춰서,
+    // 아직 못 하는 수주 (예: 권취를 기다리는 Glass) 의 포장을 먼저 세어 뒤 수주를 늦추고, 앞 공정이 시작하기 전에도 다음 공정이 그 수주를 한다고 봤다.
+    // 이제 공정마다 그날 능력을 납기 순으로 나누되 앞 공정이 기다리는 날 전까지 내준 만큼만 한다 (겹쳐 진행 · 아직 못 하는 수주는 건너뜀).
+    const TS = new Map(); let simDays = 0;
+    (function simulate() {
+      const res = new Map();
+      const resOf = (id, proc, perDay) => { let r = res.get(id); if (!r) { const none = !(perDay > 0); res.set(id, r = { proc, none, day: none ? null : WD.map(d => perDay * dayFactor(base, proc, d)), tasks: [] }); } return r; };
+      const task = (r, load, ups) => { const t = { r, load, ups, done: 0, hist: r.none ? null : [], start: null, fin: r.none ? 'nocap' : null }; r.tasks.push(t); return t; };
+      ord.forEach(o => { const a = o.acc; const x = { asm: {} };
+        if (a.INJ > 0) x.INJ = task(resOf('INJ', 'INJ', cap.perDay.INJ || 0), a.INJ, []);
+        if (a.REF > 0) x.REF = task(resOf('REF', 'REF', cap.perDay.REF || 0), a.REF, []);
+        const upA = [[x.INJ, W('INJ', 'ASM')], [x.REF, W('REF', 'ASM')]].filter(u => u[0]);
+        Object.keys(a.asm).forEach(f => { if (a.asm[f] > 0) x.asm[f] = task(resOf('ASM|' + f, 'ASM', cap.famDay[f] || 0), a.asm[f], upA); });
+        if (a.WRP > 0) x.WRP = task(resOf('WRP', 'WRP', cap.perDay.WRP || 0), a.WRP, x.REF ? [[x.REF, W('REF', 'WRP')]] : []);
+        if (a.pck > 0) x.PCK = task(resOf('PCK', 'PCK', cap.perDay.PCK || 0), a.pck, Object.values(x.asm).map(t => [t, W('ASM', 'PCK')]).concat(x.WRP ? [[x.WRP, W('WRP', 'PCK')]] : []));
+        TS.set(o, x); });
+      // 앞 공정부터 (사출 · 리필 → 조립 품목군마다 → 권취 → 포장). 하루 능력을 모르는 공정은 돌리지 않고 (끝 = 능력 모름) 다음 공정을 막지도 않는다
+      const seq = ['INJ', 'REF'].concat(Array.from(res.keys()).filter(k => k.indexOf('ASM|') === 0).sort(), ['WRP', 'PCK']).map(k => res.get(k)).filter(r => r && !r.none);
+      const frac = (u, i) => { const t = u[0]; if (!t.hist) return 1; const j = i - u[1]; return j < 0 ? 0 : t.hist[Math.min(j, t.hist.length - 1)] / t.load; };
+      let left = seq.reduce((s, r) => s + r.tasks.length, 0);
+      for (let i = 0; i < WD.length && left > 0; i++) {
+        seq.forEach(r => { let c = r.day[i];
+          for (const t of r.tasks) { if (t.fin) continue; if (!(c > 1e-9)) break;
+            const can = t.load * Math.min(1, t.ups.length ? Math.min.apply(null, t.ups.map(u => frac(u, i))) : 1) - t.done; if (!(can > 1e-9)) continue;
+            const take = Math.min(can, c); t.done += take; c -= take; if (!t.start) t.start = WD[i]; if (t.done >= t.load - 1e-6) { t.done = t.load; t.fin = WD[i]; left--; } }
+          r.tasks.forEach(t => { t.hist[i] = t.done; }); });
+        simDays = i + 1;
+      }
+      seq.forEach(r => r.tasks.forEach(t => { if (!t.fin) t.fin = 'over'; }));
+    })();
+
+    // 끝나는 날 · 출고 가능일 · 판정
+    const tot = { INJ: 0, REF: 0, WRP: 0, PCK: 0, asm: {} };   // 공정별 부하 (표)
+    ord.forEach(o => { const a = o.acc; const x = TS.get(o); const fin = (t) => (t ? t.fin : null), sta = (t) => (t ? t.start : null);
       tot.INJ += a.INJ; tot.REF += a.REF; tot.WRP += a.WRP; tot.PCK += a.pck; Object.keys(a.asm).forEach(f => { tot.asm[f] = (tot.asm[f] || 0) + a.asm[f]; });
-      const Fd = { INJ: a.INJ > 0 ? finishOf(CUM.INJ, tot.INJ) : null, REF: a.REF > 0 ? finishOf(CUM.REF, tot.REF) : null, WRP: a.WRP > 0 ? finishOf(CUM.WRP, tot.WRP) : null, PCK: a.pck > 0 ? finishOf(CUM.PCK, tot.PCK) : null, asm: {} };
-      Object.keys(a.asm).forEach(f => { if (a.asm[f] > 0) Fd.asm[f] = finishOf(CUMF[f], tot.asm[f]); });
-      const fa = Object.values(Fd.asm); Fd.ASM = fa.length ? (fa.find(x => !isDate(x)) || fa.sort().pop()) : null;
+      const Fd = { INJ: fin(x.INJ), REF: fin(x.REF), WRP: fin(x.WRP), PCK: fin(x.PCK), asm: {} }; Object.keys(x.asm).forEach(f => { Fd.asm[f] = x.asm[f].fin; });
+      const fa = Object.values(Fd.asm); Fd.ASM = fa.length ? (fa.find(v => !isDate(v)) || fa.sort().pop()) : null;
       const asmEff = Fd.ASM ? maxD(Fd.ASM, Fd.INJ ? addWork(Fd.INJ, W('INJ', 'ASM')) : null, Fd.REF ? addWork(Fd.REF, W('REF', 'ASM')) : null) : null;
       const wrpEff = Fd.WRP ? maxD(Fd.WRP, Fd.REF ? addWork(Fd.REF, W('REF', 'WRP')) : null) : null;
       const pckEff = maxD(Fd.PCK, asmEff ? addWork(asmEff, W('ASM', 'PCK')) : null, wrpEff ? addWork(wrpEff, W('WRP', 'PCK')) : null);
       o.F = Fd; o.asmEff = asmEff; o.wrpEff = wrpEff; o.pckEff = pckEff; o.ship = isDate(pckEff) ? addWork(pckEff, W('PCK', 'OUT')) : (pckEff || null);
-      o.start = { INJ: startOf(CUM.INJ, before.INJ), REF: startOf(CUM.REF, before.REF), WRP: startOf(CUM.WRP, before.WRP), PCK: startOf(CUM.PCK, before.PCK), asm: {} };
-      Object.keys(a.asm).forEach(f => { o.start.asm[f] = CUMF[f] ? startOf(CUMF[f], before.asm[f] || 0) : null; });
-      // 끝을 정한 공정: 출고 가능일에 가장 늦게 닿는 공정
-      const cand = [['PCK', Fd.PCK], ['ASM', Fd.ASM], ['WRP', Fd.WRP], ['INJ', Fd.INJ], ['REF', Fd.REF]].filter(x => isDate(x[1])).sort((x, y) => y[1].localeCompare(x[1]));
+      o.start = { INJ: sta(x.INJ), REF: sta(x.REF), WRP: sta(x.WRP), PCK: sta(x.PCK), asm: {} }; Object.keys(x.asm).forEach(f => { o.start.asm[f] = x.asm[f].start; });
+      // 끝을 정한 공정: 포장부터 거슬러 올라가며, 앞 공정이 마지막으로 내준 다음 날 바로 끝났으면 그 앞 공정 탓
+      const cand = [['PCK', Fd.PCK], ['ASM', Fd.ASM], ['WRP', Fd.WRP], ['INJ', Fd.INJ], ['REF', Fd.REF]].filter(v => isDate(v[1])).sort((p, q) => q[1].localeCompare(p[1]));
       o.limit = !isDate(o.ship) && o.ship ? (Fd.ASM && !isDate(Fd.ASM) ? 'ASM' : '') : (cand.length ? cand[0][0] : '');
+      if (isDate(o.ship)) { let t = x.PCK || Object.values(x.asm)[0] || x.WRP || x.INJ || x.REF;
+        for (let g = 0; t && g < 6; g++) { const b = t.ups.filter(u => isDate(u[0].fin)).map(u => [u[0], addWork(u[0].fin, u[1])]).sort((p, q) => q[1].localeCompare(p[1]))[0]; if (b && isDate(t.fin) && b[1] >= t.fin) t = b[0]; else break; }
+        if (t) o.limit = t.r.proc; }
       if (!o.due) o.judge = 'nodue'; else if (!isDate(o.ship)) o.judge = 'na';
       else { o.slack = F.diffDays(o.due, o.ship); o.judge = o.due < today ? 'past' : o.slack >= 7 ? 'ok' : o.slack >= 0 ? 'tight' : 'late'; }
     });
@@ -246,22 +287,31 @@
     pushLoad('PCK', tot.PCK, cap.perDay.PCK, CUM.PCK, null, cap.src.PCK, cap.logDay.PCK);
     const bottle = loads.filter(r => r.load > 0 && r.days !== null).sort((a, b) => b.days - a.days)[0] || null;
 
-    // 자재: 납기 순 필요량 vs 재고 + 입고 예정
+    // 자재: 날마다 쓰는 양 (그 공정이 그 수주를 한 만큼) 을 쌓아 재고 + 그날까지 올 입고 예정을 넘는 첫날 (1.14.2 — 예전: 그 수주를 시작하는 날)
     const inc = new Map();
     DB.rows('buy_orders').forEach(o => { if (o.status === 'recv' || o.pool) return; const x = item(str(o.code)); if (!x) return; let q = num(o.qty);
       if (o.unit && ERP.buy) { const v = ERP.buy.toErp(x.it, q, o.unit); if (v === null) return; q = v; }
       const lead = leadOf(x.it); const eta = isDate(str(o.eta)) ? str(o.eta) : (o.kind !== 'inc' && lead && isDate(o.date) ? F.addDays(o.date, lead) : '');
       let a = inc.get(x.code); if (!a) inc.set(x.code, a = []); a.push({ qty: q, eta }); });
     const matAll = new Map(); ord.forEach(o => Object.keys(o.acc.mat).forEach(c => { let m = matAll.get(c); if (!m) matAll.set(c, m = { need: 0, via: o.acc.mat[c].via }); m.need += o.acc.mat[c].qty; }));
-    const needDay = (o, via) => { const s = via === 'ASM' ? Object.values(o.start.asm).filter(isDate).sort()[0] : o.start[via]; const d = isDate(s) ? s : today; const w = via === 'INJ' || via === 'REF' ? W('RAW', via) : 0; return w ? addWork(d, -w) : d; };
+    // 수주 o 가 자재 q 를 key (공정 · 조립은 'ASM|품목군') 에서 쓰는 [필요한 날, 양] — 그 공정 · 품목군이 그 수주를 한 만큼 날마다. 원료 입고 → 사출 · 리필 은 기다리는 날만큼 앞.
+    // 그 공정 일이 없거나 능력을 모르면 오늘 한꺼번에. 800 근무일 안에 다 못 한 나머지는 마지막 근무일 (그 뒤에 씀 — 빠뜨리면 모자람이 "충분" 으로 보임)
+    const useOf = (o, key, q) => { const x = TS.get(o); const via = key.split('|')[0]; const t = via === 'ASM' ? x.asm[key.slice(4)] : x[via]; const w = via === 'INJ' || via === 'REF' ? W('RAW', via) : 0;
+      if (!t || !t.hist || !(t.load > 0)) return [[addWork(WD[0] || today, -w), q]];
+      const out = []; let prev = 0;
+      for (let i = 0; i < simDays; i++) { const f = t.hist[Math.min(i, t.hist.length - 1)] / t.load; if (f > prev + 1e-12) { out.push([addWork(WD[i], -w), q * (f - prev)]); prev = f; } if (f >= 1 - 1e-12) break; }
+      if (prev < 1 - 1e-9) out.push([addWork(WD[WD.length - 1], -w), q * (1 - prev)]);
+      return out; };
     const mats = Array.from(matAll.entries()).map(([c, m]) => {
       const x = item(c); const code = x ? x.code : c; const s = st.get(code); const stock = Math.max(0, s ? num(s.bal) : 0);
       const incs = inc.get(code) || []; const incQty = incs.reduce((a, v) => a + v.qty, 0); const incNoEta = incs.filter(v => !v.eta).reduce((a, v) => a + v.qty, 0);
       const lead = x ? leadOf(x.it) : null;
-      let cum = 0, first = null;
-      for (const o of ord) { const q = (o.acc.mat[c] || {}).qty || 0; if (!q) continue; cum += q; const d = needDay(o, o.acc.mat[c].via);
-        const avail = stock + incs.filter(v => v.eta && v.eta <= d).reduce((a, v) => a + v.qty, 0);
-        if (cum > avail + 1e-9) { first = { po: o.po, item: o.item, due: o.due, date: d, line: o.id }; break; } }
+      const ev = []; ord.forEach((o, k) => { const u = o.acc.mat[c]; if (u && u.qty > 0) Object.keys(u.by).forEach(key => useOf(o, key, u.by[key]).forEach(e => ev.push({ d: e[0], q: e[1], k, o }))); });
+      ev.sort((a, b) => a.d.localeCompare(b.d) || a.k - b.k);
+      const incD = incs.filter(v => v.eta).sort((a, b) => a.eta.localeCompare(b.eta));
+      let cum = 0, got = stock, ii = 0, first = null;
+      for (const e of ev) { cum += e.q; while (ii < incD.length && incD[ii].eta <= e.d) got += incD[ii++].qty;
+        if (cum > got + 1e-9) { first = { po: e.o.po, item: e.o.item, due: e.o.due, date: e.d, line: e.o.id }; break; } }
       const short = Math.max(0, m.need - stock - incQty);
       const orderBy = first && lead ? F.addDays(first.date, -lead) : null;
       const judge = !first ? 'enough' : !lead ? 'nolead' : orderBy < today ? 'late' : F.diffDays(orderBy, today) <= 7 ? 'week' : 'ok';
