@@ -53,6 +53,7 @@ npm run dist                                # dist/win-unpacked + 설치 파일 
 
 ## 출시 절차
 1. 시험 전부 통과 (위 명령 + 그 차수의 새 시험).
+   - **Codex 검토** (사용자 2026-11-04 "네, 같이 검토"): Codex 가 깔린 PC 에서는 시험이 끝난 뒤 Codex 에게 이번 차수에 바뀐 코드를 읽기 전용으로 한 번 검토시킨다 (부를 때마다 사용자의 ChatGPT 요금제 사용량을 씀). 저장소 폴더에서 `codex review -c sandbox_mode=read-only -c approval_policy=never -` 에, 검토 범위 (예: `git diff <이전 태그> HEAD -- app`) 와 이 파일 · `docs/CLAUDE_PROMPT.md` 6장 규칙을 읽으라는 말을 표준 입력으로 준다. codex.exe 는 PATH 에 없을 수 있고 (`%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe`), Codex 가 git 을 쓰므로 git 을 PATH 에 넣고 부른다. 지적은 그대로 믿지 않는다 — 코드 · 실제 자료 사본 · 재현 시험으로 확인해 맞는 것만 고치고, 결과를 그 차수 work_log 에 남긴다. Codex 가 없는 곳 (클라우드 세션) 은 건너뛰고 그렇다고 적는다.
 2. `package.json` · `app/js/core.js` (`ERP.v`) · `build/installer.nsi` 기본값 · `npm run dist` 스크립트의 버전 번호를 함께 올린다.
 3. `npm run demo` · `npm run dist` → 설치 파일 SHA-256 기록.
 4. 문서: README, `docs/CLAUDE_PROMPT.md` 새 차수 항목, `docs/PROMPT_v<차수>_*.md`, `docs/history/<차수>_work_log.md`.
