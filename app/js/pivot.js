@@ -293,8 +293,11 @@
   /** 현장 재고 위 영역: 공정 카드 + 원재료 환산 + 아래 줄 (p_stock.js stockTab 이 부름) */
   ERP.floorPivot = function () {
     const all = P.cards(); const dg = diagByProc(); const wrap = h('div', { class: 'fpiv' }); const hidden = [];
+    // 1.15.1 (사용자 "네, 고쳐 줘"): 분류 안 된 품목 카드는 그 품목이 재고 (창고 · 공장 어느 쪽이든) 를 가졌을 때만 — 재고 0 인 품목만 있으면 빈 카드였음.
+    //   카드 설정을 바꿨으면 (범위 · 품목군 · 줄 · 0 줄) 줄이 없어도 카드 · 숨긴 카드 [보이기] 는 남긴다 (Codex 검토: 범위를 창고로 바꾸면 되돌릴 수 없었음)
+    const noneStock = floorRows().some(s => P.procOf(s) === P.NONE && [s.bal, s.by.WH, s.by.FAC].some(v => Math.abs(v || 0) > EPS));
     P.procs().forEach(p => { const cfg = all[p]; const d = P.buildCard(p, cfg);
-      if (p === P.NONE && !d.items) return;   // 분류 안 된 품목: 있을 때만
+      if (p === P.NONE && !noneStock && !(d.items && (cfg.zero || cfg.scope !== 'all' || cfg.divs.length || cfg.rows !== 'std'))) return;
       if (cfg.hidden) { hidden.push(p); return; }
       wrap.appendChild(cardEl(p, d, cfg, dg.by[p])); });
     wrap.appendChild(rawCard());

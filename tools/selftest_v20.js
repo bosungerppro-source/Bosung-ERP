@@ -234,6 +234,23 @@ const OLD_PIVOTS = [{ id: 'asm', title: '리필 성형 · 조립 · 사출 재�
     await ev(async () => { const DB = ERP.db; ['G-1', 'F-1', 'S-RED'].forEach(c => { const r = DB.rows('items').find(x => x.code === c); if (r) DB.remove('items', r._id); }); const l = DB.rows('bom_lines').find(x => x.parent === 'S-RED'); if (l) DB.remove('bom_lines', l._id); await DB.flush(); ERP.state.stk_floor = null; });
   });
 
+  await sec('14. (1.15.1) 재고 0 인 분류 안 된 품목만 있으면 "분류 안 된 품목" 카드를 보이지 않음 (사용자 "네, 고쳐 줘")', async () => {
+    await ev(async () => { const DB = ERP.db; DB.add('items', { code: 'Z-0', name: 'NOTHING', stage: 'WIP', unit: 'PCS', src: 'test' }); await DB.flush(); }); await floor();
+    eq('Z-0 은 분류 안 됨 · 재고 없음', await ev(() => { const s = ERP.inv.rows().find(x => x.code === 'Z-0'); return [ERP.inv.floorClassOf('Z-0').proc, s ? s.bal : null]; }), ['', 0]);
+    eq('카드 = 공정 5개 (빈 "분류 안 된 품목" 카드 없음)', (await cards()).map(x => x.id), ['INJ', 'REF', 'ASM', 'WRP', 'PCK']);
+    await ev(async () => { ERP.db.setSetting('floorCards', { NONE: { zero: true } }); await ERP.db.flush(); ERP.render(); }); await settle();
+    eq('"분류 안 된 품목" 설정에서 재고 0 줄도 보기를 켜면 카드가 보임 (Z-0 ·)', [(await cards()).map(x => x.id).slice(-1)[0], (await card('NONE')).rows], ['NONE', [['Z-0', '·']]]);
+    // Codex 검토 (1.15.1): 범위를 창고로 바꿔 줄이 없어져도 카드 (설정) 와 숨긴 카드 [보이기] 는 남아야 되돌릴 수 있다
+    await ev(async (o) => { const DB = ERP.db; DB.add('items', { code: 'U-2', name: 'MYSTERY 2', stage: 'WIP', unit: 'PCS', src: 'test' }); DB.add('stock_open', { date: o.FLOOR, scope: 'FAC', code: 'U-2', qty: 4, unit: 'PCS', grp: 'floor' }); DB.setSetting('floorCards', null); await DB.flush(); ERP.render(); }, { FLOOR }); await settle();
+    eq('U-2 (공장 재고 4) → 분류 안 된 품목 카드', ((await card('NONE')) || {}).rows, [['U-2', '4']]);
+    await ev(async () => { ERP.db.setSetting('floorCards', { NONE: { scope: 'WH' } }); await ERP.db.flush(); ERP.render(); }); await settle();
+    const c2 = await card('NONE');
+    eq('범위 창고 → 줄은 없어도 카드 · [설정] 은 남음', [!!c2, c2 && c2.rows, await ev(() => !!document.querySelector('main .fpiv-card[data-id="NONE"] button[data-act="edit"]'))], [true, [], true]);
+    await ev(async () => { ERP.db.setSetting('floorCards', { NONE: { scope: 'WH', hidden: true } }); await ERP.db.flush(); ERP.render(); }); await settle();
+    eq('그 카드를 숨기면 아래 줄에 [보이기]', await ev(() => Array.from(document.querySelectorAll('main .fpiv-foot [data-show]')).map(b => b.dataset.show)), ['NONE']);
+    await ev(async () => { const DB = ERP.db; DB.setSetting('floorCards', null); ['Z-0', 'U-2'].forEach(c => { const r = DB.rows('items').find(x => x.code === c); if (r) DB.remove('items', r._id); }); const so = DB.rows('stock_open').find(x => x.code === 'U-2'); if (so) DB.remove('stock_open', so._id); await DB.flush(); ERP.render(); }); await settle();
+  });
+
   await sec('12. 베트남어 · 오류 없음', async () => {
     await ev(() => ERP.setLang('vi')); await floor();
     eq('카드 제목 (vi)', (await cards()).map(x => x.title), ['Ép nhựa — tồn', 'Ép lõi (Refill) — tồn', 'Lắp ráp — tồn', 'Quấn giấy — tồn', 'Đóng gói — tồn']);
