@@ -10,7 +10,7 @@ BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부�
 - 사용자에게 하는 설명 · 질문은 한국어로 쓴다.
 - 규칙과 지금까지의 결정은 문서에 있다. 작업 전에 읽는다.
   - `docs/CLAUDE_PROMPT.md` — 마스터 규칙 (1차부터 지금까지 모든 결정, 숫자 정의)
-  - `docs/PROMPT_v6_ECOUNT.md` (6차 v1.1.0), `docs/PROMPT_v7_WIDGETS.md` (7차 v1.2.0), `docs/PROMPT_v8_ACCURACY.md` (8차 v1.3.0), `docs/PROMPT_v9_MULTIPC_AI.md` (9차 v1.4.0), `docs/PROMPT_v10_PARTS.md` (10차 v1.5.0), `docs/PROMPT_v11_FLOOR.md` (11차 v1.6.0), `docs/PROMPT_v12_MENUS.md` (12차 v1.7.0 · 1.7.1), `docs/PROMPT_v13_PO_DONE.md` (13차 v1.8.0), `docs/PROMPT_v14_WAREHOUSE.md` (14차 v1.9.0), `docs/PROMPT_v15_UPDATE_MOBILE.md` (15차 v1.10.0), `docs/PROMPT_v16_BUY.md` (16차 v1.11.0), `docs/PROMPT_v17_PIVOT.md` (17차 v1.12.0), `docs/PROMPT_v18_CLOUD.md` (18차 v1.13.0), `docs/PROMPT_v19_PLAN.md` (19차 v1.14.0) …
+  - `docs/PROMPT_v6_ECOUNT.md` (6차 v1.1.0), `docs/PROMPT_v7_WIDGETS.md` (7차 v1.2.0), `docs/PROMPT_v8_ACCURACY.md` (8차 v1.3.0), `docs/PROMPT_v9_MULTIPC_AI.md` (9차 v1.4.0), `docs/PROMPT_v10_PARTS.md` (10차 v1.5.0), `docs/PROMPT_v11_FLOOR.md` (11차 v1.6.0), `docs/PROMPT_v12_MENUS.md` (12차 v1.7.0 · 1.7.1), `docs/PROMPT_v13_PO_DONE.md` (13차 v1.8.0), `docs/PROMPT_v14_WAREHOUSE.md` (14차 v1.9.0), `docs/PROMPT_v15_UPDATE_MOBILE.md` (15차 v1.10.0), `docs/PROMPT_v16_BUY.md` (16차 v1.11.0), `docs/PROMPT_v17_PIVOT.md` (17차 v1.12.0), `docs/PROMPT_v18_CLOUD.md` (18차 v1.13.0), `docs/PROMPT_v19_PLAN.md` (19차 v1.14.0), `docs/PROMPT_v20_FLOOR_PROC.md` (20차 v1.15.0) …
   - `docs/history/*_work_log.md` — 차수별 작업 기록 (결정 · 숫자 · 검증)
 - 기존 숫자 정의(납기 경과 60일 등)와 사용자 설정(`ai*`, 위젯 배치)은 바꾸지 않는다. 바꿀 때는 문서에 이유를 남긴다.
 
@@ -19,6 +19,7 @@ BOSUNG VINA(베트남 색연필 공장)의 수주 · 생산 · 재고 · 원부�
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci     # 의존성 (Electron 실행 파일은 빌드할 때 받음)
 export NODE_PATH=/opt/node22/lib/node_modules   # 전역 Playwright 사용 (Chromium: /opt/pw-browsers/chromium)
 npm run server                              # http://127.0.0.1:3210
+npm run test:v20                            # 현장 재고 = 공정 카드 · 현장 분류 (ERP CODE 안 씀) (20차)
 npm run test:v19                            # 생산 계획 (19차: 하루 능력 · 끝나는 날 · 자재 · 기준 자료 · 양식 · AI 비서)
 npm run test:v18                            # 여러 PC 자료 공유 — 구글 드라이브 (18차, 가짜 구글 웹 앱)
 npm run test:v17                            # 현장 재고 피벗 표 (17차)

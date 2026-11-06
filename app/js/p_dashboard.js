@@ -299,16 +299,17 @@
   // — 현장 재고 피벗 표와 같은 계산 · 모양 (ERP.pivot). 기본 배치에는 넣지 않고 "+ 위젯 추가" 에서 고른다 (여러 개, ⚙ 공정 · 품목군 · 행 · 열)
   // 1.13.6 (사용자 2026-10-26): "종합현황의 조립재고 품목군을 중복선택해서 표시하고 싶은거만 표시하게 해줘 너 맘대로하지말고 제발"
   // — ⚙ 품목군을 여러 개 고르면 고른 품목군만 표에 (합계도 그 품목군만). 안 고르면 (전체) 예전처럼 모두. 제목은 그대로
-  reg('floor_stock', { ko: '현장 재고 (공정별 현재 재고)', vi: 'Tồn hiện trường (theo công đoạn)', dko: '현장 재고 위의 표와 같은 품목군별 현재 재고 (기본 조립). ⚙ 에서 공정 · 품목군 · 행 · 열을 고르고, 공정마다 하나씩 넣을 수 있습니다', dvi: 'Tồn hiện tại theo nhóm như bảng ở trang Tồn hiện trường (mặc định lắp ráp). ⚙ chọn công đoạn · nhóm · hàng · cột', cat: 'stock', w: 1, sizes: [1, 2, 3, 4], multi: true,
-    defaults: { proc: 'ASM', rows: 'div', cols: 'none' },
-    opts: [{ k: 'proc', ko: '공정 (기본 조립)', vi: 'Công đoạn (mặc định lắp ráp)', options: () => [['', L('모든 공정', 'Mọi công đoạn')]].concat(procOpts(), [['ETC', L('기타', 'Khác')]]) },
-      { k: 'divs', ko: '품목군', vi: 'Nhóm', multi: true, options: (v, keep) => ERP.pivot.linesOf((v || {}).proc, keep).map(k => [k, ERP.inv.lineDivName(k)]) },
-      { k: 'rows', ko: '행', vi: 'Hàng', options: () => ERP.pivot.ROW_OPTS() }, { k: 'cols', ko: '열', vi: 'Cột', options: () => ERP.pivot.COL_OPTS() }],
+  // 1.15.0 (20차, 사용자 "사출현장재고따로 리필성형 현장재고 따로 조립현장재고 따로 포장 현장재고 따로"): 공정 하나만 고른다 ('모든 공정' 없음 — 공정끼리 더하지 않음).
+  //   예전에 '모든 공정' · '기타' 로 둔 위젯은 공정 카드 묶음으로 보인다. 줄 = 품목군까지 · 품목까지 (예전 행 · 열 설정은 읽지 않음)
+  reg('floor_stock', { ko: '현장 재고 (공정별 현재 재고)', vi: 'Tồn hiện trường (theo công đoạn)', dko: '현장 재고 위의 공정 카드와 같은 현재 재고 (기본 조립). ⚙ 에서 공정 · 품목군 · 줄을 고르고, 공정마다 하나씩 넣을 수 있습니다', dvi: 'Tồn hiện tại như thẻ công đoạn ở trang Tồn hiện trường (mặc định lắp ráp). ⚙ chọn công đoạn · nhóm · hàng', cat: 'stock', w: 1, sizes: [1, 2, 3, 4], multi: true,
+    defaults: { proc: 'ASM', rows: 'std' },
+    opts: [{ k: 'proc', ko: '공정 (기본 조립)', vi: 'Công đoạn (mặc định lắp ráp)', options: () => ERP.pivot.PROC_OPTS() },
+      { k: 'divs', ko: '품목군', vi: 'Nhóm', multi: true, options: (v, keep) => ERP.pivot.linesOf((v || {}).proc, keep).map(k => [k, ERP.pivot.lineName(k)]) },
+      { k: 'rows', ko: '줄', vi: 'Hàng', options: () => ERP.pivot.ROW_OPTS() }],
     render(ctx, inst) {
-      const P = ERP.pivot; const c = P.fromWidget(inst.o || {}); const d = P.build(c);
-      return box(P.autoTitle(Object.assign({}, c, { divs: [] })), h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('floor'); } }, L('현장 재고 →', 'Tồn hiện trường →')),
-        d.rows.length ? P.tableEl(c, d) : h('div', { class: 'empty' }, L('재고가 없습니다.', 'Không có tồn.')),
-        h('p', { class: 'help', style: { margin: '6px 0 0' } }, [d.units.length === 1 ? L('단위 ', 'Đơn vị ') + d.units[0] : null, L('현재 재고', 'Tồn hiện tại')].filter(Boolean).join(' · ')));
+      const w = ERP.pivot.widget(inst.o || {});
+      return box(w.title, h('a', { href: '#/floor', onclick: (e) => { e.preventDefault(); ERP.goStock('floor'); } }, L('현장 재고 →', 'Tồn hiện trường →')),
+        ...w.els, h('p', { class: 'help', style: { margin: '6px 0 0' } }, w.help));
     } });
   // 1.13.9: 현장 재고 → 원재료 환산 (현장 재고 화면의 조립 재고 옆 표와 같은 것). 기본 배치에는 넣지 않고 "+ 위젯 추가" 에서
   reg('floor_raw', { ko: '원재료 환산 (현장 재고)', vi: 'Quy đổi nguyên liệu (tồn hiện trường)', dko: '현장 재고 (창고+공장) 를 BOM 으로 원료까지 푼 원재료별 kg · 공정별 (현장 재고 화면의 조립 재고 옆 표와 같음)', dvi: 'Tồn hiện trường quy về nguyên liệu theo BOM (kg) · theo công đoạn', cat: 'stock', w: 2, sizes: [2, 3, 4],

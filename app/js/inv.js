@@ -112,6 +112,116 @@
   /** 목록 · 필터용: 이름 · 코드 (여러 단계가 같은 이름 — 예: 부품 — 을 쓸 수 있어 코드를 같이 보인다). 이름이 없으면 코드만 */
   INV.stageTitle = (code) => { const n = INV.label('stage', code), c = INV.stageCodeShow(code); return !code ? '' : (n === c ? c : n + ' · ' + c); };
 
+  // ------------------------------------------------------------------ 20차 (1.15.0): 현장 분류 = 공정 · 구분 · 품목군 — ERP CODE 를 쓰지 않는다
+  // 사용자 2026-11-06: "사출현장재고따로 리필성형 현장재고 따로 조립현장재고 따로 포장 현장재고 따로" · "이카운터에서 가져온 erp코드는 무시하고 너가 만들어"
+  // ERP CODE (단계 · 제품군 · 세부) 대신 ERP 가 가진 자료로 정한다. 앞의 것이 이긴다:
+  //   공정  = 품목 기준 정보 '생산 공정' (사람) → 단위 세트 · 박스 (SET · CT = 포장) → 생산 일보 (전체 기간, 가장 많이 만든 공정)
+  //           → 공장 자료의 역할 (색상별 BOM · 리필 규격 · 품목 구성) → 반제품 목록 CL → BOM 구조 (부모 · 자식) → 이름 낱말
+  //           (ECOUNT BOM 줄의 비고 (사출 · 조립 · 포장 …) 는 쓰지 않는다 — 박스 BOM 은 모든 줄이 '포장' 이라 펜 · 부품까지 포장이 됨. 사용자 "erp코드는 무시")
+  //   구분  = 사람 → 공장 자료의 역할 → 반제품 목록 CL → 사출 일보의 부품 이름 → 이름 낱말 (사출: 배럴 · 노즈콘 · 홀더 · 스푼 · 그 밖의 부품)
+  //   품목군 = 사람 → 공장 자료 (색상별 BOM 품목군 · 리필 규격 구분 · 품목 구성 품목군) → 반제품 목록 CL → 생산 일보 품목군 → BOM 부모 · 자식 → 이름
+  //   사출 일보가 묶음 이름 (Barrel · Holder …) 으로 여러 품목군을 만든 품목은 multi — 현장 카드가 생산 입고를 일보 줄의 품목군으로 나눈다 (INV.floorSplit)
+  INV.FLOOR_KINDS = [
+    { k: 'BARREL', proc: 'INJ', ko: '배럴', vi: 'Barrel' }, { k: 'NOSE', proc: 'INJ', ko: '노즈콘', vi: 'Nose cone' }, { k: 'HOLDER', proc: 'INJ', ko: '홀더', vi: 'Holder' },
+    { k: 'SPOON', proc: 'INJ', ko: '스푼', vi: 'Spoon' }, { k: 'PART', proc: 'INJ', ko: '그 밖의 부품', vi: 'Linh kiện khác' },
+    { k: 'CORE', proc: 'REF', ko: '심', vi: 'Lõi' },
+    { k: 'ASSY', proc: 'ASM', ko: '조립품', vi: 'Hàng lắp ráp' }, { k: 'SUB', proc: 'ASM', ko: '조립 중간품', vi: 'Lắp ráp trung gian' },
+    { k: 'WRAP', proc: 'WRP', ko: '권취품', vi: 'Hàng quấn giấy' },
+    { k: 'SET', proc: 'PCK', ko: '세트', vi: 'Bộ (set)' }, { k: 'BOX', proc: 'PCK', ko: '박스', vi: 'Thùng' }];
+  const FK = new Map(INV.FLOOR_KINDS.map(k => [k.k, k]));
+  INV.floorKindName = (k) => { const x = FK.get(k); return x ? L(x.ko, x.vi) : L('분류 안 됨', 'Chưa phân loại'); };
+  const nk = (s) => String(s || '').toUpperCase().replace(/\s+/g, '');
+  /** 공정 이름 · 코드 → 공정 (사출 · INJ · Injection · Ép nhựa …). BOM 비고 '원료 kg (MRP 소요량)' 같은 글은 '' */
+  INV.procOfText = (t) => { const n = nk(t); if (!n) return ''; const p = ERP.PROC.find(x => [x.id, x.ko, x.vi, x.en].some(v => nk(v) === n)); return p ? p.id : ''; };
+  /** 글 (부품 이름 · 반제품 목록 CL · 품명) → 구분. 부품 낱말이 먼저 (REFILL CONTAINER = 그 밖의 부품) */
+  INV.kindOfText = (t) => { const n = up(t); if (!n) return '';
+    if (/CONTAINER|TUBE|PLUNGER|CONNECTOR|\bCAP\b|CLIP|ERASER/.test(n)) return 'PART';
+    if (/REFILL|\bLEAD\b|\bCORE\b/.test(n)) return 'CORE';
+    if (/HOLDER|PLUG/.test(n)) return 'HOLDER'; if (/SPOON/.test(n)) return 'SPOON'; if (/NOSE/.test(n)) return 'NOSE'; if (/BARREL/.test(n)) return 'BARREL'; return ''; };
+  /** 글 (일보 품목군 · 공장 자료 품목군 · CL · 품명) → 품목군 (MINI · REG · PEN · CPC · GLA · MARKER) */
+  INV.floorLine = (t) => { const c = up(t); if (INV.LINE_ORDER.includes(c)) return c;   // 품목군 코드 그대로 (품목 '현장 품목군' 고르기 값 — Codex 검토: GLA)
+    if (/^PEEL/.test(normName(t))) return 'GLA';   // Peel = 종이 권취 연필 (1.13.13: 종이 권취 품목군 = Glass) — 리필 규격 '구분 Peel' 심도 Glass
+    const d = INV.lineOfDiv(ERP.normDiv ? ERP.normDiv(t) : t); if (d) return d; const n = up(t); if (!n) return '';   // 1.13.15: Dial Mini = Mini · Regular = Dial
+    if (/CLICK/.test(n)) return 'CPC'; if (/MINI/.test(n)) return 'MINI'; if (/GLASS/.test(n)) return 'GLA'; if (/MARKER/.test(n)) return 'MARKER';
+    if (/\b(DIAL|REGULAR|BIC|FREEDOM)\b/.test(n)) return 'REG'; if (/PENCIL/.test(n)) return 'PEN'; return ''; };
+  const NO_CLASS = Object.freeze({ proc: '', kind: '', line: '', multi: false, src: '' });
+  /** 품목코드 → { proc, kind, line, multi, src } (모든 품목. 정하지 못하면 없음) */
+  INV.floorClass = () => DB.memo('inv.fclass', ['items', 'prod_log', 'bom', 'bom_lines', 'semi_items', 'refill_specs', 'item_bom', 'code_map'], () => {
+    const IT = INV.items(); const MAP = INV.codeMap(); const T = new Map();
+    const t = (c) => { let o = T.get(c); if (!o) T.set(c, o = { logP: {}, logK: {}, logL: {}, role: {}, roleL: {}, semiK: '', semiL: '' }); return o; };
+    const add = (m, k, w) => { if (k) m[k] = (m[k] || 0) + (w || 1); };
+    const top = (m) => { let b = '', v = -Infinity; Object.keys(m || {}).forEach(k => { if (m[k] > v) { v = m[k]; b = k; } }); return b; };
+    // 생산 일보 (전체 기간) — 재고 반영과 같은 품목 찾기 (코드 → 코드 연결)
+    DB.rows('prod_log').forEach(r => { if (!r || !r.process || r.process === 'STP') return; const code = str(r.code); let it = (str(r.item) && IT.get(r.item)) || (code ? IT.get(code) : null);
+      const src = code || str(r.part) || str(r.name); if (!it && src) { const mc = MAP.daily(r.process, r.division, src); if (mc) it = IT.get(mc); } if (!it) return;
+      const q = Math.abs(C.qty(r)) || 1; const o = t(str(it.code)); add(o.logP, r.process, q);
+      if (r.process === 'INJ') add(o.logK, INV.kindOfText(r.part || r.name || code) || 'PART', q); add(o.logL, INV.floorLine(r.division), q); });
+    // BOM 줄 (부모 → 자식) — 구조만 쓴다 (비고는 안 씀)
+    const kids = new Map(), pars = new Map();
+    DB.rows('bom_lines').forEach(r => { const p = str(r.parent), c = str(r.child); if (!p || !c) return;
+      (kids.get(p) || kids.set(p, []).get(p)).push(c); (pars.get(c) || pars.set(c, []).get(c)).push(p); });
+    // 공장 자료: 색상별 BOM (조립품 · 심 · 노즈콘 · 배럴 · 홀더 · 스푼) · 리필 규격 (심) · 품목 구성 (박스)
+    const role = (c, kind, ln) => { c = str(c); if (!c || c === '0') return; const o = t(c); add(o.role, kind); add(o.roleL, ln); };
+    DB.rows('bom').forEach(r => { const ln = INV.floorLine(r.division); role(r.color_code, 'ASSY', ln); role(r.refill_code, 'CORE', ln); role(r.nose_code, 'NOSE', ln); role(r.barrel_code, 'BARREL', ln); role(r.holder, 'HOLDER', ln); role(r.spoon, 'SPOON', ln); });
+    DB.rows('refill_specs').forEach(r => role(r.erp_code, 'CORE', INV.floorLine(r.kind)));
+    DB.rows('item_bom').forEach(r => role(r.item, 'BOX', INV.floorLine(r.kind)));
+    // 반제품 목록 CL-1 · CL-2 · CL-3 (예: Barrel / Barrel / MINI · Refill / Mini / V2 · Mini/Dial / Holder / Mini)
+    DB.rows('semi_items').forEach(r => { const c = str(r.code); if (!c) return; const o = t(c); const cl = [r.cl1, r.cl2, r.cl3].map(str);
+      o.semiK = cl.map(INV.kindOfText).find(Boolean) || ''; o.semiL = [cl[2], cl[1], cl[0]].map(INV.floorLine).find(Boolean) || ''; });
+    const isSet = (it) => INV.unitN(it.unit) === 'SET';
+    const kindFor = (proc, it, o, manualK) => {
+      if (manualK && FK.has(manualK) && FK.get(manualK).proc === proc) return manualK;
+      if (proc === 'INJ') { const inj = (k) => (k && FK.has(k) && FK.get(k).proc === 'INJ' ? k : ''); return inj(o && top(o.role)) || inj(o && o.semiK) || inj(o && top(o.logK)) || inj(INV.kindOfText(it.name)) || 'PART'; }
+      if (proc === 'REF') return 'CORE'; if (proc === 'WRP') return 'WRAP'; if (proc === 'PCK') return isSet(it) ? 'SET' : 'BOX'; return 'ASSY'; };
+    const out = new Map();
+    IT.m.forEach((it, code) => { const o = T.get(code);
+      let proc = INV.procOfText(it.proc), src = proc ? 'manual' : '';
+      const step = (p, s) => { if (!proc && p) { proc = p; src = s; } };
+      const mk = str(it.fkind); if (FK.has(mk)) step(FK.get(mk).proc, 'manual');   // 사람이 정한 구분 → 그 공정 (Codex 검토: 스푼으로 정하면 사출 · 스푼)
+      // 단위가 세트 · 박스 (SET · CT) 인 현장 품목 = 포장 (마니라 세트 · 박스). ECOUNT BOM 비고가 '조립' 이어도 (세트 BOM 줄) 포장으로 본다
+      if (/^(SET|CT)$/.test(INV.unitN(it.unit))) step('PCK', 'unit');
+      if (o) { step(top(o.logP), 'log'); const rk = top(o.role); step(rk && FK.get(rk).proc, 'master'); step(o.semiK && FK.get(o.semiK).proc, 'semi'); }
+      if (!proc) return;
+      const manualL = INV.floorLine(it.fline); let line = manualL || (o && top(o.roleL)) || (o && o.semiL) || ''; let multi = false;
+      if (!line && o) { const ls = Object.keys(o.logL).filter(Boolean); if (proc === 'INJ' && ls.length > 1) multi = true; else line = top(o.logL); }
+      if (!line && !multi) line = INV.floorLine(it.name);
+      out.set(code, { proc, kind: kindFor(proc, it, o, str(it.fkind)), line, multi, src });
+    });
+    // BOM 구조로 나머지: 부모가 조립품 · 권취품이면 부품 (심 이름이면 심), 부모가 사출 부품이면 같은 부품, 부모가 포장이면 조립품 (세트 단위면 세트), 자식만 있으면 조립품 · 세트
+    const lineOf = (list) => { const m = {}; list.forEach(x => add(m, x.line)); return top(m); };
+    for (let pass = 0; pass < 6; pass++) {
+      let changed = 0;
+      IT.m.forEach((it, code) => { if (out.has(code)) return;
+        const ps = (pars.get(code) || []).map(p => out.get(p)).filter(Boolean), ks = (kids.get(code) || []).map(k => out.get(k)).filter(Boolean); let d = null;
+        if (ps.length) { const ln = lineOf(ps) || INV.floorLine(it.name);
+          if (ps.some(x => x.proc === 'ASM' || x.proc === 'WRP')) { const k = INV.kindOfText(it.name); d = k === 'CORE' ? { proc: 'REF', kind: 'CORE' } : { proc: 'INJ', kind: k || 'PART' }; d.line = ln; }
+          else if (ps.some(x => x.proc === 'INJ')) d = { proc: 'INJ', kind: ps.find(x => x.proc === 'INJ').kind, line: ln };
+          else if (ps.some(x => x.proc === 'PCK')) d = isSet(it) ? { proc: 'PCK', kind: 'SET', line: ln } : { proc: 'ASM', kind: 'ASSY', line: ln };
+          if (d) d.src = 'bom_parent'; }
+        if (!d && ks.length) d = Object.assign(isSet(it) ? { proc: 'PCK', kind: 'SET' } : { proc: 'ASM', kind: 'ASSY' }, { line: lineOf(ks) || INV.floorLine(it.name), src: 'bom_child' });
+        if (!d) { const k = INV.kindOfText(it.name); if (k) d = { proc: FK.get(k).proc, kind: k, line: INV.floorLine(it.name), src: 'name' }; }
+        if (d) { d.multi = false; if (INV.floorLine(it.fline)) d.line = INV.floorLine(it.fline); out.set(code, d); changed++; } });
+      if (!changed) break;
+    }
+    // 품목군이 빈 품목은 BOM 부모 · 자식의 품목군으로 채운다 (공정이 먼저 정해진 품목도 — Codex 검토: 이름이 RED 인 세트 = 자식 조립품의 Mini). 묶음 이름 (multi) 은 그대로
+    for (let pass = 0; pass < 4; pass++) {
+      let changed = 0;
+      out.forEach((d, code) => { if (d.line || d.multi) return; const ln = lineOf((pars.get(code) || []).concat(kids.get(code) || []).map(x => out.get(x)).filter(x => x && x.line && !x.multi)); if (ln) { d.line = ln; changed++; } });
+      if (!changed) break;
+    }
+    // 다른 조립품의 자식인 조립품 = 조립 중간품 (사람이 정한 구분은 그대로)
+    out.forEach((d, code) => { if (d.proc === 'ASM' && d.kind === 'ASSY' && !str((IT.get(code) || {}).fkind) && (pars.get(code) || []).some(p => { const x = out.get(p); return x && x.proc === 'ASM'; })) d.kind = 'SUB'; });
+    return out;
+  });
+  INV.floorClassOf = (code) => INV.floorClass().get(code) || NO_CLASS;
+  /** multi 품목 (사출 일보의 묶음 이름) 의 생산 입고를 일보 줄의 품목군으로: 품목코드 → Map(품목군 → 양) */
+  INV.floorSplit = () => DB.memo('inv.fsplit:' + INV.prodMode() + ':' + calcSig(), ['prod_log', 'items', 'stock_open', 'bom', 'bom_lines', 'recipes', 'products', 'item_bom', 'materials', 'code_map', 'semi_items', 'refill_specs'], () => {
+    const CL = INV.floorClass(); const byId = new Map(DB.rows('prod_log').map(r => [r._id, r])); const out = new Map();
+    INV.prodPost().rows.forEach(p => { if (p.kind !== 'PROD') return; const c = CL.get(p.code); if (!c || !c.multi) return; const r = byId.get(p.ref); const ln = r ? INV.floorLine(r.division) : '';
+      let m = out.get(p.code); if (!m) out.set(p.code, m = new Map()); m.set(ln, r4((m.get(ln) || 0) + p.qty)); });
+    return out;
+  });
+
   // ------------------------------------------------------------------ ERP CODE parser
   function stageOf(seg1) {
     const s = up(seg1); if (!s) return 'ETC';

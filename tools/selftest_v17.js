@@ -2,9 +2,7 @@
 /* 17차(v1.12.x) 자동 시험: 현장 재고 위 = 피벗 표
    사용자 1.12.0: "두번째사진 형태로 조립부분만 보여줘. 다른공정들은 커스텀마이징 할수있게 해주고 엑셀 기능의 피벗테이블 처럼"
    사용자 1.12.1: "현재 재고잖아 월별은 필요없어 현재재고만 보여주면된다" — 월 열 없음, 값은 언제나 현재 재고
-   1 기본 표 = 조립 · 품목군 | 현재 재고 · 단계 카드 없음 · 2 월 열 없음 (예전 설정의 월 → 현재 재고)
-   3 설정 (공정 · 품목군 · 행 · 열 · 범위 · 제목 · 재고 0 줄) → 저장 (다시 열어도 그대로) · 4 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히
-   5 단위가 다르면 나눔 (포장 SET · CT) · 6 칸 → 아래 표 거르기 · 품목 줄 → 수불부 · 엑셀
+   1 (1.15.0 · 20차) 현장 재고 위 = 공정 카드 — 예전 1~6 (피벗 표: 공정 더하기 · 행 · 열 · 표 추가 · 월 열) 은 공정끼리 더하지 않는 새 규칙 시험 하나로 바꿈 (자세한 것은 selftest_v20)
    7 종합 현황 위젯 (1.12.2, 사용자 "종합 현황에 이거 추가할수있게 해줘") · 7-2 위젯 ⚙ 품목군 여러 개 → 고른 것만 (1.13.6)
    7-3 생산 관리 일별 · 월별 · 일보 조회 · 종합 현황 일별 · 월별 위젯도 품목군 여러 개 (1.13.8)
    7-4 현장 재고 → 원재료 환산 표 (조립 재고 옆 · 공정별 · 위젯) · 7-5 MRP 수주 가져오기: 전체 선택 · 진행 상태 · 범위 · 7-6 박스 포장의 SG 는 차감 안 함 (1.13.9)
@@ -60,11 +58,13 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
   await A.goto(S.url + '/#/home'); await ready();
 
   await ev(async (o) => { const DB = ERP.db; await DB.wipe();
-    const it = (code, name, stage, line, unit) => ({ code, name, stage, line: line || undefined, unit: unit || 'PCS', src: 'test' });
+    const it = (code, name, stage, line, unit, x) => Object.assign({ code, name, stage, line: line || undefined, unit: unit || 'PCS', src: 'test' }, x || {});
+    // 1.15.0 (20차): 현장 재고의 공정 · 구분 · 품목군은 ERP CODE 가 아니라 현장 분류 (INV.floorClass) — 이 시험 자료에는 일보 · BOM 이 없어 '생산 공정' 으로 정한다
+    const P = (proc, fkind) => (fkind ? { proc, fkind } : { proc });
     DB.replace('items', [
-      it('A-M1', 'MINI RED', 'WIP', 'MINI'), it('A-M2', 'MINI BLUE', 'WIP', 'MINI'), it('A-D1', 'DIAL RED', 'WIP', 'REG'), it('A-P1', 'PENCIL PART', 'WIP55', 'PEN'), it('A-Z', 'NO LINE', 'WIP'),
-      it('I-M1', 'BARREL MINI', 'WIP01', 'MINI'), it('R-M1', 'CORE MINI', 'WIP00', 'MINI'), it('S-M1', 'STAMPED MINI', 'WIP11', 'MINI'),
-      it('K-P1', 'PENCIL 12 MANILA', 'SG', 'PEN', 'SET'), it('K-P2', 'PENCIL 12 BOX', 'FG', 'PEN', 'CT'), it('RM-1', 'RESIN', 'RM', '', 'kg')]);
+      it('A-M1', 'MINI RED', 'WIP', 'MINI', 'PCS', P('ASM')), it('A-M2', 'MINI BLUE', 'WIP', 'MINI', 'PCS', P('ASM')), it('A-D1', 'DIAL RED', 'WIP', 'REG', 'PCS', P('ASM')), it('A-P1', 'PENCIL PART', 'WIP55', 'PEN', 'PCS', P('ASM', 'SUB')), it('A-Z', 'NO LINE', 'WIP', '', 'PCS', P('ASM')),
+      it('I-M1', 'BARREL MINI', 'WIP01', 'MINI', 'PCS', P('INJ')), it('R-M1', 'CORE MINI', 'WIP00', 'MINI', 'PCS', P('REF')), it('S-M1', 'STAMPED MINI', 'WIP11', 'MINI'),
+      it('K-P1', 'PENCIL 12 MANILA', 'SG', 'PEN', 'SET', P('PCK')), it('K-P2', 'PENCIL 12 BOX', 'FG', 'PEN', 'CT', P('PCK')), it('RM-1', 'RESIN', 'RM', '', 'kg')]);
     const fl = (code, qty) => ({ date: o.FLOOR, scope: 'FAC', code, qty, unit: 'PCS', grp: 'floor' });
     const ec = (code, qty, unit, scope) => ({ date: o.EC, scope: scope || 'FAC', code, qty, unit });
     DB.replace('stock_open', [fl('A-M1', 100), fl('A-M2', 20), fl('A-D1', 30), fl('A-P1', 40), fl('A-Z', 5), fl('I-M1', 500), fl('R-M1', 50), fl('S-M1', 70),
@@ -74,146 +74,31 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     DB.replace('prod_log', []);
     DB.meta.openDate = { WH: o.EC, FAC: o.EC, FLOOR: o.FLOOR }; DB.meta.seeded = DB.meta.seeded || new Date().toISOString(); delete DB.meta.floorPivots; await DB.saveMeta(); await DB.flush(); }, { FLOOR, EC });
 
-  await sec('1. 기본 표 = 조립 · 품목군 | 현재 재고 · 단계 카드 없음', async () => {
+  // 1.15.0 (20차): 17차의 피벗 표 (공정 여러 개를 품목군 한 칸에 더함) 는 버렸다 — 현장 재고 위 = 공정 카드. 자세한 시험은 selftest_v20.
+  //   사용자 2026-11-06 "사출현장재고따로 리필성형 현장재고 따로 조립현장재고 따로 포장 현장재고 따로" · "이카운터에서 가져온 erp코드는 무시하고 너가 만들어"
+  //   그래서 예전 1~6 (표 추가 · 순서 · 지우기 · 공정 더하기 · 행/열 고르기 · 월 열) 은 새 규칙 시험 하나로 바꿨다.
+  const ASM_ROWS = [['Mini', '120', '·'], ['Dial', '40', '·'], ['Pencil', '·', '40'], ['품목군 미지정', '5', '·'], ['합계', '165', '40']];
+  await sec('1. (1.15.0) 현장 재고 위 = 공정 카드 — 공정끼리 · 구분끼리 · 단위끼리 더하지 않음 · 단계 카드 없음', async () => {
     await floor();
-    const c = await cards();
-    eq('표 하나 · 제목 "조립 재고" (연도 없음) · 단계 카드 없음 · 연도 단추 없음', [c.length, c[0] && c[0].title, await ev(() => document.querySelectorAll('main .flow .st').length), await ev(() => document.querySelectorAll('main .fpiv .wnav').length)], [1, '조립 재고', 0, 0]);
-    eq('머리: 품목군 · 현재 재고 (월 없음)', c[0].head, ['품목군', '현재 재고']);
-    // 현재 = 현장 실사 + 그 뒤 수불 (A-M1 100 + 50 − 30 = 120, A-M2 20 → Mini 140 · Dial 30 + 10 = 40)
-    eq('줄 = 품목군 (Mini · Dial · Pencil · 기타) 현재 재고 · 합계', c[0].rows, [['Mini', '140'], ['Dial', '40'], ['Pencil', '40'], ['기타', '5'], ['합계', '225']]);
-    ok('설명: 단위 PCS · 좁은 카드 (현재 재고 한 칸)', /단위 PCS/.test(c[0].help) && c[0].narrow, c[0]);
-    eq('합계 = 조립 단계(WIP · WIP55) 품목의 재고 합 (아래 품목 표와 같은 계산)', await ev(() => ERP.inv.rows().filter(s => ERP.inv.groupOf(s) === 'floor' && ['WIP', 'WIP55'].includes(s.stage)).reduce((a, s) => a + s.bal, 0)), 225);
-    eq('설정 floorPivots 은 아직 저장 안 됨 (기본 표)', await ev(() => ERP.db.setting('floorPivots', null)), null);
-  });
-
-  await sec('2. 월 열 없음 — 예전(1.12.0) 설정의 열 "월" 도 현재 재고 한 칸으로', async () => {
-    await setPivots([{ id: 'asm', procs: ['ASM'], rows: 'div', cols: 'month' }]);
-    const c = (await cards())[0];
-    eq('cols: month → 품목군 · 현재 재고', [c.title, c.head, c.rows.slice(-1)[0]], ['조립 재고', ['품목군', '현재 재고'], ['합계', '225']]);
-    ok('표 · 설명에 "월" 없음', !/\d+월|월 =|말일/.test(await ev(() => document.querySelector('main .fpiv').innerText)));
-    await setPivots(null);
-  });
-
-  await sec('3. 설정 (엑셀 피벗처럼: 공정 · 품목군 · 행 · 열 · 범위 · 제목) → 저장', async () => {
-    await A.click('main .fpiv-card[data-id="asm"] button[data-act="edit"]'); await settle();
-    const ed = await ev(() => { const e = document.querySelector('main .fpiv-card[data-id="asm"] .fpiv-edit'); return e ? { procs: Array.from(e.querySelectorAll('[data-proc]')).map(l => [l.dataset.proc, l.querySelector('input').checked]), divs: Array.from(e.querySelectorAll('[data-div]')).map(l => [l.dataset.div, l.innerText.trim(), l.querySelector('input').checked]),
-      rows: Array.from(e.querySelectorAll('select[data-k="rows"] option')).map(o => o.textContent), cols: Array.from(e.querySelectorAll('select[data-k="cols"] option')).map(o => o.textContent) } : null; });
-    eq('설정: 공정 = 전체 + 현장에 있는 공정 (종이 권취는 품목 없어 빠짐, 스탬핑 배럴 S-M1 은 1.13.16 부터 기타, 조립만 켜짐) · 품목군 = 전체(켜짐) · Mini · Dial · Pencil · 기타 · 행 4 · 열 (월 없음, 행과 같은 품목군 빼고)', ed, {
-      procs: [['', false], ['INJ', false], ['REF', false], ['ASM', true], ['PCK', false], ['ETC', false]],
-      divs: [['', '전체', true], ['MINI', 'Mini', false], ['REG', 'Dial', false], ['PEN', 'Pencil', false], ['', '기타', false]],
-      rows: ['품목군', '공정', '단계', '품목'], cols: ['없음 (현재 재고 한 칸)', '공정', '단계'] });
-    eq('설정을 열면 넓은 카드', (await cards())[0].narrow, false);
-  });
-
-  await sec('3-2. 공정 더하기 · 열 = 공정 · 범위 · 제목 · 다시 열어도 그대로', async () => {
-    await A.click('main .fpiv-card[data-id="asm"] .fpiv-edit label[data-proc="INJ"] input'); await settle();
-    let c = (await cards())[0];
-    eq('사출 더함 → 제목 "조립 · 사출 재고" · Mini 현재 = 140 + 배럴 500 + 창고 25 = 665', [c.title, c.rows.find(r => r[0] === 'Mini').slice(-1)[0]], ['조립 · 사출 재고', '665']);
-    await ev(() => { const s = document.querySelector('main .fpiv-card[data-id="asm"] select[data-k="cols"]'); s.value = 'proc'; s.dispatchEvent(new Event('change')); }); await settle();
-    c = (await cards())[0];
-    eq('열 = 공정 → 품목군 \\ 공정 · 합계 · 사출 · 조립', [c.title, c.head], ['조립 · 사출 재고', ['품목군 \\ 공정', '합계', '사출', '조립']]);
-    eq('줄: Mini 665 = 525 + 140 · Dial 40 · Pencil 40 · 기타 5 · 합계 750', c.rows, [['Mini', '665', '525', '140'], ['Dial', '40', '·', '40'], ['Pencil', '40', '·', '40'], ['기타', '5', '·', '5'], ['합계', '750', '525', '225']]);
-    await ev(() => { const s = document.querySelector('main .fpiv-card[data-id="asm"] select[data-k="scope"]'); s.value = 'WH'; s.dispatchEvent(new Event('change')); }); await settle();
-    c = (await cards())[0];
-    eq('범위 = 창고 → 창고에 있는 것만 (배럴 Mini 25, 0 인 열 숨김) · 설명에 범위 창고', [c.rows, /범위 창고/.test(c.help)], [[['Mini', '25', '25'], ['합계', '25', '25']], true]);
-    await ev(() => { const s = document.querySelector('main .fpiv-card[data-id="asm"] select[data-k="scope"]'); s.value = 'all'; s.dispatchEvent(new Event('change')); }); await settle();
-    await ev(() => { const i = document.querySelector('main .fpiv-card[data-id="asm"] input[data-k="title"]'); i.value = '조립 + 사출'; i.dispatchEvent(new Event('change')); }); await settle();
-    eq('설정 저장 (floorPivots): 공정 ASM · INJ · 열 공정 · 제목', await ev(() => ERP.db.setting('floorPivots', null)), [{ id: 'asm', title: '조립 + 사출', procs: ['ASM', 'INJ'], divs: [], rows: 'div', cols: 'proc', scope: 'all' }]);
-    await A.reload(); await ready(); await floor();
-    c = (await cards())[0];
-    eq('다시 열어도 그대로 (제목 · 열 = 공정) · 설정 닫힘', [c.title, c.head[0], c.edit], ['조립 + 사출', '품목군 \\ 공정', false]);
-    eq('서버에 저장됨', await ev(async () => (await (await fetch('/api/meta', { cache: 'no-store' })).json()).meta.floorPivots[0].procs), ['ASM', 'INJ']);
-  });
-
-  await sec('3-3. 행 바꾸기 (공정 · 단계 · 품목) · 품목군 거르기 · 재고 0 줄', async () => {
-    await A.click('main .fpiv-card[data-id="asm"] button[data-act="edit"]'); await settle();
-    await ev(() => { const s = document.querySelector('main .fpiv-card[data-id="asm"] select[data-k="rows"]'); s.value = 'proc'; s.dispatchEvent(new Event('change')); }); await settle();
-    let c = (await cards())[0];
-    eq('행 = 공정 (열이 공정이던 것은 현재 재고 한 칸으로) → 공정 · 현재 재고', [c.head, c.rows], [['공정', '현재 재고'], [['사출', '525'], ['조립', '225'], ['합계', '750']]]);
-    await ev(() => { const s = document.querySelector('main .fpiv-card[data-id="asm"] select[data-k="rows"]'); s.value = 'stage'; s.dispatchEvent(new Event('change')); }); await settle();
-    eq('행 = 단계 → 배럴 · 부품 WIP55 · 조립 완료', (await cards())[0].rows, [['배럴 · WIP01', '525'], ['부품 · WIP55', '40'], ['조립 완료 · WIP', '185'], ['합계', '750']]);
-    await A.click('main .fpiv-card[data-id="asm"] .fpiv-edit label[data-div="MINI"] input'); await settle();
-    c = (await cards())[0];
-    eq('품목군 Mini 만 → 배럴 525 · 조립 완료 140 (넣은 제목은 그대로)', [c.title, c.rows], ['조립 + 사출', [['배럴 · WIP01', '525'], ['조립 완료 · WIP', '140'], ['합계', '665']]]);
-    await ev(() => { const i = document.querySelector('main .fpiv-card[data-id="asm"] input[data-k="title"]'); i.value = ''; i.dispatchEvent(new Event('change')); }); await settle();
-    eq('제목을 비우면 자동 제목 "조립 · 사출 재고 (Mini)"', (await cards())[0].title, '조립 · 사출 재고 (Mini)');
-    await ev(() => { const s = document.querySelector('main .fpiv-card[data-id="asm"] select[data-k="rows"]'); s.value = 'item'; s.dispatchEvent(new Event('change')); }); await settle();
-    eq('행 = 품목 → 품목코드 줄 (A-M1 · A-M2 · I-M1)', (await cards())[0].rows, [['A-M1', '120'], ['A-M2', '20'], ['I-M1', '525'], ['합계', '665']]);
-    await A.click('main .fpiv-card[data-id="asm"] tbody tr[data-k="A-M2"] td.pc'); await settle();
-    const md = await ev(() => { const m = document.querySelector('.modal'); return m ? m.querySelector('.modal-head').textContent : null; });
-    ok('품목 줄 → 그 품목 수불부 (A-M2)', !!md && /A-M2/.test(md), md);
-    await A.keyboard.press('Escape'); await settle();
+    const c = await cards(); const by = Object.fromEntries(c.map(x => [x.id, x]));
+    eq('카드 = 사출 · 리필 성형 · 조립 · 종이 권취 · 포장 · 분류 안 된 품목 · 단계 카드 없음', [c.map(x => [x.id, x.title]), await ev(() => document.querySelectorAll('main .flow .st').length)],
+      [[['INJ', '사출 재고'], ['REF', '리필 성형 재고'], ['ASM', '조립 재고'], ['WRP', '종이 권취 재고'], ['PCK', '포장 재고'], ['NONE', '분류 안 된 품목']], 0]);
+    // 현재 = 현장 실사 + 그 뒤 수불 (A-M1 100 + 50 − 30 = 120, A-M2 20 → Mini 140 · Dial 30 + 10 = 40 · A-P1 조립 중간품 40 · A-Z 품목군 없음 5)
+    eq('조립 = 품목군 × 구분 · 칸마다 합계 (조립품 + 중간품은 안 더함)', [by.ASM.head, by.ASM.rows], [['품목군 \\ 구분', '조립품', '조립 중간품'], [['Mini', '140', '·'], ['Dial', '40', '·'], ['Pencil', '·', '40'], ['품목군 미지정', '5', '·'], ['합계', '185', '40']]]);
+    eq('사출 = 배럴 Mini 525 (실사 500 + 창고 조정 25) · 리필 = Mini 50 · 포장 = SET 9 · CT 3 (단위끼리 안 더함) · 종이 권취 = 재고 없음', [by.INJ.rows, by.REF.rows, by.PCK.head, by.PCK.rows, by.WRP.rows],
+      [[['배럴', '525']], [['Mini', '50'], ['합계', '50']], ['품목군 \\ 구분', '세트 (SET)', '박스 (CT)'], [['Pencil', '9', '3'], ['합계', '9', '3']], []]);
+    eq('스탬핑 배럴 S-M1 은 공정 없음 (1.13.16) → 분류 안 된 품목 (ERP CODE 단계 WIP11 은 안 씀)', by.NONE.rows, [['S-M1', '70']]);
+    ok('원부자재 (RM-1) 는 없음', !(await ev(() => document.querySelector('main .fpiv').innerText)).includes('RM-1'));
+    eq('설정 floorCards · floorPivots 저장 안 됨', await ev(() => [ERP.db.setting('floorCards', null), ERP.db.setting('floorPivots', null)]), [null, null]);
+    await A.click('main .fpiv-card[data-id="ASM"] tbody tr[data-k="MINI"] td.pc:nth-child(2)'); await settle();
+    const f = await ev(() => ({ proc: ERP.state.stk_floor.proc, kind: ERP.state.stk_floor.kind, fline: ERP.state.stk_floor.fline, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t):not(.fraw-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort() }));
+    eq('조립 · Mini · 조립품 칸 → 아래 표 = A-M1 · A-M2', f, { proc: 'ASM', kind: 'ASSY', fline: 'MINI', codes: ['A-M1', 'A-M2'] });
+    // 아래 시험 (위젯 등) 이 쓰는 숫자: A-M2 재고 0 (예전 3-3 과 같음)
     await ev(async () => { const DB = ERP.db; DB.add('stock_tx', { date: '2026-10-06', kind: 'ADJ', to_scope: 'FAC', code: 'A-M2', qty: -20, unit: 'PCS', src: 'manual' }); await DB.flush(); ERP.render(); }); await settle();
-    eq('A-M2 재고 0 → 줄 숨김', (await cards())[0].rows.map(r => r[0]), ['A-M1', 'I-M1', '합계']);
-    await A.click('main .fpiv-card[data-id="asm"] .fpiv-edit label.fpiv-chk:has-text("재고 0인 줄도 보기") input'); await settle();
-    eq('재고 0인 줄도 보기 → A-M2 · 로 보임', (await cards())[0].rows, [['A-M1', '120'], ['A-M2', '·'], ['I-M1', '525'], ['합계', '645']]);
-    await A.click('main .fpiv-card[data-id="asm"] button[data-act="done"]'); await settle();
-    eq('완료 → 설정 닫힘', (await cards())[0].edit, false);
+    eq('A-M2 재고 0 → 조립 카드 = 위젯 시험 숫자', (await cards()).find(x => x.id === 'ASM').rows, ASM_ROWS);
   });
 
-  await sec('4. 표 추가 · 순서 · 지우기 · 기본 표로 · 좁은 표는 나란히', async () => {
-    await setPivots(null);
-    await A.click('main .fpiv-foot button[data-act="add"]'); await settle();
-    let c = await cards();
-    eq('+ 표 추가 → 둘째 표 = 다음 공정(사출) · 품목군 · 현재 재고 · 설정 열림', [c.length, c[1].title, c[1].head, c[1].edit], [2, '사출 재고', ['품목군', '현재 재고'], true]);
-    eq('사출 표: Mini 525 (배럴 500 + 창고 25)', c[1].rows, [['Mini', '525'], ['합계', '525']]);
-    await A.click('main .fpiv-foot button[data-act="add"]'); await settle();
-    c = await cards();
-    eq('한 번 더 → 셋째 표 = 리필 성형', [c.length, c[2].title], [3, '리필 성형 재고']);
-    const ids = c.map(x => x.id);
-    await ev((id) => { const b = Array.from(document.querySelectorAll('main .fpiv-card[data-id="' + id + '"] .fpiv-edit button')).find(x => x.textContent === '위로'); b.click(); }, ids[2]); await settle();
-    eq('위로 → 리필 성형 표가 둘째로', (await cards()).map(x => x.id), [ids[0], ids[2], ids[1]]);
-    // 설정을 닫으면 세 표가 한 줄에 나란히 (1480px 폭)
-    for (const id of [ids[1], ids[2]]) { await A.click('main .fpiv-card[data-id="' + id + '"] button[data-act="done"]'); await settle(); }
-    const pos = await ev(() => Array.from(document.querySelectorAll('main .fpiv-card')).map(x => [x.classList.contains('narrow'), Math.round(x.getBoundingClientRect().top)]));
-    ok('좁은 표 셋이 한 줄에 나란히', pos.length === 3 && pos.every(p => p[0]) && pos.every(p => p[1] === pos[0][1]), pos);
-    await A.click('main .fpiv-card[data-id="' + ids[2] + '"] button[data-act="edit"]'); await settle();
-    await ev((id) => document.querySelector('main .fpiv-card[data-id="' + id + '"] button[data-act="del"]').click(), ids[2]); ok('지우기 확인 창', await confirmModal()); await settle();
-    eq('표 지우기 → 2개 (조립 · 사출)', (await cards()).map(x => x.id), [ids[0], ids[1]]);
-    for (const id of [ids[0], ids[1]]) {
-      await A.click('main .fpiv-card[data-id="' + id + '"] button[data-act="edit"]'); await settle();
-      await ev((i) => document.querySelector('main .fpiv-card[data-id="' + i + '"] button[data-act="del"]').click(), id); await confirmModal(); await settle();
-    }
-    eq('모두 지우면 표 없음 · [+ 표 추가] · [기본 표로]', [(await cards()).length, await ev(() => Array.from(document.querySelectorAll('main .fpiv-foot button')).map(b => [b.dataset.act, b.textContent])), await ev(() => ERP.db.setting('floorPivots', null))], [0, [['add', '+ 표 추가'], ['reset', '기본 표로 (조립 · 품목군)']], []]);
-    await A.click('main .fpiv-foot button[data-act="reset"]'); await settle();
-    eq('기본 표로 → 조립 · 품목군 | 현재 재고', (await cards()).map(x => [x.id, x.title, x.head.join(' | ')]), [['asm', '조립 재고', '품목군 | 현재 재고']]);
-  });
-
-  await sec('5. 단위가 다르면 나눔 (포장 SET · CT) · 모든 공정', async () => {
-    await setPivots([{ id: 'all', procs: [], rows: 'proc', cols: 'div' }]);
-    const c = (await cards())[0];
-    eq('모든 공정 재고 · 공정 \\ 품목군 · 합계 · Mini · Dial · Pencil · 기타 · 넓은 카드', [c.title, c.head, c.narrow], ['모든 공정 재고', ['공정 \\ 품목군', '합계', 'Mini', 'Dial', 'Pencil', '기타'], false]);
-    eq('공정 줄 (단위별) · 포장 CT 3 · SET 7 + 9/15 조정 2 = 9 · 스탬핑 배럴은 기타 (1.13.16) · 단위별 합계', c.rows, [
-      ['사출 · PCS', '525', '525', '·', '·', '·'], ['리필 성형 · PCS', '50', '50', '·', '·', '·'], ['조립 · PCS', '205', '120', '40', '40', '5'],
-      ['포장 · CT', '3', '·', '·', '3', '·'], ['포장 · SET', '9', '·', '·', '9', '·'], ['기타 · PCS', '70', '70', '·', '·', '·'],
-      ['합계 · CT', '3', '·', '·', '3', '·'], ['합계 · PCS', '850', '765', '40', '40', '5'], ['합계 · SET', '9', '·', '·', '9', '·']]);
-    ok('원부자재(RM-1)는 없음', !(await ev(() => document.querySelector('main .fpiv').innerText)).includes('RM-1'));
-    await setPivots([{ id: 'pk', procs: ['PCK'], rows: 'div', cols: 'none' }]);
-    eq('포장만 · 현재 재고: Pencil CT 3 · SET 9 (단위별 줄 · 합계)', (await cards())[0].rows, [['Pencil · CT', '3'], ['Pencil · SET', '9'], ['합계 · CT', '3'], ['합계 · SET', '9']]);
-  });
-
-  await sec('6. 칸 → 아래 표 거르기 (공정 · 품목군) · 엑셀', async () => {
-    await setPivots(null); await floor();
-    await A.click('main .fpiv-card tbody tr[data-k="MINI"] td.pc:last-child'); await settle();
-    const f = await ev(() => ({ proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort(), chip: Array.from(document.querySelectorAll('main .toolbar button')).map(b => b.textContent).filter(t => /×$/.test(t)) }));
-    eq('Mini 칸 → 아래 표 = 조립 · Mini 품목 (A-M1 · 재고 0 이지만 수불 있는 A-M2) · "조립 · Mini ×"', f, { proc: 'ASM', line: 'MINI', codes: ['A-M1', 'A-M2'], chip: ['조립 · Mini ×'] });
-    await A.click('main .fpiv-card tbody tr[data-k=""] td.pc:first-child'); await settle();
-    eq('기타(품목군 없음) 줄 → 조립 품목 전체 (품목군 거르기 없음)', await ev(() => [ERP.state.stk_floor.proc, ERP.state.stk_floor.line]), ['ASM', '']);
-    await setPivots([{ id: 'all', procs: [], rows: 'div', cols: 'proc' }]);
-    await A.click('main .fpiv-card tbody tr[data-k="MINI"] td.pc:nth-child(3)'); await settle();
-    eq('품목군 × 공정 표의 Mini · 사출 칸 → 사출 · Mini', await ev(() => [ERP.state.stk_floor.proc, ERP.state.stk_floor.line]), ['INJ', 'MINI']);
-    await ev(() => { window.__xl = null; ERP.xl.exportAoa = (name, hdr, rows) => { window.__xl = { name, hdr, rows }; }; });
-    await A.click('main .fpiv-card button[data-act="xl"]'); await settle();
-    const x = await ev(() => window.__xl);
-    eq('엑셀 = 머리 · 줄 6 + 단위별 합계 3 (보이는 표 그대로)', x && [x.name, x.hdr, x.rows[0], x.rows.length, x.rows.slice(-1)[0]], ['floor_pivot', ['품목군', '합계', '사출', '리필 성형', '조립', '포장', '기타'], ['Mini · PCS', 765, 525, 50, 120, 0, 70], 9, ['합계 · SET', 9, 0, 0, 0, 9, 0]]);
-    await setPivots(null);
-    await A.click('main .fpiv-card button[data-act="xl"]'); await settle();
-    const y = await ev(() => window.__xl);
-    eq('기본 표 엑셀 = 품목군 · 현재 재고', y && [y.hdr, y.rows], [['품목군', '현재 재고'], [['Mini', 120], ['Dial', 40], ['Pencil', 40], ['기타', 5], ['합계', 205]]]);
-  });
-
-  await sec('7. 종합 현황 위젯 (1.12.2): 위젯 추가 → 현장 재고 (공정별 현재 재고) · ⚙ 공정 · 여러 개 · 칸 → 현장 재고', async () => {
-    await setPivots(null);
+  await sec('7. 종합 현황 위젯 (1.12.2 · 1.15.0): 위젯 추가 → 현장 재고 (공정별 현재 재고) · ⚙ 공정 하나 · 여러 개 · 칸 → 현장 재고', async () => {
     await A.emulateMedia({ reducedMotion: 'reduce' });   // 편집 모드의 흔들림 애니메이션 끄기 (클릭 시험용, v7 과 같음)
     // 1.12.5 부터 기본 배치에 조립 재고 위젯이 있어, 없는 배치에서 위젯 추가를 본다
     await ev(() => { ERP.db.setSetting('dash', [{ k: 'v17-pm', id: 'kpi_pck_month', w: 1 }]); ERP.state.dashEdit = true; ERP.goto('dashboard'); ERP.render(); }); await settle();
@@ -223,23 +108,23 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await A.click('.modal .wgal-item:has(b:text-is("현장 재고 (공정별 현재 재고)")) button'); await settle();
     const wOf = () => ev(() => Array.from(document.querySelectorAll('.wgrid .w[data-id=floor_stock]')).map(el => ({ title: el.querySelector('h2').textContent, head: Array.from(el.querySelectorAll('thead th')).map(t => t.innerText.trim()), rows: Array.from(el.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())), w: el.dataset.w, help: (el.querySelector('p.help') || {}).textContent })));
     let w = await wOf();
-    eq('추가한 위젯 = 조립 재고 · 품목군 | 현재 재고 (현장 재고 위 표와 같은 숫자) · 가로 1칸 · 단위 PCS', w, [{ title: '조립 재고', head: ['품목군', '현재 재고'], rows: [['Mini', '120'], ['Dial', '40'], ['Pencil', '40'], ['기타', '5'], ['합계', '205']], w: '1', help: '단위 PCS · 현재 재고' }]);
+    eq('추가한 위젯 = 조립 재고 · 품목군 × 구분 (현장 재고 위 카드와 같은 숫자) · 가로 1칸 · 단위 PCS', w, [{ title: '조립 재고', head: ['품목군 \\ 구분', '조립품', '조립 중간품'], rows: ASM_ROWS, w: '1', help: '단위 PCS · 현재 재고' }]);
     await A.click('.wgrid .w[data-id=floor_stock] .wbar button[title="위젯 설정"]'); await A.waitForSelector('.modal select');
     const opts = await ev(() => Array.from(document.querySelectorAll('.modal select')).map(s => Array.from(s.options).map(o => o.textContent)));
-    eq('⚙: 공정 (모든 공정 + 공정 + 기타) · 행 · 열', opts, [['모든 공정', '사출', '리필 성형', '조립', '종이 권취', '포장', '기타'], ['품목군', '공정', '단계', '품목'], ['없음 (현재 재고 한 칸)', '공정', '품목군', '단계']]);
+    eq('⚙: 공정 (하나만 — 모든 공정 없음, 1.15.0) · 줄', opts, [['사출', '리필 성형', '조립', '종이 권취', '포장'], ['품목군까지', '품목 (색) 까지']]);
     await ev(() => { const s = document.querySelectorAll('.modal select')[0]; s.value = 'INJ'; s.dispatchEvent(new Event('change')); });
     await A.click('.modal .modal-foot button.primary'); await settle();
     w = await wOf();
-    eq('⚙ 공정 = 사출 → 사출 재고 · Mini 525', [w[0].title, w[0].rows], ['사출 재고', [['Mini', '525'], ['합계', '525']]]);
+    eq('⚙ 공정 = 사출 → 사출 재고 · 배럴 Mini 525', [w[0].title, w[0].rows], ['사출 재고', [['배럴', '525']]]);
     await A.click('main button:has-text("위젯 추가")'); await A.waitForSelector('.modal .wgal');
     await A.click('.modal .wgal-item:has(b:text-is("현장 재고 (공정별 현재 재고)")) button'); await settle();
-    eq('하나 더 (여러 개) → 사출 · 조립 두 개 저장', await ev(() => ERP.dashLayout().filter(x => x.id === 'floor_stock').map(x => x.o)), [{ proc: 'INJ', rows: 'div', cols: 'none' }, { proc: 'ASM', rows: 'div', cols: 'none' }]);
+    eq('하나 더 (여러 개) → 사출 · 조립 두 개 저장', await ev(() => ERP.dashLayout().filter(x => x.id === 'floor_stock').map(x => x.o.proc)), ['INJ', 'ASM']);
     eq('1.12.5 기본 배치에는 조립 재고 위젯이 하나 (사용자 배치)', await ev(() => ERP.dashDefault().filter(x => x.id === 'floor_stock').map(x => x.o.proc)), ['ASM']);
     await ev(() => { ERP.state.dashEdit = false; ERP.render(); }); await settle();
-    await ev(() => { const el = Array.from(document.querySelectorAll('.wgrid .w[data-id=floor_stock]')).pop(); el.querySelector('tbody tr[data-k="MINI"] td.pc:last-child').click(); });
+    await ev(() => { const el = Array.from(document.querySelectorAll('.wgrid .w[data-id=floor_stock]')).pop(); el.querySelector('tbody tr[data-k="MINI"] td.pc:nth-child(2)').click(); });
     await A.waitForFunction(() => location.hash === '#/floor', null, { timeout: 15000 }); await settle();
-    const f = await ev(() => ({ hash: location.hash, proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort() }));
-    eq('조립 위젯의 Mini 칸 → 현장 재고 · 조립 · Mini 품목', f, { hash: '#/floor', proc: 'ASM', line: 'MINI', codes: ['A-M1', 'A-M2'] });
+    const f = await ev(() => ({ hash: location.hash, proc: ERP.state.stk_floor.proc, fline: ERP.state.stk_floor.fline, codes: Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t):not(.fraw-t) tbody tr')).map(tr => tr.children[0].innerText.trim()).sort() }));
+    eq('조립 위젯의 Mini 칸 → 현장 재고 · 조립 · Mini 품목', f, { hash: '#/floor', proc: 'ASM', fline: 'MINI', codes: ['A-M1', 'A-M2'] });
     await ev(() => { ERP.db.setSetting('dash', null); ERP.state.stk_floor = null; }); await settle();
   });
 
@@ -253,20 +138,20 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     const tick = async (sel) => { await A.click('.modal [data-k="divs"] ' + sel + ' input'); await A.waitForTimeout(100); };
     const openDlg = async () => { await A.click('.wgrid .w[data-id=floor_stock] .wbar button:has-text("⚙")'); await A.waitForSelector('.modal select'); };
     const procTo = async (p) => { await ev((x) => { const s = document.querySelector('.modal select'); s.value = x; s.dispatchEvent(new Event('change')); }, p); await A.waitForTimeout(100); };
-    const ALL = [['Mini', '120'], ['Dial', '40'], ['Pencil', '40'], ['기타', '5'], ['합계', '205']];
-    eq('처음: 조립 재고 = Mini · Dial · Pencil · 기타 · 합계 205', (await wOf()).rows, ALL);
+    const ALL = ASM_ROWS; const PICK = [['Mini', '120', '·'], ['Pencil', '·', '40'], ['합계', '120', '40']];
+    eq('처음: 조립 재고 = Mini · Dial · Pencil · 품목군 미지정 · 칸마다 합계', (await wOf()).rows, ALL);
     await openDlg();
-    eq('⚙ 에 품목군: 전체 (켜짐) + 조립 재고에 있는 품목군 Mini · Dial · Pencil · 기타 (꺼짐)', await dlg(), { label: '품목군', all: true, opts: [['MINI', 'Mini', false], ['REG', 'Dial', false], ['PEN', 'Pencil', false], ['', '기타', false]] });
-    eq('공정 · 행 · 열 고르기는 그대로', await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent)), ['공정 (기본 조립)', '품목군', '행', '열']);
+    eq('⚙ 에 품목군: 전체 (켜짐) + 조립 재고에 있는 품목군 Mini · Dial · Pencil · 품목군 미지정 (꺼짐)', await dlg(), { label: '품목군', all: true, opts: [['MINI', 'Mini', false], ['REG', 'Dial', false], ['PEN', 'Pencil', false], ['', '품목군 미지정', false]] });
+    eq('공정 · 품목군 · 줄 고르기 (1.15.0: 행 · 열 대신 줄)', await ev(() => Array.from(document.querySelectorAll('.modal .field > label')).map(l => l.textContent)), ['공정 (기본 조립)', '품목군', '줄']);
     await tick('[data-v="MINI"]'); await tick('[data-v="PEN"]');
-    eq('Mini · Pencil 을 고르면 (여러 개) 전체는 꺼짐', await dlg(), { label: '품목군', all: false, opts: [['MINI', 'Mini', true], ['REG', 'Dial', false], ['PEN', 'Pencil', true], ['', '기타', false]] });
+    eq('Mini · Pencil 을 고르면 (여러 개) 전체는 꺼짐', await dlg(), { label: '품목군', all: false, opts: [['MINI', 'Mini', true], ['REG', 'Dial', false], ['PEN', 'Pencil', true], ['', '품목군 미지정', false]] });
     await A.click('.modal .modal-foot button.primary'); await settle();
-    eq('저장 → 고른 품목군만: Mini 120 · Pencil 40 · 합계 160 (제목 · 머리 그대로)', await wOf(), { title: '조립 재고', head: ['품목군', '현재 재고'], rows: [['Mini', '120'], ['Pencil', '40'], ['합계', '160']] });
-    eq('위젯 설정에 저장 (공정 · 행 · 열 그대로)', await ev(() => ERP.dashLayout().find(x => x.id === 'floor_stock').o), { proc: 'ASM', rows: 'div', cols: 'none', divs: ['MINI', 'PEN'] });
+    eq('저장 → 고른 품목군만: Mini 조립품 120 · Pencil 중간품 40 (제목 · 머리 그대로)', await wOf(), { title: '조립 재고', head: ['품목군 \\ 구분', '조립품', '조립 중간품'], rows: PICK });
+    eq('위젯 설정에 저장 (공정 · 품목군)', await ev(() => { const o = ERP.dashLayout().find(x => x.id === 'floor_stock').o; return [o.proc, o.divs]; }), ['ASM', ['MINI', 'PEN']]);
     await ev(() => { ERP.state.dashEdit = false; ERP.render(); }); await settle();
-    eq('편집을 끝내도 고른 것만', (await wOf()).rows, [['Mini', '120'], ['Pencil', '40'], ['합계', '160']]);
+    eq('편집을 끝내도 고른 것만', (await wOf()).rows, PICK);
     await A.reload(); await ready(); await show();
-    eq('다시 열어도 그대로 (서버에 저장됨)', (await wOf()).rows, [['Mini', '120'], ['Pencil', '40'], ['합계', '160']]);
+    eq('다시 열어도 그대로 (서버에 저장됨)', (await wOf()).rows, PICK);
     await openDlg();
     eq('⚙ 을 다시 열면 Mini · Pencil 켜짐', [(await dlg()).all, (await dlg()).opts.map(x => x[2])], [false, [true, false, true, false]]);
     await procTo('INJ');
@@ -277,13 +162,13 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     await tick('[data-v="REG"]'); await tick('[data-all]');
     eq('전체를 켜면 고른 것이 모두 꺼짐', [(await dlg()).all, (await dlg()).opts.some(x => x[2])], [true, false]);
     await A.click('.modal .modal-foot button.primary'); await settle();
-    eq('전체로 저장 → 예전처럼 모두 (합계 205) · 저장된 품목군은 비움', [(await wOf()).rows, await ev(() => ERP.dashLayout().find(x => x.id === 'floor_stock').o.divs)], [ALL, []]);
+    eq('전체로 저장 → 예전처럼 모두 · 저장된 품목군은 비움', [(await wOf()).rows, await ev(() => ERP.dashLayout().find(x => x.id === 'floor_stock').o.divs)], [ALL, []]);
     await openDlg(); await tick('[data-v="REG"]'); await A.click('.modal .modal-foot button:not(.primary)'); await settle();
     eq('고르고 취소 → 바뀌지 않음', (await wOf()).rows, ALL);
     await ev(() => ERP.setLang('vi')); await show();
     await openDlg();
     const v = await ev(() => document.querySelector('.modal [data-k="divs"]').closest('.field').innerText.replace(/\s+/g, ' '));
-    ok('베트남어: Nhóm · Tất cả · Khác · 한글 없음', /Nhóm/.test(v) && /Tất cả/.test(v) && /Khác/.test(v) && !/[가-힣]/.test(v), v);
+    ok('베트남어: Nhóm · Tất cả · Chưa có nhóm · 한글 없음', /Nhóm/.test(v) && /Tất cả/.test(v) && /Chưa có nhóm/.test(v) && !/[가-힣]/.test(v), v);
     await A.keyboard.press('Escape'); await settle();
     await ev(() => ERP.setLang('ko'));
     await ev(() => { ERP.db.setSetting('dash', null); ERP.state.dashEdit = false; ERP.render(); }); await settle();
@@ -370,7 +255,7 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('현장 재고 (A-M1 120 · 배럴 I-M1 525 · 심 R-M1 50)', exp.bal, { 'A-M1': 120, 'I-M1': 525, 'R-M1': 50 });
     const CELL = { 'RM-1': { INJ: '1.05', REF: '·', ASM: '0.24' }, 'RM-2': { INJ: '·', REF: '0.05', ASM: '0.12' }, '합계': { INJ: '1.05', REF: '0.05', ASM: '0.36' } };
     const r0 = await rv('main .fpiv .fraw-card');
-    eq('조립 재고 표 바로 오른쪽 (다음) 에 원재료 환산 표', await ev(() => !!document.querySelector('main .fpiv .fpiv-card[data-id="asm"] + .fraw-card')), true);
+    eq('공정 카드 바로 다음에 원재료 환산 표 (1.15.0)', await ev(() => { const r = document.querySelector('main .fpiv .fraw-card'); return !!(r && r.previousElementSibling && r.previousElementSibling.classList.contains('fpiv-card')); }), true);
     eq('원재료 환산: 원재료 · 합계 · 공정별 (kg, 많은 순) — 조립 = 배럴 · 심을 거쳐 원료까지', r0 && { title: r0.title, head: r0.head, rows: r0.rows },
       { title: '원재료 환산 (현장 재고)', head: ['원재료', '합계'].concat(exp.procs.map(p => exp.names[p])),
         rows: [['RM-1 RESIN', '1.29'].concat(exp.procs.map(p => CELL['RM-1'][p])), ['RM-2 WAX', '0.17'].concat(exp.procs.map(p => CELL['RM-2'][p])), ['합계', '1.46'].concat(exp.procs.map(p => CELL['합계'][p]))] });
@@ -1141,8 +1026,8 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
 
   await sec('11. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => ERP.setLang('vi')); await floor();
-    const c = (await cards())[0];
-    eq('베트남어: 제목 · 머리 · 합계', [c.title, c.head, c.rows.slice(-1)[0][0]], ['Lắp ráp — tồn', ['Nhóm', 'Tồn hiện tại'], 'Tổng']);
+    const c = (await cards()).find(x => x.id === 'ASM');
+    eq('베트남어: 조립 카드 제목 · 머리 · 합계', [c.title, c.head, c.rows.slice(-1)[0][0]], ['Lắp ráp — tồn', ['Nhóm \\ Loại', 'Hàng lắp ráp', 'Lắp ráp trung gian'], 'Tổng']);
     await A.click('main .fpiv-card button[data-act="edit"]'); await settle();
     const vt = await ev(() => document.querySelector('main .fpiv').innerText);
     ok('베트남어 설정에 한글 없음', !/[가-힣]/.test(vt), vt.match(/.{0,20}[가-힣]+.{0,20}/g));

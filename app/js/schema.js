@@ -256,7 +256,10 @@
       { k: 'set_per_ct', ko: 'CT당 set', vi: 'Bộ/thùng', t: 'n' },
       { k: 'pcs_per_set', ko: 'set당 pcs', vi: 'Cái/bộ', t: 'n' },
       { k: 'type', ko: 'BOM 유형', vi: 'Loại BOM', t: 's', opts: () => ERP.ITEM_TYPES.map(x => ({ v: x.v, ko: x.ko, vi: x.vi })) },
-      { k: 'proc', ko: '생산 공정', vi: 'Công đoạn SX', t: 't' },
+      // 20차 (1.15.0): 현장 재고의 공정 · 구분 · 품목군 — 비우면 생산 일보 · BOM · 반제품 목록으로 자동 (INV.floorClass, ERP CODE 안 씀)
+      { k: 'proc', ko: '생산 공정', vi: 'Công đoạn SX', t: 's', opts: procOpts },
+      { k: 'fkind', ko: '현장 구분', vi: 'Loại (hiện trường)', t: 's', opts: () => ERP.inv.FLOOR_KINDS.map(x => ({ v: x.k, ko: x.ko, vi: x.vi })) },
+      { k: 'fline', ko: '현장 품목군', vi: 'Nhóm (hiện trường)', t: 's', opts: () => ERP.inv.LINE_ORDER.map(k => ({ v: k, ko: ERP.inv.LINE_DIV[k], vi: ERP.inv.LINE_DIV[k] })) },
       { k: 'safety_move', ko: '안전재고관리-창고이동', vi: 'QL tồn AT - chuyển kho', t: 't' },
       // 16차: 해외 주문 품목 (자재구매 파일 Oder Korea 표) — 원부자재 재고 → 해외 주문 탭에서 따로 본다
       { k: 'buy', ko: '해외 주문 품목', vi: 'Hàng đặt nước ngoài', t: 'b' },

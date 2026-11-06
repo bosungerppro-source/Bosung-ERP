@@ -78,6 +78,13 @@
     const ws = XLSX().utils.aoa_to_sheet([header].concat(rows)); ws['!cols'] = header.map(h2 => ({ wch: Math.max(10, String(h2).length + 4) }));
     const wb = XLSX().utils.book_new(); XLSX().utils.book_append_sheet(wb, ws, name.slice(0, 31)); save(wb, name + '_' + ERP.fmt.today() + '.xlsx');
   };
+  /** 20차: 여러 시트 [{ name, header, rows }] → 통합 문서 하나 (시트 이름 31자 · 같은 이름은 번호) */
+  XL.exportSheets = function (name, sheets) {
+    const wb = XLSX().utils.book_new(); const used = new Set();
+    (sheets || []).forEach((s, i) => { let n = String(s.name || ('Sheet' + (i + 1))).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31).trim() || ('Sheet' + (i + 1)); let k = 2; while (used.has(n)) n = n.slice(0, 27) + ' ' + (k++); used.add(n);
+      const ws = XLSX().utils.aoa_to_sheet([s.header || []].concat(s.rows || [])); ws['!cols'] = (s.header || []).map(h2 => ({ wch: Math.max(10, String(h2).length + 4) })); XLSX().utils.book_append_sheet(wb, ws, n); });
+    save(wb, name + '_' + ERP.fmt.today() + '.xlsx');
+  };
   /** all tables → one workbook (sheet name = table key, header = localized labels) */
   XL.exportAll = function (tables) {
     const wb = XLSX().utils.book_new();

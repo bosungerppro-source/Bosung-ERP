@@ -180,6 +180,10 @@ select.partsel{max-width:150px;min-width:96px;font-size:12px;font-weight:600;pad
 .fpiv-chk.on{border-color:var(--accent);background:#F5F9FF}
 .field .fpiv-chk{font-weight:400;color:inherit}
 .fpiv-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fpiv-warns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.fpiv-w{border:0;background:none;padding:0;cursor:pointer;font:inherit}
+.fpiv-wh{font-size:13px;margin:10px 0 4px}
+.fstk-tabs{display:inline-flex;flex-wrap:wrap;gap:4px}
 .tbl.dt td.pc{cursor:pointer}.tbl.dt td.pc:hover{background:#F5F9FF}
 .tbl.dt.nostick2 th:nth-child(2),.tbl.dt.nostick2 td:nth-child(2){position:static;left:auto;box-shadow:none;z-index:auto}
 .tbl.dt.nostick2 thead th:nth-child(2){background:#F7F8FA}

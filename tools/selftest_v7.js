@@ -91,14 +91,14 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     await ev(() => { ERP.state.stk_mat = null; ERP.state.stk_floor = null; ERP.goStock('mat'); ERP.render(); }); await page.waitForTimeout(300);
     const cm = await cardCodes();
     await ev(() => { ERP.goStock('floor'); ERP.render(); }); await page.waitForTimeout(300);
-    // 1.12.0: 현장 재고 위 = 피벗 표 (기본 조립 · 품목군 × 월) — 단계 카드 · 공정별 칸 없음, 품목군 이름은 일보 품목군 (이름 없는 제품군은 코드만)
-    const pv = await ev(() => { const c = document.querySelector('main .fpiv-card'); return { cards: document.querySelectorAll('main .fpiv-card').length, st: document.querySelectorAll('main .flow .st').length, title: c ? c.querySelector('h2').textContent : '',
-      head: c ? Array.from(c.querySelectorAll('thead th')).map(t => t.innerText.replace(/\s+/g, ' ').trim()) : [], rows: c ? Array.from(c.querySelectorAll('tbody tr:not(.tot) td:first-child')).map(td => td.innerText.trim()) : [] }; });
+    // 1.15.0 (20차): 현장 재고 위 = 공정 카드 (사출 · 리필 성형 · 조립 · 종이 권취 · 포장 — 공정마다 따로), 단계 카드 없음. 조립 카드 줄 = 품목군 이름 (1.12.0 피벗 표 대신)
+    const pv = await ev(() => { const c = document.querySelector('main .fpiv-card[data-id="ASM"]'); return { cards: Array.from(document.querySelectorAll('main .fpiv-card')).map(x => x.dataset.id), st: document.querySelectorAll('main .flow .st').length, title: c ? c.querySelector('h2').textContent : '',
+      rows: c ? Array.from(c.querySelectorAll('tbody tr:not(.tot) td:first-child')).map(td => td.innerText.trim()) : [] }; });
     eq('원부자재 재고 흐름 카드 = RM · SM · CM', cm, ['RM', 'SM', 'CM']);
-    ok('현장 재고 위 = 피벗 표 하나 (조립 재고 · 품목군 | 현재 재고, 1.12.1 월 없음) · 단계 카드 없음 · 줄 = 품목군 (이름 없는 제품군은 코드만)', pv.cards === 1 && pv.st === 0 && pv.title === '조립 재고' && pv.head.join(' | ') === '품목군 | 현재 재고' && pv.rows.length > 0 && pv.rows.every(t => ['Mini', 'Dial', 'Pencil', 'Click pencil', 'Glass', 'Marker', '기타'].includes(t) || /^[A-Z0-9]+$/.test(t)), pv);
-    await page.click('main .fpiv-card tbody tr:not(.tot) td.pc'); await page.waitForTimeout(300);
-    const r = await ev(() => ({ proc: ERP.state.stk_floor.proc, line: ERP.state.stk_floor.line, rows: document.querySelectorAll('main table.tbl:not(.fpiv-t) tbody tr').length }));
-    ok('피벗 표 줄 → 아래 표가 그 공정(조립) · 품목군 품목', r.proc === 'ASM' && r.rows > 0, r);
+    ok('현장 재고 위 = 공정 카드 (사출 · 리필 성형 · 조립 · 종이 권취 · 포장) · 단계 카드 없음 · 조립 카드 줄 = 품목군 이름', pv.cards.slice(0, 5).join(',') === 'INJ,REF,ASM,WRP,PCK' && pv.st === 0 && pv.title === '조립 재고' && pv.rows.length > 0 && pv.rows.every(t => ['Mini', 'Dial', 'Pencil', 'Click pencil', 'Glass', 'Marker', '품목군 미지정'].includes(t)), pv);
+    await page.click('main .fpiv-card[data-id="ASM"] tbody tr:not(.tot) td.pc'); await page.waitForTimeout(300);
+    const r = await ev(() => ({ proc: ERP.state.stk_floor.proc, fline: ERP.state.stk_floor.fline, rows: document.querySelectorAll('main table.tbl:not(.fpiv-t):not(.fraw-t) tbody tr').length }));
+    ok('조립 카드 줄 → 아래 표가 그 공정(조립) · 품목군 품목', r.proc === 'ASM' && r.rows > 0, r);
     const sus = await ev(async () => { const out = {}; for (const g of ['mat', 'floor']) { ERP.goStock(g); ERP.state['stk_' + g] = { stage: '', line: '', sub: '', cat: '', scope: 'all', status: 'susp', q: '', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }; ERP.render(); out[g] = parseInt(document.querySelector('main .pager span').textContent.replace(/,/g, ''), 10); } return out; });
     eq('이동 누락 의심 = 원부자재 + 현장 재고 = 71', sus.mat + sus.floor, 71);
     await ev(() => { ERP.state.stk_mat.status = ''; ERP.state.stk_mat.q = 'rm wax bees'; ERP.goStock('mat'); ERP.render(); }); await page.waitForTimeout(300);
@@ -400,7 +400,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     const p2 = await browser.newPage(); const e2 = []; p2.on('pageerror', e => e2.push(e.message));
     await p2.goto('file://' + path.join(ROOT, 'dist/ERP_Demo.html') + '#/materials'); await p2.waitForFunction(() => window.ERP && ERP.db && ERP.db.ready, null, { timeout: 120000 }); await p2.waitForTimeout(800);
     const r = await p2.evaluate(() => { const a = document.querySelectorAll('.flow .st').length; ERP.goStock('floor'); ERP.render(); const b = document.querySelectorAll('main .fpiv-card table.fpiv-t tbody tr').length, bs = document.querySelectorAll('.flow .st').length; ERP.goto('dashboard'); ERP.render(); return { mode: ERP.db.mode, items: ERP.db.rows('items').length, open: ERP.db.rows('stock_open').length, flow: [a, b > 0 && bs === 0], widgets: document.querySelectorAll('.wgrid .w').length }; });
-    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고는 피벗 표) · 위젯 7 (1.12.5 기본 배치)', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, true], 7]); ok('데모 오류 0', e2.length === 0, e2);
+    eq('데모: 브라우저 모드 · 품목 · 기초재고 · 흐름 카드(원부자재 3 · 현장 재고는 공정 카드) · 위젯 7 (1.12.5 기본 배치)', [r.mode, r.items, r.open, r.flow, r.widgets], ['local', 2265, 1276, [3, true], 7]); ok('데모 오류 0', e2.length === 0, e2);
   }
 
   section('18. 저장 표시 · 닫기 전 저장 · 베트남어 빈 글자');
