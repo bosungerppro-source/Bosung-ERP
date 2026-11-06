@@ -251,6 +251,90 @@
   const lockPcs = () => { const DB = ERP.db; let n = 0;
     DB.rows('po').forEach(p => { if (!p.lock || !String(p.lock).split(',').includes('color')) return; const c = N(p.color), s = N(p.sets); if (!c || s === null || !(N(p.pcs) > 0) || N(p.pcs) === s * c) return; p.pcs = s * c; n++; });
     if (n) DB.touch('po'); };
+  // 1.14.3 (사용자 2026-11-06 "수주관리 수량이 중복되서 게속 들어가는거같아"): 수주가 겹쳐 들어가지 않게
+  //   ① PO 번호 없는 줄 (품번 있음) 은 PO 번호2 · 품번 · set · 납기로 같은 줄을 찾는다 (set 이나 납기만 바뀌었으면 PO 번호2 · 품번 · 납기 → PO 번호2 · 품번 으로, 하나뿐일 때만).
+  //      예전 키 (TABLES.po.nat — 수주일 · 품목군 · 구분2 · 색상수 포함) 는 파일의 구분2 표기 (0 · 3RRP) 가 ERP (빈칸 · RRP) 와 다르면 새 줄이 돼,
+  //      11-06 생산관리 파일이 10-30 작업지시서의 PO 미정 16줄을 한 번 더 넣었다. 품번도 없는 줄 (예전 품목군별 월 합계) 은 예전 키 그대로.
+  //   ② 새로 들어갈 PO 줄이 이미 있는 수주와 같은 수주로 보이면 넣지 않고 미리보기에 알린다 — 품번 · set · 납기가 같고 PO 번호의 이웃한 두 숫자만 바뀜 (11-06 5100356187 = 5100365187),
+  //      같은 PO 에 품번 앞부분만 · 기호만 다르고 set 같음 (캐나다 수주서에서 앞부분만 읽은 68 = 68-7503-0-001). 다른 수주이면 반영 방식 "비슷한 줄도 넣기".
+  const isNone = (p) => ERP.calc.isPoNone(p.po_no);
+  const kv = (r, ks) => ks.map(k => String(r[k] === undefined || r[k] === null ? '' : r[k]).trim().toLowerCase()).join('\u0001');
+  const alnum = (s) => String(s === undefined || s === null ? '' : s).toLowerCase().replace(/[^0-9a-z]/g, '');
+  const basePo = (s) => String(s === undefined || s === null ? '' : s).trim().replace(/-\d{1,2}$/, '');
+  const day10 = (v) => String(v === undefined || v === null ? '' : v).slice(0, 10);
+  const swap1 = (a, b) => { if (a.length !== b.length || a === b) return false; const d = []; for (let i = 0; i < a.length && d.length < 3; i++) if (a[i] !== b[i]) d.push(i);
+    return d.length === 2 && d[1] === d[0] + 1 && a[d[0]] === b[d[1]] && a[d[1]] === b[d[0]]; };   // 이웃한 두 글자만 서로 바뀜
+  /** 새로 들어갈 PO 줄 중 이미 있는 수주 (base, 기본 = 지금 수주 표) 와 같은 수주로 보이는 것 [{ row, like }] (keys 로 맞는 줄 = 갱신은 빼고) */
+  function similarPo(rows, keys, base) {
+    const cur = (base || ERP.db.rows('po')).filter(p => !isNone(p)); const have = new Set(cur.map(p => kv(p, keys)));
+    const by = (f) => { const m = new Map(); cur.forEach(p => { const k = f(p); if (!k) return; let a = m.get(k); if (!a) m.set(k, a = []); a.push(p); }); return m; };
+    const byItem = by(p => alnum(p.item_no)), byPo = by(p => basePo(p.po_no)); const out = [];
+    rows.forEach(r => { if (isNone(r) || have.has(kv(r, keys))) return;
+      const it = alnum(r.item_no), po = basePo(r.po_no), sets = Number(r.sets);
+      const like = (byItem.get(it) || []).find(p => Number(p.sets) === sets && day10(p.due) === day10(r.due) && swap1(basePo(p.po_no), po))
+        || (it.length >= 2 ? (byPo.get(po) || []).find(p => { const a = alnum(p.item_no); return (a === it || a.startsWith(it) || it.startsWith(a)) && Number(p.sets) === sets; }) : null);
+      if (like) out.push({ row: r, like }); });
+    return out;
+  }
+  /** PO 번호 없는 줄 (품번 있음) ↔ 이미 있는 PO 번호 없는 줄 (base, 기본 = 지금 수주 표) — 맞으면 그 줄의 _id 를 붙인 사본 (DB.upsert 키 = _id) */
+  function matchPoNone(rows, base) {
+    const cur = (base || ERP.db.rows('po')).filter(p => isNone(p) && String(p.item_no || '').trim()); const used = new Set();
+    const out = rows.map(r => Object.assign({}, r)); const done = out.map(() => false);
+    [[['po_no2', 'item_no', 'sets', 'due'], false], [['po_no2', 'item_no', 'due'], true], [['po_no2', 'item_no'], true]].forEach(([ks, only]) => {
+      const idx = new Map(); cur.forEach(p => { if (used.has(p._id)) return; const k = kv(p, ks); let a = idx.get(k); if (!a) idx.set(k, a = []); a.push(p); });
+      const want = new Map(); out.forEach((r, i) => { if (!done[i]) { const k = kv(r, ks); want.set(k, (want.get(k) || 0) + 1); } });
+      out.forEach((r, i) => { if (done[i]) return; const k = kv(r, ks); const a = (idx.get(k) || []).filter(p => !used.has(p._id));
+        if (!a.length || (only && (a.length !== 1 || want.get(k) !== 1))) return; used.add(a[0]._id); r._id = a[0]._id; done[i] = true; });
+    });
+    return out;
+  }
+  const hasItem = (r) => !!String(r.item_no || '').trim();
+  /** 같은 키의 n번째 줄 ↔ n번째 줄 (DB.upsert 의 여러 줄 표 규칙) 로 셈 — { add, upd } */
+  const countAgainst = (rows, keys, base) => { const have = new Map(); base.forEach(p => { const k = kv(p, keys); have.set(k, (have.get(k) || 0) + 1); });
+    const seen = new Map(); let add = 0, upd = 0; rows.forEach(r => { const k = kv(r, keys); const i = seen.get(k) || 0; seen.set(k, i + 1); if (i < (have.get(k) || 0)) upd++; else add++; }); return { add, upd }; };
+  /** 같이 올린 수주 묶음 중 j 보다 먼저 반영되는 것 (고른 것, 화면 순서 = 반영 순서) 이 넣을 줄까지 더한 수주 — 미리보기 · 반영 방식이 반영 결과와 같게 (1.14.3 Codex 검토) */
+  function batchBase(j) {
+    let base = ERP.db.rows('po').slice();
+    for (const x of (j.batch || [])) { if (x === j) break; if (x.table !== 'po' || !x.include || !(x.rows && x.rows.length)) continue;
+      if (x.keys) { const sim = x.mode === 'all' ? new Set() : new Set(similarPo(x.rows, x.keys, base).map(s => s.row)); const have = new Set(base.map(p => kv(p, x.keys)));
+        base = base.concat(x.rows.filter(r => !sim.has(r) && !have.has(kv(r, x.keys)))); }
+      else base = base.concat(matchPoNone(x.rows.filter(hasItem), base).filter(r => !r._id)); }
+    return base;
+  }
+  const poBatch = (jobs, self) => { self.batch = jobs; };   // p_data: 같이 올린 작업 목록 (화면이 쓰는 작업)
+  /** 반영: PO 번호가 있는 줄 (생산관리 파일 · 수주서) — 같은 수주로 보이는 줄은 빼고 (반영 방식 all 이면 넣음) */
+  function applyPo(job) {
+    const sim = job.mode === 'all' ? [] : similarPo(job.rows, job.keys); const skip = new Set(sim.map(x => x.row));
+    const r = ERP.db.upsert('po', job.rows.filter(x => !skip.has(x)), job.keys, { keep: job.keep, defaults: job.defaults });
+    const res = { added: r.added, updated: r.updated }; if (r.locked) res.locked = r.locked; if (sim.length) res.skipped = sim.length;
+    if (typeof job.after === 'function') job.after(job, res); return res;
+  }
+  /** 반영: PO 번호 없는 줄 (생산관리 파일) — 품번 있는 줄은 matchPoNone, 월 합계 줄은 예전 키 */
+  function applyPoNone(job, dry) {
+    const DB = ERP.db; const a = DB.upsert('po', matchPoNone(job.rows.filter(hasItem)), ['_id'], { dry }); const mo = job.rows.filter(r => !hasItem(r));
+    const b = mo.length ? DB.upsert('po', mo, null, { dry }) : { added: 0, updated: 0 };
+    const res = { added: a.added + b.added, updated: a.updated + b.updated }; if ((a.locked || 0) + (b.locked || 0)) res.locked = (a.locked || 0) + (b.locked || 0);
+    if (!dry && typeof job.after === 'function') job.after(job, res); return res;
+  }
+  const poLab = (k) => { const c = ERP.TABLES.po.cols.find(x => x.k === k); return c ? ERP.colLabel(c) : k; };
+  const poVal = (v) => (typeof v === 'number' ? ERP.fmt.n(v) : (v === undefined || v === null || v === '' ? '–' : String(v)));
+  /** 미리보기: 추가 · 갱신 (· 같은 수주로 보여 뺌) — 같이 올린 앞 묶음이 넣을 줄까지 보고 셈 (batchBase). withDiff 면 바뀌는 값까지 (수주서) */
+  function poPreview(j, withDiff) {
+    const base = batchBase(j); const sim = j.mode === 'all' ? [] : similarPo(j.rows, j.keys, base); const skip = new Set(sim.map(x => x.row));
+    const rest = j.rows.filter(x => !skip.has(x)); const c = countAgainst(rest, j.keys, base);
+    const parts = [[L('추가', 'Thêm'), c.add, c.add ? 'info' : 'neutral'], [L('갱신', 'Cập nhật'), c.upd, 'neutral']];
+    if (sim.length) parts.push([L('같은 수주로 보여 뺌', 'Giống đơn có sẵn — bỏ qua'), sim.length, 'warn']);
+    const r = withDiff === false ? null : ERP.db.upsert('po', rest, j.keys, { keep: j.keep, defaults: j.defaults, dry: true });   // 바뀌는 값 = 지금 수주 표에 있는 줄
+    const d = r ? [r.changes.map(c => c.row.po_no + ': ' + c.diff.map(x => poLab(x[0]) + ' ' + poVal(x[1]) + ' → ' + poVal(x[2])).join(' · ')).join(' / ')] : [];
+    if (sim.length) d.push(L('넣지 않음 (오타 · 품번을 덜 읽음 — 다른 수주이면 반영 방식 "비슷한 줄도 넣기"): ', 'Không thêm (sai số · đọc thiếu mã — nếu là đơn khác chọn "Thêm cả dòng giống"): ')
+      + sim.map(x => [x.row.po_no, x.row.item_no, ERP.fmt.n(Number(x.row.sets) || 0) + ' set'].join(' ') + ' = ' + L('있는 줄 ', 'dòng có sẵn ') + [x.like.po_no, x.like.item_no].join(' ')).join(' · '));
+    return { parts, detail: d.filter(Boolean).join(' / ') };
+  }
+  /** 반영 방식: 같은 수주로 보이는 줄이 있을 때만 "비슷한 줄도 넣기" (this = 화면의 작업) */
+  function poModes() {
+    const one = L('PO · 품번 기준 갱신 · 추가', 'Cập nhật · thêm theo PO · mã');
+    return this.mode === 'all' || similarPo(this.rows, this.keys, batchBase(this)).length ? { upsert: one + L(' (같은 수주로 보이는 줄은 빼고)', ' (bỏ dòng giống đơn có sẵn)'), all: L('비슷한 줄도 넣기', 'Thêm cả dòng giống') } : { upsert: one };
+  }
   D('po', (n, M) => findRow(M, r => hasCell(r, /^Po No$/i) && hasCell(r, /^kind goods$/i), 0, 6) >= 0, (M) => {
     const hi = findRow(M, r => hasCell(r, /^Po No$/i), 0, 6); const rows = [];
     for (let i = hi + 1; i < M.length; i++) {
@@ -259,8 +343,12 @@
         rfid: T(S(r, 11)), kind2: T(S(r, 12)), color2: T(S(r, 13)), pcs: N(S(r, 14)) || 0, sets: N(S(r, 15)) || 0, cs: N(S(r, 16)) || 0, due: T(S(r, 17)), rate: N(S(r, 18)), packed: N(S(r, 19)) || 0, diff: N(S(r, 20)), yn: T(S(r, 21)), mark: T(S(r, 22)) }));
     }
     const noPo = rows.filter(r => !String(r.po_no || '').trim());
-    const out = [{ table: 'po', rows: rows.filter(r => String(r.po_no || '').trim()), mode: 'upsert', keys: PO_KEYS, after: lockPcs, label: L('수주 (PO) 목록', 'Danh sách PO') }];
-    if (noPo.length) out.push({ table: 'po', rows: noPo, mode: 'upsert', after: lockPcs, label: L('수주 (PO) 목록 — PO 번호 없는 줄', 'Danh sách PO — dòng không có số PO') });
+    const out = [{ table: 'po', rows: rows.filter(r => String(r.po_no || '').trim()), mode: 'upsert', keys: PO_KEYS, after: lockPcs, label: L('수주 (PO) 목록', 'Danh sách PO'),
+      apply: applyPo, preview: (j) => poPreview(j, false), modes: poModes, onBatch: poBatch }];   // 1.14.3: 전체 교체 · 끝에 추가 없음 (다시 올려도 늘지 않게)
+    if (noPo.length) out.push({ table: 'po', rows: noPo, mode: 'upsert', after: lockPcs, label: L('수주 (PO) 목록 — PO 번호 없는 줄', 'Danh sách PO — dòng không có số PO'), onBatch: poBatch,
+      apply: (j) => applyPoNone(j, false), preview: (j) => { const base = batchBase(j); const w = matchPoNone(j.rows.filter(hasItem), base); const mo = countAgainst(j.rows.filter(r => !hasItem(r)), ERP.TABLES.po.nat || [], base);
+        const add = w.filter(r => !r._id).length + mo.add, upd = w.filter(r => r._id).length + mo.upd; return { parts: [[L('추가', 'Thêm'), add, add ? 'info' : 'neutral'], [L('갱신', 'Cập nhật'), upd, 'neutral']] }; },
+      modes: () => ({ upsert: L('갱신 · 추가 (PO 번호2 · 품번 · set · 납기로 같은 줄)', 'Cập nhật · thêm (cùng dòng theo số PO 2 · mã · bộ · ngày giao)') }) });
     return out;
   });
 
@@ -273,6 +361,11 @@
   const PO_LANDS = { 멕시코: 'Mexico', mexico: 'Mexico', 미국: 'USA', usa: 'USA', 영국: 'UK', uk: 'UK', 호주: 'AUS', australia: 'AUS', australlia: 'AUS', aus: 'AUS', 캐나다: 'Canada', canada: 'Canada' };
   const PO_KINDS = [[/미니\s*다이알|mini\s*dial/i, 'Mini'], [/다이알|dial/i, 'Dial'], [/펜슬|pencil/i, 'Pencil'], [/미니|mini/i, 'Mini'], [/유리|glass/i, 'Glass']];
   const PO_ITEM = /Item\s*No\.?\s*[:;：]?\s*([0-9A-Z][0-9A-Z.-]*[0-9A-Z])/i;
+  // 1.14.3: "Item No : 68 7503 0 001" (띄어쓰기 · 점) — 품번 모양 (숫자 2 · 4 · 글자 1 · 숫자 3) 이면 '-' 로 잇는다 (예전: 앞의 68 까지만 → 생산관리 파일의 68-7503-0-001 과 두 줄)
+  //   예전 읽기 (PO_ITEM) 보다 길게 읽을 때만 쓴다 — 68-7503-0-001-A 같은 꼬리 (-A) 를 자르지 않게 (1.14.3 Codex 검토)
+  const PO_ITEM_SP = /Item\s*No\.?\s*[:;：]?\s*(([0-9]{2})[\s.-]+([0-9]{4})[\s.-]+([0-9A-Z])[\s.-]+([0-9]{3})((?:-[0-9A-Z]+)*))(?![0-9A-Z])/i;
+  const poItem = (v) => { if (typeof v !== 'string') return null; const m = v.match(PO_ITEM), s = v.match(PO_ITEM_SP);
+    if (s && (!m || s[1].length > m[1].length)) return s.slice(2, 6).join('-') + (s[6] || ''); return m ? m[1] : null; };
   const poLine = (s) => { const t = String(s || '').trim(); let m;
     if ((m = t.match(/^(Walmart|Target)\s*P\.?\s*O\.?\s*#?\s*[:：]?\s*([0-9][\w-]*)/i))) return { po2: m[2], shop: m[1] };
     if ((m = t.match(/^(?:크레욜라\s*|SAP\s*)?P\.?\s*O\.?\s*(?:#|NO\.?)?\s*[:：]?\s*([0-9][\w-]*)/i))) return { po: m[1] };
@@ -287,13 +380,6 @@
     if (d) return y ? (ERP.fmt.parseDate(y + d.slice(4)) || d) : d; } return null; };
   /** 지금 ERP 수주에 있는 이름 표기 (거래처 · 국가 · 시장) 로 맞춤 — 없으면 파일 글자 그대로 */
   const poSame = (raw, field) => { const n0 = norm(raw); if (!n0 || !ERP.db || !ERP.db.rows) return raw; const hit = ERP.db.rows('po').find(r => r[field] && norm(r[field]) === n0); return hit ? String(hit[field]) : raw; };
-  function poPreview(j) {
-    const r = ERP.db.upsert('po', j.rows, j.keys, { keep: j.keep, defaults: j.defaults, dry: true });
-    const lab = (k) => { const c = ERP.TABLES.po.cols.find(x => x.k === k); return c ? ERP.colLabel(c) : k; };
-    const fv = (v) => (typeof v === 'number' ? ERP.fmt.n(v) : (v === undefined || v === null || v === '' ? '–' : String(v)));
-    return { parts: [[L('추가', 'Thêm'), r.added, r.added ? 'info' : 'neutral'], [L('갱신', 'Cập nhật'), r.updated, 'neutral']],
-      detail: r.changes.map(c => c.row.po_no + ': ' + c.diff.map(x => lab(x[0]) + ' ' + fv(x[1]) + ' → ' + fv(x[2])).join(' · ')).join(' / ') };
-  }
   D('po-sheet', (n, M) => /^수입자$/.test(String(S(M[0], 0) || '').trim()) && hasCell(M[0], /^주문일자$/) && findRow(M, r => !!poLine(S(r, 0)), 0, 12) >= 0, (M) => {
     let po = null, po2 = null, shop = null; for (let i = 0; i < 12 && i < M.length; i++) { const x = poLine(S(M[i], 0)); if (!x) continue; if (x.po2) { po2 = x.po2; shop = x.shop; } else if (!po) po = x.po; }
     M.some(r => (r || []).some(v => { const m = typeof v === 'string' && v.match(/Vivid\s*PO\s*No\.?\s*[:：]?\s*([\w-]+)/i); if (m && !po2) po2 = m[1]; return !!m; }));
@@ -311,13 +397,14 @@
     for (let i = 0; i < M.length; i++) {
       const r = M[i]; if (!r) continue; if (r.some(v => typeof v === 'string' && v.trim() === '수출지')) break; if (!poItemStart(r)) continue;
       const blk = [r]; let j = i + 1; for (; j < M.length; j++) { if (poItemStart(M[j]) || poStop(M[j])) break; blk.push(M[j] || []); }
-      let cs = null, item = null; blk.forEach((x, bi) => { if (bi && cs === null && /^(ct|cs)$/.test(poUnit(S(x, 5)))) cs = N(S(x, 4)); if (!item) x.some(v => { const m = typeof v === 'string' && v.match(PO_ITEM); if (m) item = m[1]; return !!m; }); });
+      let cs = null, item = null; blk.forEach((x, bi) => { if (bi && cs === null && /^(ct|cs)$/.test(poUnit(S(x, 5)))) cs = N(S(x, 4)); if (!item) x.some(v => { const t = poItem(v); if (t) item = t; return !!t; }); });
       items.push({ code: T(S(r, 0)) || '', desc: T(S(r, 2)) || '', unit: poUnit(S(r, 5)), q: N(S(r, 4)), cs, item }); i = j - 1;
     }
     const rows = [], skipped = [], noKind = [], noColor = [];
     items.forEach((it, idx) => {
       if (!it.item || it.unit === 'pcs' || it.unit === 'ea') { skipped.push(it); return; }
-      const color = (it.desc.match(/(\d+)\s*색/) || [])[1] || null; const k = PO_KINDS.find(x => x[0].test(it.desc)); if (!k) noKind.push(it.desc); if (!color) noColor.push(it.desc);
+      const cm = it.desc.match(/\d+\s*색(?:\s*\+\s*\d+\s*색)*/); const color = cm ? String(cm[0].match(/\d+/g).reduce((a, d) => a + Number(d), 0)) : null;   // 1.14.3: "24색+6색" = 30 (예전: 24)
+      const k = PO_KINDS.find(x => x[0].test(it.desc)); if (!k) noKind.push(it.desc); if (!color) noColor.push(it.desc);
       const sets = it.unit === 'set' ? it.q : null; const cs = it.unit === 'set' ? it.cs : it.q;
       rows.push(pick({ date, customer, country, market, po_no: po + (items.length > 1 ? '-' + (idx + 1) : ''), po_no2: po2, item_no: it.item, kind: k ? k[1] : null, color,
         sets, cs, pcs: sets !== null && color ? sets * Number(color) : null, due }));
@@ -326,8 +413,8 @@
     if (!items.length) notes.unshift(L('품목 줄을 찾지 못했습니다 (수주서 모양이 다름)', 'Không tìm thấy dòng hàng (mẫu đơn khác)'));
     if (noKind.length) notes.push(L('품목군을 모르는 설명 (비워 둠): ', 'Không rõ nhóm hàng (để trống): ') + noKind.join(', '));
     if (noColor.length) notes.push(L('색상수를 모르는 설명 (pcs 비워 둠): ', 'Không rõ số màu (để trống pcs): ') + noColor.join(', '));
-    return [{ table: 'po', rows, mode: 'upsert', keys: PO_KEYS, keep: PO_KEEP, defaults: { kind2: '0', rfid: '0' }, preview: poPreview, label: L('수주서 PO ', 'Đơn hàng PO ') + (po || ''), note: notes.join(' · '),
-      modes: () => ({ upsert: L('PO · 품번 기준 갱신 · 추가', 'Cập nhật · thêm theo PO · mã') }) }];   // 이미 있는 줄은 세트 · 카톤 · pcs · 납기만 (keep)
+    return [{ table: 'po', rows, mode: 'upsert', keys: PO_KEYS, keep: PO_KEEP, defaults: { kind2: '0', rfid: '0' }, preview: poPreview, apply: applyPo, label: L('수주서 PO ', 'Đơn hàng PO ') + (po || ''), note: notes.join(' · '),
+      modes: poModes, onBatch: poBatch }];   // 이미 있는 줄은 세트 · 카톤 · pcs · 납기만 (keep). 1.14.3: 같은 수주로 보이는 줄은 빼고 (poModes · applyPo · 같이 올린 앞 묶음까지)
   });
 
   // history sheets of the production workbook (header row is found within the first 4 rows)

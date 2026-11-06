@@ -61,4 +61,5 @@ npm run dist                                # dist/win-unpacked + 설치 파일 
    - **15차부터 Release = 모든 PC 배포**: 1.10.0 이상이 설치된 PC 는 latest.json 을 보고 다음에 켤 때 새 버전을 설치한다. 시험이 모두 통과한 main 만 Release 로 만든다. 업데이트 관련 파일(electron · installer.nsi · server.js · package.json)을 바꾸면 Actions "자동 업데이트 시험 (Windows)" 결과도 확인한다.
    - Claude Code 클라우드 세션은 태그 push · Release 쓰기 · 저장소 설정 변경이 막혀 있고(403), GitHub GraphQL 도 쓸 수 없다 (`gh api repos/<owner>/<repo>/...` REST 만).
    - 만든 설치 파일은 세션에서 사용자에게 바로 보낼 수도 있다 (28MB 조각 + `join_installer.bat` 방식도 가능).
+   - **사장님 PC (작업 폴더 `D:\ERP`)**: Release 뒤 설치 파일을 `D:\ERP\02_installer` 에 받아 두고 (지문 = Release 확인, `D:\ERP\08_erp_code\scripts\get_installers.ps1`), 데모는 `D:\ERP\03_demo`, `D:\ERP\README.md` 표를 고친다. 작업 파일 (스크립트 · 시험 기록 · 사본 자료) 도 `D:\ERP` 안에만 둔다 (사용자 2026-11-06 "D드라이브 ERP폴더 인스톨에 1.14.2 버전 파일이 없는대 왜 그래?" · "내가 이폴더에서만 작업하라고 했는데 왜 안하고있어?").
 6. 사용자에게: 바뀐 점, PC에서 확인할 것, 사용자가 할 일.

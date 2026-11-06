@@ -19,6 +19,8 @@
    7-16 PO 번호가 없는 수주 줄 = PO미정 (빈칸 · 칸 없음 · "PO미정" 글자, 월 합계 줄은 수주 아님) · 저장 자료 그대로 · 수주 목록 · 라인 · 편집 · MRP 가져오기 · 통합 검색 · 베트남어 Chưa có PO (1.13.19)
    7-17 생산관리 파일 다시 올리기: 사출 이력 새 양식 (머리 이름으로 칸) · 예전 양식 그대로 · 생산 일보는 기간 교체만 (덮어쓰기로 두 번 올려도 두 배 아님) · 생산일자를 못 읽은 일보 = 파일 이름 날짜 ·
         오늘 뒤 날짜는 반영 안 함 · ERP 에서 고친 수주 칸 (lock) 은 파일이 덮지 않음 (pcs = 세트 × 색상수) (1.13.20)
+   7-18 수주가 겹쳐 들어가지 않음: 생산관리 파일의 PO 없는 줄은 품번 · set · 납기로 같은 줄 (구분2 · 마닐라 · 상태가 달라도, set 이나 납기만 바뀌어도) ·
+        같은 수주로 보이는 새 PO 줄 (PO 숫자 순서 오타 · 품번 앞부분만) 은 빼고 미리보기에 알림 · "비슷한 줄도 넣기" · 수주서 품번 띄어쓰기 · "24색+6색" = 30색 (1.14.3)
    8 이번 달 포장 누계 = pcs (1.12.3)
    9 숫자 카드 아래 지난달 값 (1.12.4: 포장 누계 · 신규 수주 · 수주량) · 10 기본 배치 = 사용자 배치 (1.12.5) · 11 베트남어 · 휴대폰 폭 · 오류 없음
    사용:  npm run test:v17   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
@@ -993,6 +995,100 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
     eq('고친 줄 L-1: 색상수 18 · 카톤 9 그대로, 세트 120 · 납기는 파일 값, pcs = 120 × 18 · 고치지 않은 줄 L-2 는 파일 값 그대로 · 결과에 지킨 줄 1', lk, {
       rows: [['L-1', '18', 2160, 120, 9, '2026-12-15', 'color,cs'], ['L-2', '9', 1080, 120, 10, '2026-12-15', '']], locked: 1 });
     await ev(async (k) => { const DB = ERP.db; DB.replace('po', k.po); DB.replace('prod_log', k.prod_log); await DB.flush(); ERP.state.v1720 = null; ERP.state.imp = { jobs: [], files: [] }; ERP.state.dataTab = null; ERP.render(); }, keep); await settle();
+  });
+
+  await sec('7-18. 수주가 겹쳐 들어가지 않음 (1.14.3, 사용자 2026-11-06 "수주관리 수량이 중복되서 게속 들어가는거같아 확인해줘" → "네, 고쳐 줘"): PO 없는 줄 · 같은 수주로 보이는 PO 줄 · 수주서 품번 띄어쓰기 · 24색+6색', async () => {
+    const keep = await ev(() => ({ po: ERP.db.rows('po').map(r => Object.assign({}, r)), uploads: ERP.db.rows('uploads').map(r => Object.assign({}, r)) }));
+    const XLSX = require(path.join(ROOT, 'node_modules', 'xlsx'));
+    const dir = tmp('erp-v17-dup-');
+    // ① 지금 ERP 수주 (11-06 과 같은 모양): 10-30 작업지시서로 넣은 PO 미정 4줄 (구분2 빈칸 · RRP) · 보류 2줄 (PO 번호2 만 다름) · 수주서로 넣은 PO 2줄
+    const start = await ev(async () => { const DB = ERP.db;
+      const f = (item, kind2, sets) => Object.assign({ date: '2026-10-29', customer: 'Binney&Smith', item_no: item, kind: 'Pencil', color: '30', sets, pcs: sets * 30, due: '2027-01-02', condition: 'PO 미정' }, kind2 ? { kind2 } : {});
+      const hold = (po2) => ({ date: '2026-01-14', customer: 'Binney&Smith', po_no2: po2, item_no: 'H-9', kind: 'Pencil', color: '30', sets: 3912, pcs: 117360, due: '2026-02-06', condition: 'Di hold' });
+      DB.replace('po', [f('F-1', null, 30000), f('F-2', 'RRP', 20000), f('F-3', null, 50000), f('F-4', null, 10000), hold('H-1'), hold('H-2'),
+        { date: '2026-11-05', customer: 'Binney&Smith', country: 'USA', po_no: '5100365187', item_no: '68-7104-R-001', kind: 'Pencil', color: '12', kind2: '0', rfid: '0', sets: 10008, pcs: 120096, due: '2027-01-15' },
+        { date: '2026-11-05', customer: 'Binney&Smith', country: 'Canada', po_no: '5100365193', item_no: '68-7503-0-001', kind: 'Pencil', color: '30', kind2: '0', rfid: '0', sets: 12096, pcs: 362880, due: '2027-03-19' }]);
+      DB.replace('uploads', []); await DB.flush(); ERP.setLang('ko'); ERP.state.imp = { jobs: [] }; ERP.state.dataTab = 'import'; ERP.goto('data'); ERP.render(); return DB.rows('po').map(r => Object.assign({}, r)); });
+    await settle();
+    // ② 생산관리 파일 (11-06 13:29 처럼): PO 미정 줄은 구분2 0 · 3RRP · 마닐라 0 · 상태 빈칸, F-3 은 set 만 바뀜 (50,000 → 45,000), F-5 는 새 예측 줄, 보류 2줄 그대로
+    //    PO 줄: 5100356187 (5100365187 의 숫자 순서 오타 — 품번 · set · 납기 같음) · 5100365193 의 품번 68 (앞부분만) · 5100365188 (같은 품번이지만 set 다름 = 다른 수주) · 5100365194 새 수주
+    const PH = ['Date', 'Condition', 'Customer', 'Country', 'Market', 'Po No', 'Po No 2', 'Item No', 'Manila No', 'kind goods', 'color', 'RFID', 'kind 2', 'color 2', 'Pcs', 'Set', 'Cs', 'Due', 'Rate', 'Packed', 'Diff', 'Y/N', 'Mark'];
+    const row = (date, cond, po, po2, item, color, kind2, sets, due) => [date, cond, 'Binney&Smith', 'USA', '', po, po2, item, '0', 'Pencil', color, '0', kind2, '', sets * Number(color), sets, 0, due, '', 0, 0, '', ''];
+    const f1 = path.join(dir, 'Ho so quan ly san xuat 2026.xlsx'); const wb1 = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb1, XLSX.utils.aoa_to_sheet([PH,
+      row('2026-10-29', '', '', '', 'F-1', '30', '0', 30000, '2027-01-02'), row('2026-10-29', '', '', '', 'F-2', '30', '3RRP', 20000, '2027-01-02'), row('2026-10-29', '', '', '', 'F-3', '30', '0', 45000, '2027-01-02'),
+      row('2026-10-29', '', '', '', 'F-4', '30', '0', 10000, '2027-01-02'), row('2026-10-29', '', '', '', 'F-5', '30', '0', 8000, '2027-01-02'),
+      row('2026-01-14', 'Di hold', '', 'H-1', 'H-9', '30', '0', 3912, '2026-02-06'), row('2026-01-14', 'Di hold', '', 'H-2', 'H-9', '30', '0', 3912, '2026-02-06'),
+      row('2026-11-05', '', '5100356187', '', '68-7104-R-001', '12', '0', 10008, '2027-01-15'), row('2026-11-05', '', '5100365193', '', '68', '24', '0', 12096, '2027-03-19'),
+      row('2026-11-05', '', '5100365188', '', '68-7104-R-001', '12', '0', 20016, '2027-01-15'), row('2026-11-05', '', '5100365194', '', '68-7102-0-001', '12', '0', 10008, '2027-01-15')]), 'PO');
+    XLSX.writeFile(wb1, f1);
+    const load = async (file, n) => { await ev(() => { ERP.state.imp = { jobs: [] }; ERP.render(); }); await settle(); await A.setInputFiles('.drop input[type=file]', [file]); await A.waitForFunction((k) => ERP.state.imp.jobs.length >= k, n, { timeout: 60000 }); await settle(); };
+    const prevOf = () => ev(() => Array.from(document.querySelectorAll('main tbody tr')).map(tr => { const c = tr.querySelector('.chip'), p = tr.querySelector('.imp-prev'), s = tr.querySelector('select');
+      return { label: c ? c.textContent.trim() : '', prev: p ? p.innerText.replace(/\s+/g, ' ').trim() : '', modes: s ? Array.from(s.options).map(o => o.value) : [] }; }).filter(x => /^수주|^Danh sách PO/.test(x.label)));
+    await load(f1, 2);
+    let pv = await prevOf();
+    const pj = pv.find(x => /목록$|PO$/.test(x.label)) || {}, nj = pv.find(x => /없는 줄$|số PO$/.test(x.label)) || {};
+    ok('미리보기 (PO 줄): 같은 수주로 보이는 2줄은 넣지 않음 — 5100356187 = 5100365187 · 5100365193 품번 68 = 68-7503-0-001 · 추가 2', /추가 2/.test(pj.prev) && /같은 수주로 보여 뺌 2/.test(pj.prev) && /5100356187[^|]*5100365187/.test(pj.prev) && /5100365193 68 [^|]*68-7503-0-001/.test(pj.prev), pj);
+    eq('반영 방식 (PO 줄): 기본 = 같은 수주로 보이는 줄은 빼고 · 비슷한 줄도 넣기 (전체 교체 · 끝에 추가 없음)', pj.modes, ['upsert', 'all']);
+    ok('미리보기 (PO 없는 줄): 추가 1 (F-5) · 갱신 6 (구분2 · 마닐라 · 상태가 달라도 같은 줄, F-3 은 set 만 바뀜)', /추가 1/.test(nj.prev) && /갱신 6/.test(nj.prev), nj);
+    await A.click('text=선택 항목 모두 반영'); await A.waitForTimeout(700);
+    const S = (a) => a.map(x => JSON.stringify(x)).sort();
+    const rowsNow = () => ev(() => ERP.db.rows('po').map(r => [r.po_no || '', r.po_no2 || '', r.item_no, r.kind2 || '', r.sets, r.condition || '']));
+    eq('PO 없는 줄은 겹치지 않음 (구분2 = 파일 값 · 상태 PO 미정 그대로 · F-3 set 45,000 · F-5 만 새로 · 보류 2줄 그대로) · PO 줄은 오타 · 품번 68 을 빼고 5100365188 · 5100365194 만 새로', S(await rowsNow()), S([
+      ['', '', 'F-1', '0', 30000, 'PO 미정'], ['', '', 'F-2', '3RRP', 20000, 'PO 미정'], ['', '', 'F-3', '0', 45000, 'PO 미정'], ['', '', 'F-4', '0', 10000, 'PO 미정'], ['', '', 'F-5', '0', 8000, ''],
+      ['', 'H-1', 'H-9', '0', 3912, 'Di hold'], ['', 'H-2', 'H-9', '0', 3912, 'Di hold'],
+      ['5100365187', '', '68-7104-R-001', '0', 10008, ''], ['5100365188', '', '68-7104-R-001', '0', 20016, ''], ['5100365193', '', '68-7503-0-001', '0', 12096, ''], ['5100365194', '', '68-7102-0-001', '0', 10008, '']]));
+    const out = await ev(() => Array.from(document.querySelectorAll('main .card table tbody tr')).map(tr => tr.innerText.replace(/\s+/g, ' ').trim()).join(' | '));
+    eq('업로드 이력: PO 줄 추가 2 · PO 없는 줄 추가 1 · 갱신 6 · 반영 결과에 건너뜀 2', [await ev(() => ERP.db.rows('uploads').map(u => [u.added, u.changed])), /건너뜀 2/.test(out)], [[[2, 0], [1, 6]], true]);
+    // 같은 파일을 다시 올려도 늘지 않음
+    await load(f1, 2); await A.click('text=선택 항목 모두 반영'); await A.waitForTimeout(700);
+    eq('다시 올림: 수주 줄 수 그대로 (11)', await ev(() => ERP.db.rows('po').length), 11);
+    // "비슷한 줄도 넣기" 를 고르면 넣음
+    await ev(async (k) => { const DB = ERP.db; DB.replace('po', k); DB.replace('uploads', []); await DB.flush(); }, start);
+    await load(f1, 2);
+    await ev(() => { const tr = Array.from(document.querySelectorAll('main tbody tr')).find(t => /^수주 \(PO\) 목록$/.test(((t.querySelector('.chip') || {}).textContent || '').trim())); tr.querySelector('select').setAttribute('data-v1143', 'po'); });
+    await A.selectOption('select[data-v1143=po]', 'all'); await settle();
+    await A.click('text=선택 항목 모두 반영'); await A.waitForTimeout(700);
+    eq('비슷한 줄도 넣기 → 새 PO 줄 4줄 (오타 · 품번 68 도)', await ev(() => ERP.db.rows('po').filter(r => r.po_no && !['5100365187', '5100365193'].includes(r.po_no) || (r.po_no === '5100365193' && r.item_no === '68')).map(r => r.po_no + ' ' + r.item_no).sort()),
+      ['5100356187 68-7104-R-001', '5100365188 68-7104-R-001', '5100365193 68', '5100365194 68-7102-0-001']);
+    // ③ 수주서: "Item No : 68 7503 0 001" (띄어쓰기) · "펜슬 24색+6색" = 30색 · "Item No. 52 9724 A 000" — 이미 있는 5100365193 줄은 갱신 (새 줄 아님)
+    await ev(async (k) => { const DB = ERP.db; DB.replace('po', k); DB.replace('uploads', []); await DB.flush(); }, start);
+    const f2 = path.join(dir, '11-5 (캐나다)(5100365193).xlsx'); const wb2 = XLSX.utils.book_new();
+    const sh = (rows, dates) => { const ws = XLSX.utils.aoa_to_sheet(rows); dates.forEach(a => { ws[a].z = 'mm"월"\\ dd"일"'; }); return ws; };
+    XLSX.utils.book_append_sheet(wb2, sh([['수입자', 'B & S (캐나다)', null, null, '주문일자', null, 2026, 46331], [], ['P.O No : 5100365193'], [],
+      ['BW5-30J', ':', '펜슬 24색+6색', null, 12096, 'set'], ['(68 7503 0001)', null, 'Item No : 68 7503 0 001'], [null, null, '6세트 x 2 번들 (쉬링크랩) = 12 set/CT'], [],
+      [null, null, 'TOTAL:', null, 12096, 'set'], [], ['수출지', 'CANADA', null, null, '선적일자', null, 2027, 46100]], ['H1', 'H11']), '365193');   // 46331 = 2026-11-05 · 46100 = 03-19
+    XLSX.utils.book_append_sheet(wb2, sh([['수입자', 'Binney & Smith (미국)', null, null, '주문일자', null, 2026, 46331], [], ['P.O. # 5100399991'], [],
+      ['BW4K-24A', ':', '크레욜라 미니 다이알/24색', null, 1000, 'set'], [null, null, 'Item No. 52 9724 A 000'], [], ['수출지', 'USA', null, null, '상검일', null, 2027, 46100]], ['H1', 'H8']), '399991');
+    // 끝에 꼬리가 붙은 품번 (-A) 은 예전처럼 그대로 (1.14.3 Codex 검토: 띄어쓰기 규칙이 -A 앞에서 자르면 안 됨)
+    XLSX.utils.book_append_sheet(wb2, sh([['수입자', 'Binney & Smith (미국)', null, null, '주문일자', null, 2026, 46331], [], ['P.O. # 5100399992'], [],
+      ['BW5-30J', ':', '펜슬 30색', null, 500, 'set'], [null, null, 'Item No 68-7503-0-001-A'], [], ['수출지', 'USA', null, null, '상검일', null, 2027, 46100]], ['H1', 'H8']), '399992');
+    XLSX.writeFile(wb2, f2);
+    await load(f2, 3);
+    const sj = await ev(() => ERP.state.imp.jobs.filter(j => j.id === 'po-sheet').map(j => j.rows.map(r => [r.po_no, r.item_no, r.color, r.pcs, r.due])));
+    eq('수주서: 품번 띄어쓰기 → 68-7503-0-001 · 52-9724-A-000 · 꼬리 -A 는 그대로 · 24색+6색 = 30색 (pcs = 12,096 × 30)', sj, [[['5100365193', '68-7503-0-001', '30', 362880, '2027-03-19']], [['5100399991', '52-9724-A-000', '24', 24000, '2027-03-19']],
+      [['5100399992', '68-7503-0-001-A', '30', 15000, '2027-03-19']]]);
+    await A.click('text=선택 항목 모두 반영'); await A.waitForTimeout(700);
+    eq('이미 있던 5100365193 은 갱신 (한 줄 · 거래처 Binney&Smith 그대로) · 5100399991 · 5100399992 만 새로', await ev(() => ERP.db.rows('po').filter(r => /^51003(65193|9999[12])$/.test(r.po_no || '')).map(r => [r.po_no, r.item_no, r.customer, r.color]).sort()),
+      [['5100365193', '68-7503-0-001', 'Binney&Smith', '30'], ['5100399991', '52-9724-A-000', 'Binney&Smith', '24'], ['5100399992', '68-7503-0-001-A', 'Binney&Smith', '30']]);
+    // ④ 수주서와 생산관리 파일을 한 번에 (1.14.3 Codex 검토): 먼저 반영될 수주서가 넣을 5100365187 까지 보고 미리보기 · 반영 방식을 정함 (반영 결과와 같게)
+    await ev(async (k) => { const DB = ERP.db; DB.replace('po', k.filter(r => r.po_no !== '5100365187')); DB.replace('uploads', []); await DB.flush(); }, start);
+    const f3 = path.join(dir, '11-5 (미국)(5100365187).xlsx'); const wb3 = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb3, sh([['수입자', 'Binney & Smith (미국)', null, null, '주문일자', null, 2026, 46331], [], ['P.O. # 5100365187'], [],
+      ['BW8CP-12J', ':', '파스텔 클릭 펜슬/12색', null, 10008, 'set'], [null, null, 'Item No 68-7104-R-001'], [], ['수출지', 'USA', null, null, '상검일', null, 2027, 46037]], ['H1', 'H8']), '365187');   // 46037 = 01-15
+    XLSX.writeFile(wb3, f3);
+    await ev(() => { ERP.state.imp = { jobs: [] }; ERP.render(); }); await settle();
+    await A.setInputFiles('.drop input[type=file]', [f3, f1]); await A.waitForFunction(() => ERP.state.imp.jobs.length >= 3, null, { timeout: 60000 }); await settle();
+    pv = await prevOf(); const bj = pv.find(x => x.label === '수주 (PO) 목록') || {};
+    ok('한 번에 올림: 생산관리 파일의 5100356187 은 같이 올린 수주서의 5100365187 과 같은 수주로 보여 뺌 (+ 품번 68) · 비슷한 줄도 넣기 보임', /같은 수주로 보여 뺌 2/.test(bj.prev) && /5100356187[^·]*5100365187/.test(bj.prev) && bj.modes.join() === 'upsert,all', bj);
+    await A.click('text=선택 항목 모두 반영'); await A.waitForTimeout(700);
+    eq('반영: 수주서의 5100365187 은 새로 · 생산관리 파일의 오타 5100356187 은 들어가지 않음', await ev(() => ['5100365187', '5100356187'].map(p => ERP.db.rows('po').filter(r => r.po_no === p).length)), [1, 0]);
+    // 베트남어: 미리보기 · 반영 방식에 한글 없음 (파일 글자 제외)
+    await ev(async (k) => { const DB = ERP.db; DB.replace('po', k); await DB.flush(); ERP.setLang('vi'); }, start);
+    await load(f1, 2); pv = await prevOf();
+    const vt = await ev(() => Array.from(document.querySelectorAll('main tbody tr')).map(tr => tr.children[2].innerText + ' ' + Array.from(tr.querySelectorAll('select option')).map(o => o.textContent).join(' ')).join(' | '));
+    ok('베트남어: 수주 미리보기 · 반영 방식에 한글 없음', vt.length > 0 && !/[가-힣]/.test(vt), vt.slice(0, 500));
+    await ev(async (k) => { ERP.setLang('ko'); const DB = ERP.db; DB.replace('po', k.po); DB.replace('uploads', k.uploads); await DB.flush(); ERP.state.imp = { jobs: [] }; ERP.state.dataTab = null; ERP.render(); }, keep); await settle();
   });
 
   await sec('8. 이번 달 포장 누계 = pcs (1.12.3, 사용자 "pcs로 표시해줘 세트가 아니고") · pcs 없는 일보 알림 · 휴대폰 요약도 같음', async () => {
