@@ -133,7 +133,7 @@
     o = o || {};
     return h('div', { class: 'tbl-wrap', style: o.maxH ? { maxHeight: o.maxH } : null }, h('table', { class: 'tbl' },
       h('thead', h('tr', cols.map(c => h('th', { class: c.num ? 'num' : '' }, c.label)))),
-      h('tbody', rows.length ? rows.map(r => h('tr', { class: o.onClick ? 'click' : '', onclick: o.onClick ? () => o.onClick(r) : null }, cols.map(c => h('td', { class: c.num ? 'num' : '', style: c.style ? c.style(r) : null }, c.render(r))))) : h('tr', h('td', { colspan: cols.length, class: 'empty' }, L('데이터가 없습니다.', 'Không có dữ liệu.'))))));
+      h('tbody', rows.length ? rows.map(r => h('tr', { class: o.onClick ? 'click' : '', onclick: o.onClick ? () => o.onClick(r) : null }, cols.map(c => h('td', { class: c.num ? 'num' : '', style: c.style ? c.style(r) : null }, c.render(r))))) : h('tr', h('td', { colspan: cols.length, class: 'empty' }, o.empty || L('데이터가 없습니다.', 'Không có dữ liệu.'))))));
   };
 
   // chart helper (Chart.js)

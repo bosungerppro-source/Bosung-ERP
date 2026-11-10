@@ -85,16 +85,30 @@
   }
 
   // ---------- 탭: 자재 ----------
+  // 1.15.2: 구분 단추 (원재료 · 부자재 · 소모품 · 반제품 …, 구분 = 품목 마스터의 단계 — plan.js P.matKindOf). 누르면 그 구분만 · 다른 구분을 더 누르면 같이 · 다시 누르면 뺌
+  //   (사용자 2026-11-10 "생산계획에서 자재 모자라는 것만 표시하는건 원자재 부자재 소모품 반제품 이런식으로 선택해서 표시할수있게 해줘"). 고른 구분은 이 화면을 떠나도 (ERP.state) 남는다
   function matsTab(host, R, st) {
-    const list = st.matAll ? R.mats : R.short;
-    const seg = h('div', { class: 'seg' }, [[false, L('모자라는 것만', 'Chỉ vật tư thiếu') + ' ' + R.short.length], [true, L('전체', 'Tất cả') + ' ' + R.mats.length]]
-      .map(o => h('button', { type: 'button', class: 'btn sm' + (!!st.matAll === o[0] ? ' primary' : ''), onclick: () => { st.matAll = o[0]; ERP.render(); } }, o[1])));
+    const present = new Set(R.mats.map(m => m.mkind));
+    const kinds = P.MAT_KINDS.filter(k => P.MAT_KINDS_MAIN.indexOf(k) >= 0 || present.has(k));
+    // 없어진 구분 (예: 품목에 없던 코드를 품목에 넣음) 은 풀어서 안 보이는 단추로 걸러지지 않게
+    const sel = st.mkinds = (Array.isArray(st.mkinds) ? st.mkinds : []).filter((k, i, a) => kinds.indexOf(k) >= 0 && a.indexOf(k) === i);
+    const inSel = (m) => !sel.length || sel.indexOf(m.mkind) >= 0;
+    const base = st.matAll ? R.mats : R.short;
+    const list = base.filter(inSel);
+    const seg = h('div', { class: 'seg' }, [[false, L('모자라는 것만', 'Chỉ vật tư thiếu') + ' ' + R.short.filter(inSel).length], [true, L('전체', 'Tất cả') + ' ' + R.mats.filter(inSel).length]]
+      .map(o => h('button', { type: 'button', class: 'btn sm' + (!!st.matAll === o[0] ? ' primary' : ''), 'data-plan-mat': o[0] ? 'all' : 'short', onclick: () => { st.matAll = o[0]; ERP.render(); } }, o[1])));
+    const pick = (k) => { st.mkinds = !sel.length ? [k] : sel.indexOf(k) >= 0 ? sel.filter(x => x !== k) : sel.concat(k); ERP.render(); };
+    const kseg = h('div', { class: 'seg', style: { flexWrap: 'wrap' } }, [h('button', { type: 'button', class: 'btn sm' + (!sel.length ? ' primary' : ''), 'data-plan-mkind': 'all', onclick: () => { st.mkinds = []; ERP.render(); } }, L('모든 구분', 'Mọi loại'))]
+      .concat(kinds.map(k => h('button', { type: 'button', class: 'btn sm' + (sel.indexOf(k) >= 0 ? ' primary' : ''), 'data-plan-mkind': k, onclick: () => pick(k),
+        title: L('누르면 이 구분만 · 다른 구분을 더 누르면 같이 · 다시 누르면 뺍니다', 'Bấm để chỉ xem loại này · bấm thêm loại khác để xem cùng · bấm lại để bỏ') }, P.matKindName(k) + ' ' + base.filter(m => m.mkind === k).length))));
+    const empty = (st.matAll ? L('고른 구분의 자재가 없습니다.', 'Không có vật tư trong loại đã chọn.') : L('고른 구분에 모자라는 자재가 없습니다.', 'Không có vật tư thiếu trong loại đã chọn.'))
+      + (sel.indexOf('SEMI') >= 0 ? ' ' + L('반제품은 공장에서 만들어 [공정별 부하] 에서 셉니다 — BOM 에 원료로 적힌 반제품만 자재로 봅니다.', 'Bán thành phẩm do xưởng làm, tính ở [Tải công đoạn] — chỉ bán thành phẩm ghi là nguyên liệu trong BOM mới tính là vật tư.') : '');
     const leadIn = (m) => (m.item ? h('input', { class: 'inp', type: 'number', min: 0, step: 1, style: { width: '70px' }, value: num(m.item.lead_days) > 0 ? m.item.lead_days : '', placeholder: m.lead ? String(m.lead) : '',
       title: L('품목 리드타임 (일). 비우면 해외 주문 품목은 기본 리드타임', 'Thời gian giao (ngày). Trống = mặc định của hàng đặt nước ngoài'),
       onchange: (e) => { const v = F.parseNum(e.target.value); DB.update('items', m.item._id, { lead_days: v > 0 ? Math.round(v) : undefined }); redraw(); } }) : '–');
-    host.append(h('div', { class: 'toolbar' }, seg), ERP.simpleTable([
+    host.append(h('div', { class: 'toolbar' }, seg, kseg), ERP.simpleTable([
       { label: L('품목', 'Mã · tên'), render: m => h('div', h('b', m.code), h('div', { class: 'sub' }, m.name || '')) },
-      { label: L('단계', 'Loại'), render: m => m.stage || '' },
+      { label: L('구분', 'Loại'), render: m => h('div', P.matKindName(m.mkind), m.stage && m.stage !== 'ETC' ? h('div', { class: 'sub' }, ERP.inv.stageCodeShow(m.stage)) : null) },
       { label: L('쓰는 공정', 'Công đoạn dùng'), render: m => ERP.procName(m.via) },
       { label: L('필요량', 'Cần'), num: 1, render: m => F.n(m.need, 2) + ' ' + (m.unit || '') },
       { label: L('지금 재고', 'Tồn'), num: 1, render: m => F.n(m.stock, 2) },
@@ -105,9 +119,9 @@
       { label: L('리드타임 (일)', 'Thời gian giao'), render: leadIn },
       { label: L('발주 마감', 'Hạn đặt'), render: m => m.orderBy || '' },
       { label: L('판정', 'Đánh giá'), render: m => h('div', mChip(m.judge), m.arrive ? h('div', { class: 'sub' }, L('지금 발주하면 도착 ', 'Đặt ngay sẽ đến ') + m.arrive) : null) },
-    ], list, { maxH: '62vh' }),
-      h('p', { class: 'help' }, L('필요량 = 진행 중 수주의 남은 양을 BOM 으로 푼 원부자재 (현장 재고는 앞 공정에서 먼저 씀). 납기 순으로 쌓은 필요량이 재고 + 입고 예정 (해외 주문의 도착 예정일까지 온 것) 을 넘는 첫 수주가 처음 모자라는 수주, 그 공정이 그 수주를 시작하는 날 (원료 입고 뒤 기다리는 날만큼 앞) 이 필요한 날, 필요한 날 − 리드타임 = 발주 마감입니다. 리드타임 칸은 품목 마스터의 리드타임을 바꿉니다. * = 도착 예정일 없는 주문.',
-        'Cần = vật tư tách từ BOM của phần còn lại. PO thiếu đầu tiên = PO mà cộng dồn vượt tồn + sắp nhập, ngày cần = ngày công đoạn bắt đầu PO đó, hạn đặt = ngày cần − thời gian giao. Ô thời gian giao sửa danh mục mặt hàng. * = đơn chưa có ngày đến.')));
+    ], list, { maxH: '62vh', empty: sel.length ? empty : undefined }),
+      h('p', { class: 'help' }, L('필요량 = 진행 중 수주의 남은 양을 BOM 으로 푼 원부자재 (현장 재고는 앞 공정에서 먼저 씀). 납기 순으로 쌓은 필요량이 재고 + 입고 예정 (해외 주문의 도착 예정일까지 온 것) 을 넘는 첫 수주가 처음 모자라는 수주, 그 공정이 그 수주를 시작하는 날 (원료 입고 뒤 기다리는 날만큼 앞) 이 필요한 날, 필요한 날 − 리드타임 = 발주 마감입니다. 리드타임 칸은 품목 마스터의 리드타임을 바꿉니다. * = 도착 예정일 없는 주문. 구분 = 품목 마스터의 단계 (품목 마스터에서 고칠 수 있음) · 품목에 없음 = BOM 에만 있는 코드 (품목을 등록하면 구분이 정해짐).',
+        'Cần = vật tư tách từ BOM của phần còn lại. PO thiếu đầu tiên = PO mà cộng dồn vượt tồn + sắp nhập, ngày cần = ngày công đoạn bắt đầu PO đó, hạn đặt = ngày cần − thời gian giao. Ô thời gian giao sửa danh mục mặt hàng. * = đơn chưa có ngày đến. Loại = công đoạn trong danh mục mặt hàng (sửa được ở danh mục) · Chưa có trong danh mục = mã chỉ có trong BOM (đăng ký mặt hàng để có loại).')));
   }
 
   // ---------- 탭: 기준 자료 ----------

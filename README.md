@@ -107,7 +107,7 @@ npm run demo        # dist/ERP_Demo.html
 npm run test:assistant   # 비서·화면·서버 자동 시험 (Playwright 필요: npm i -D playwright)
 npm run test:v16    # 16차 해외 주문 품목 (자재구매 파일 · 리드타임)
 npm run test:v18    # 18차 여러 PC 자료 공유 — 구글 드라이브 (가짜 구글 웹 앱 · 시트에서 실제 Code.gs, 205개)
-npm run test:v19    # 19차 생산 계획 (하루 능력 · 끝나는 날 · 판정 · 자재 · 기준 자료 · 양식 올리기 · AI 비서 · 해외 주문 수주 MRP · Codex 검토, 116개)
+npm run test:v19    # 19차 생산 계획 (하루 능력 · 끝나는 날 · 판정 · 자재 · 기준 자료 · 양식 올리기 · AI 비서 · 해외 주문 수주 MRP · Codex 검토 · 자재 구분, 137개)
 npm run test:v17    # 17차 현장 재고 피벗 표 (+ 1.13.x · 1.14.3 수주 올리기 7-8 · 7-16 ~ 7-18장, 252개)
 npm run test:v15    # 15차 자동 업데이트 · 휴대폰으로 보기 · 구글 웹 앱 4판 (실제 설치 시험은 GitHub Actions "자동 업데이트 시험 (Windows)")
 npm run test:v14    # 14차 창고 입출고장 → 원부자재 · ECOUNT 보완

@@ -9,6 +9,7 @@
    8 화면 (탭 · 범위 · 판정 거르기 · 리드타임 칸 · 기준 자료 칸 · 쉬는 날 넣기) · 9 생산계획_기준자료_양식 올리기 · 10 AI 비서 (도구 · 내장 모드) · 11 엑셀 · 12 베트남어 · 오류 없음
    13 Codex 검토 (1.14.2): 하루씩 공정을 같이 돌리기 (앞 공정이 내준 만큼만 · 아직 못 하는 수주는 뒤 수주를 막지 않음) · 불량률이 부품 · 자재로 · 달력 조 수 0 · 오늘 전 필요한 날
       · (고친 코드의 Codex 검토) 조립 품목군이 둘인 수주의 자재는 그 품목군 진행으로 · 800 근무일 안에 다 못 쓴 나머지도 셈
+   14 자재 구분 골라 보기 (1.15.2, 사용자 "원자재 부자재 소모품 반제품 이런식으로 선택해서 표시"): 구분 = 품목 마스터 단계 → 품목구분 · 품목에 없는 코드 따로 · 단추 · 알림 · 엑셀 · AI 비서
    사용:  npm run test:v19   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -368,6 +369,81 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
       del('po', r => r.po_no === 'PO-MIX'); del('items', r => ['SET-X', 'PEN-M2', 'PEN-D2', 'DMAT'].includes(r.code)); del('bom_lines', r => r.parent === 'SET-X' || r.parent === 'PEN-D2'); del('stock_open', r => r.code === 'DMAT');
       DB.replace('plan_proc', []); await DB.flush(); });
     eq('되돌리면 처음 계산과 같음', (await run('all')).counts, R1.counts);
+  });
+
+  await sec('14. 자재 구분 골라 보기 (1.15.2): 원재료 · 부자재 · 소모품 · 반제품 · 품목에 없음', async () => {
+    // 사용자 2026-11-10 "생산계획에서 자재 모자라는 것만 표시하는건 원자재 부자재 소모품 반제품 이런식으로 선택해서 표시할수있게 해줘"
+    // 구분 = 품목 마스터의 단계 (원부자재 재고 화면과 같음) → 단계 없으면 품목구분 (ECOUNT) · 품목 마스터에 없는 코드는 따로 (짐작하지 않음)
+    await ev(async () => { const DB = ERP.db;
+      DB.addMany('items', [{ code: 'TAPE-1', name: 'TAPE', stage: 'CM', unit: 'ROLL', src: 'test' }, { code: 'LBL-9', name: 'LABEL', etype: '부재료', unit: 'PCS', src: 'test' },
+        { code: 'CORE-B', name: 'BOUGHT CORE', stage: 'WIP00', line: 'MINI', unit: 'PCS', src: 'test' }]);
+      DB.addMany('bom_lines', [{ parent: 'CT-M', child: 'TAPE-1', qty: 1, note: '포장' }, { parent: 'CT-M', child: 'LBL-9', qty: 1, note: '포장' }, { parent: 'CT-M', child: 'CORE-B', qty: 1, note: '원료 kg (MRP 소요량)' },
+        { parent: 'CT-M', child: 'NOPE-9', qty: 1, note: '포장' }]); await DB.flush(); });
+    const k = await ev(() => { const P = ERP.plan; const R = P.run('all'); return { kinds: R.mats.map(m => [m.code, m.mkind]).sort(), short: R.short.length, need: R.mats.filter(m => ['TAPE-1', 'LBL-9', 'CORE-B', 'NOPE-9'].includes(m.code)).map(m => m.need),
+      names: ['RM', 'SM', 'CM', 'SEMI', 'FG', 'ETC', 'NONE'].map(x => P.matKindName(x)) }; });
+    eq('구분: 원료 RM · 케이스 · 카톤 SM · 테이프 CM · 단계 없고 품목구분 부재료 → SM · BOM 에 원료로 적힌 반제품 → SEMI · 품목에 없는 코드 → NONE', k.kinds,
+      [['CASE-M', 'SM'], ['CORE-B', 'SEMI'], ['CTN-M', 'SM'], ['LBL-9', 'SM'], ['NOPE-9', 'NONE'], ['RES-1', 'RM'], ['TAPE-1', 'CM']]);
+    eq('모자라는 것 7종 · 새 자재는 카톤마다 1 (330)', [k.short, k.need], [7, [330, 330, 330, 330]]);
+    eq('구분 이름 (원부자재 재고 화면과 같은 단계 이름)', k.names, ['원재료', '부자재', '소모품', '반제품', '완제품', '기타', '품목에 없음']);
+    eq('AI 비서 production_plan 자재에도 구분', await ev(() => ERP.ai.tools.production_plan({ view: 'materials' }).materials.map(m => [m.code, m.category]).sort()),
+      [['CASE-M', '부자재'], ['CORE-B', '반제품'], ['CTN-M', '부자재'], ['LBL-9', '부자재'], ['NOPE-9', '품목에 없음'], ['RES-1', '원재료'], ['TAPE-1', '소모품']]);
+    // 화면
+    await ev(() => { ERP.setLang('ko'); ERP.state.plan = { tab: 'mats' }; location.hash = '#/plan'; ERP.render(); }); await settle();
+    const view = () => ev(() => ({ btn: Array.from(document.querySelectorAll('#main button[data-plan-mkind]')).map(b => [b.dataset.planMkind, b.textContent.trim(), b.classList.contains('primary')]),
+      seg: Array.from(document.querySelectorAll('#main button[data-plan-mat]')).map(b => b.textContent.trim()),
+      rows: Array.from(document.querySelectorAll('#main .card table tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.replace(/\s+/g, ' ').trim())) }));
+    const codes = (v) => v.rows.map(r => r[0].split(' ')[0]).sort();
+    let v = await view();
+    eq('구분 단추: 모든 구분 · 원재료 1 · 부자재 3 · 소모품 1 · 반제품 1 · 품목에 없음 1 (완제품 · 기타는 없어서 안 보임)', v.btn,
+      [['all', '모든 구분', true], ['RM', '원재료 1', false], ['SM', '부자재 3', false], ['CM', '소모품 1', false], ['SEMI', '반제품 1', false], ['NONE', '품목에 없음 1', false]]);
+    eq('표 7줄 · 구분 칸 = 구분 이름 + 단계 코드', [v.rows.length, v.rows.find(r => r[0].startsWith('RES-1'))[1], v.rows.find(r => r[0].startsWith('NOPE-9'))[1]], [7, '원재료 RM', '품목에 없음']);
+    await A.click('#main button[data-plan-mkind="RM"]'); await settle(); v = await view();
+    eq('원재료만: RES-1 한 줄 · 모자라는 것만 1 · 전체 1', [codes(v), v.seg], [['RES-1'], ['모자라는 것만 1', '전체 1']]);
+    await A.click('#main button[data-plan-mkind="SM"]'); await settle(); v = await view();
+    eq('부자재를 더 누르면 같이: 4줄 · 켜진 단추 원재료 · 부자재', [codes(v), v.btn.filter(b => b[2]).map(b => b[0])], [['CASE-M', 'CTN-M', 'LBL-9', 'RES-1'], ['RM', 'SM']]);
+    await A.click('#main button[data-plan-mkind="RM"]'); await settle(); v = await view();
+    eq('원재료를 다시 누르면 뺌: 부자재 3줄', codes(v), ['CASE-M', 'CTN-M', 'LBL-9']);
+    await A.click('.tabs .tab:nth-child(1)'); await settle(); await A.click('.tabs .tab:nth-child(3)'); await settle(); v = await view();
+    eq('다른 탭에 갔다 와도 고른 구분 그대로', [v.btn.filter(b => b[2]).map(b => b[0]), v.rows.length], [['SM'], 3]);
+    await A.click('#main button[data-plan-mkind="all"]'); await settle(); v = await view();
+    eq('모든 구분 → 7줄', [v.rows.length, v.btn.filter(b => b[2]).map(b => b[0])], [7, ['all']]);
+    // 재고가 넉넉한 소모품: 모자라는 것만 → 알림 · 전체 → 보임
+    await ev(async (o) => { ERP.db.add('stock_open', { date: o.EC, scope: 'WH', code: 'TAPE-1', qty: 1000, unit: 'ROLL' }); await ERP.db.flush(); ERP.render(); }, { EC: D(-60) }); await settle();
+    await A.click('#main button[data-plan-mkind="CM"]'); await settle(); v = await view();
+    ok('소모품: 모자라는 것 없음 → 알림 한 줄', v.rows.length === 1 && /고른 구분에 모자라는 자재가 없습니다/.test(v.rows[0][0]) && v.btn.some(b => b[0] === 'CM' && b[1] === '소모품 0'), v);
+    await A.click('#main button[data-plan-mat="all"]'); await settle(); v = await view();
+    eq('전체 + 소모품 → TAPE-1 (충분) 한 줄 · 모자라는 것만 0 · 전체 1', [codes(v), v.seg], [['TAPE-1'], ['모자라는 것만 0', '전체 1']]);
+    await A.click('#main button[data-plan-mat="short"]'); await settle();
+    // 반제품이 자재에 하나도 없을 때 (실제 자료와 같음): 단추는 늘 보이고 (0), 누르면 공장에서 만들어 공정별 부하에서 센다는 알림
+    await ev(async () => { const DB = ERP.db; DB.rows('bom_lines').filter(l => l.child === 'CORE-B').forEach(l => DB.remove('bom_lines', l._id)); await DB.flush(); ERP.render(); }); await settle();
+    await A.click('#main button[data-plan-mkind="all"]'); await settle(); v = await view();
+    ok('반제품 단추는 늘 보임 (0)', v.btn.some(b => b[0] === 'SEMI' && b[1] === '반제품 0'), v.btn);
+    await A.click('#main button[data-plan-mkind="SEMI"]'); await settle(); v = await view();
+    ok('반제품만: 없음 → 공정별 부하에서 센다는 알림', v.rows.length === 1 && /공정별 부하/.test(v.rows[0][0]), v.rows);
+    // 고른 구분이 없어지면 (품목에 없는 코드를 품목에 넣음) 거르기도 풀림 — 안 보이는 단추로 걸러지지 않게
+    await A.click('#main button[data-plan-mkind="all"]'); await settle(); await A.click('#main button[data-plan-mkind="NONE"]'); await settle();
+    await ev(async () => { ERP.db.add('items', { code: 'NOPE-9', name: 'NEW CARTON', stage: 'SM', unit: 'PCS', src: 'test' }); await ERP.db.flush(); ERP.render(); }); await settle(); v = await view();
+    eq('품목에 없음이 사라지면 → 모든 구분 · 모자라는 5줄 (NOPE-9 는 부자재)', [v.btn.map(b => b[0]), v.btn.filter(b => b[2]).map(b => b[0]), v.rows.length, v.btn.find(b => b[0] === 'SM')[1]],
+      [['all', 'RM', 'SM', 'CM', 'SEMI'], ['all'], 5, '부자재 4']);
+    // 품목 마스터에서 단계를 고치면 구분도
+    await ev(async () => { const DB = ERP.db; const it = DB.rows('items').find(i => i.code === 'TAPE-1'); DB.update('items', it._id, { stage: 'SM' }); await DB.flush(); });
+    eq('품목 마스터에서 단계를 고치면 구분도 (TAPE-1 소모품 → 부자재)', await ev(() => ERP.plan.run('all').mats.find(m => m.code === 'TAPE-1').mkind), 'SM');
+    // 엑셀 자재 시트: 구분 칸 (단계 칸 앞)
+    const xs = await ev(() => { const s = ERP.plan.sheets(ERP.plan.run('all'), ERP.plan.run('firm')).find(x => x.name === '자재'); return { hd: s.aoa[0].slice(0, 5), res: s.aoa.find(r => r[0] === 'RES-1').slice(0, 5) }; });
+    eq('엑셀 자재 시트: 품목코드 · 품명 · 구분 · 단계 · 단위 (RES-1 = 원재료 · RM)', xs, { hd: ['품목코드', '품명', '구분', '단계', '단위'], res: ['RES-1', 'RESIN', '원재료', 'RM', 'kg'] });
+    // 휴대폰 폭: 구분 단추가 줄을 바꿔 화면이 옆으로 넘치지 않음 (표는 안에서 밀기)
+    await A.setViewportSize({ width: 390, height: 840 }); await ev(() => ERP.render()); await settle();
+    const w = await ev(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+    ok('휴대폰 폭: 자재 탭이 옆으로 넘치지 않음', w.sw <= w.cw + 2, w);
+    await A.setViewportSize({ width: 1480, height: 920 }); await settle();
+    // 베트남어: 구분 단추 · 알림에 한글 없음
+    await ev(() => { ERP.setLang('vi'); ERP.render(); }); await settle();
+    const vt = await ev(() => Array.from(document.querySelectorAll('#main .card .toolbar')).map(e => e.innerText).join(' | '));
+    ok('베트남어: 자재 탭 단추에 한글 없음', !/[가-힣]/.test(vt) && /Nguyên vật liệu/.test(vt) && /Bán thành phẩm/.test(vt), vt);
+    // 되돌림
+    await ev(async () => { const DB = ERP.db; ERP.setLang('ko'); ERP.state.plan = null; const del = (t, f) => DB.rows(t).filter(f).forEach(r => DB.remove(t, r._id));
+      del('items', r => ['TAPE-1', 'LBL-9', 'CORE-B', 'NOPE-9'].includes(r.code)); del('bom_lines', r => ['TAPE-1', 'LBL-9', 'CORE-B', 'NOPE-9'].includes(r.child)); del('stock_open', r => r.code === 'TAPE-1'); await DB.flush(); });
+    eq('되돌리면 처음 계산과 같음 (자재 3종)', await ev(() => { const R = ERP.plan.run('all'); return [R.mats.map(m => m.code).sort(), R.counts]; }), [['CASE-M', 'CTN-M', 'RES-1'], R1.counts]);
   });
 
   await sec('12. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {

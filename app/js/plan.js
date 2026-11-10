@@ -37,6 +37,22 @@
   P.judgeTone = (j) => (P.JUDGE[j] ? P.JUDGE[j][2] : 'neutral');
   P.mjudgeName = (j) => { const x = P.MJUDGE[j]; return x ? L(x[0], x[1]) : str(j); };
   P.mjudgeTone = (j) => (P.MJUDGE[j] ? P.MJUDGE[j][2] : 'neutral');
+  // 1.15.2 자재 구분 (사용자 2026-11-10 "생산계획에서 자재 모자라는 것만 표시하는건 원자재 부자재 소모품 반제품 이런식으로 선택해서 표시할수있게 해줘")
+  //   = 품목 마스터의 단계 (원부자재 재고 화면과 같음 · 품목 마스터에서 고칠 수 있음): 원재료 RM · 부자재 SM · 소모품 CM · 반제품 (사출 · 리필 · 조립 단계, 마니라 세트) · 완제품 FG
+  //   → 단계가 없으면 (ETC) 품목구분 (ECOUNT 원재료 · 부재료 …) → 품목 마스터에 없는 코드 (BOM 에만 있음) 는 NONE — 이름 · 비고로 짐작하지 않는다
+  P.MAT_KINDS = ['RM', 'SM', 'CM', 'SEMI', 'FG', 'ETC', 'NONE'];
+  P.MAT_KINDS_MAIN = ['RM', 'SM', 'CM', 'SEMI'];   // 사용자가 말한 넷 — 자재에 없어도 단추를 보인다
+  P.matKindOf = (it) => {
+    if (!it) return 'NONE';
+    const INV = ERP.inv; const stg = INV.info(it).stage;
+    if (stg === 'RM' || stg === 'SM' || stg === 'CM' || stg === 'FG') return stg;
+    if (stg === 'SG' || INV.inProcess(stg)) return 'SEMI';
+    if (stg === 'ETC') { const et = str(it.etype).replace(/[[\]]/g, '');
+      if (/원재료|원자재/.test(et)) return 'RM'; if (/소모품/.test(et)) return 'CM'; if (/부재료|부자재/.test(et)) return 'SM'; if (/반제품/.test(et)) return 'SEMI'; if (/제품|상품/.test(et)) return 'FG'; }
+    return 'ETC';
+  };
+  P.matKindName = (k) => (k === 'RM' || k === 'SM' || k === 'CM' ? ERP.inv.stageName(k) : k === 'SEMI' ? L('반제품', 'Bán thành phẩm') : k === 'FG' ? L('완제품', 'Thành phẩm')
+    : k === 'NONE' ? L('품목에 없음', 'Chưa có trong danh mục') : L('기타', 'Khác'));
   P.waitName = (k) => { const [a, b] = k.split('>'); const n = (x) => (x === 'RAW' ? L('원료 · 부자재 입고', 'Nhập NL · vật tư') : x === 'OUT' ? L('출고 · 검사', 'Xuất · kiểm') : ERP.procName(x)); return n(a) + ' → ' + n(b); };
 
   /** 조립 품목군 이름: 일보 품목군 · 품목 라인 (INV.LINE_DIV) 을 같게 — ERP.normDiv (Regular → Dial) + 대소문자 */
@@ -315,7 +331,7 @@
       const short = Math.max(0, m.need - stock - incQty);
       const orderBy = first && lead ? F.addDays(first.date, -lead) : null;
       const judge = !first ? 'enough' : !lead ? 'nolead' : orderBy < today ? 'late' : F.diffDays(orderBy, today) <= 7 ? 'week' : 'ok';
-      return { code, name: x ? x.name : (s ? str(s.name) : ''), stage: x ? x.stage : '', unit: x ? (INV.unitShow(x.unit) || x.unit) : (s ? s.prim : ''), via: m.via, need: m.need, stock, inc: incQty, incNoEta, short, first, lead, orderBy,
+      return { code, name: x ? x.name : (s ? str(s.name) : ''), stage: x ? x.stage : '', mkind: P.matKindOf(x ? x.it : null), unit: x ? (INV.unitShow(x.unit) || x.unit) : (s ? s.prim : ''), via: m.via, need: m.need, stock, inc: incQty, incNoEta, short, first, lead, orderBy,
         arrive: first && lead && judge === 'late' ? F.addDays(today, lead) : null, judge, item: x ? x.it : null };
     }).sort((a, b) => (b.first ? 1 : 0) - (a.first ? 1 : 0) || String((a.first || {}).date || '').localeCompare(String((b.first || {}).date || '')) || b.short - a.short || a.code.localeCompare(b.code));
 
@@ -396,14 +412,14 @@
     const loadAoa = [[L('공정 · 품목군', 'Công đoạn · nhóm'), L('남은 일 (현장 재고 뺀 뒤, pcs)', 'Việc còn (pcs)'), L('하루 능력 (계산에 씀)', 'Năng lực / ngày'), L('능력 출처', 'Nguồn'), L('일보 실적 하루', 'Báo cáo / ngày'), L('걸리는 근무일', 'Số ngày làm'), L('끝나는 날', 'Ngày xong'), L('설비 기준 최대 하루', 'Tối đa theo máy / ngày'), L('걸리는 근무일 (설비 기준)', 'Số ngày (theo máy)')]]
       .concat(A.loads.map(r => [P.loadName(r.id), r0(r.load), r0(r.perDay), r.src === 'manual' ? L('직접 넣음', 'nhập tay') : r.src === 'log' ? L('일보 실적', 'báo cáo') : L('없음', 'không có'), r0(r.logDay), r2(r.days), dOr(r.end), r.proc === 'PCK' ? (cap.mach.PCK ? r0(cap.mach.PCK) + ' set' : '') : r0(r.mach), r2(r.daysMach)]))
       .concat([[], [L('포장 하루 실적 (참고)', 'Đóng gói / ngày (tham khảo)'), r0(cap.pckSetsDay) + ' set'], [L('현장 재고에서 쓴 양 (참고)', 'Dùng từ tồn hiện trường'), r0(A.fromStock), A.fromStockN + L('품목', ' mã')]]);
-    const matAoa = [[L('품목코드', 'Mã'), L('품명', 'Tên'), L('단계', 'Loại'), L('단위', 'ĐV'), L('쓰는 공정', 'Công đoạn dùng'), L('필요량', 'Cần'), L('지금 재고', 'Tồn'), L('입고 예정', 'Sắp nhập'), L('모자람', 'Thiếu'), L('처음 모자라는 수주', 'PO thiếu đầu tiên'), L('그 수주 납기', 'Hạn PO đó'), L('필요한 날', 'Ngày cần'), L('리드타임 (일)', 'Thời gian giao'), L('발주 마감일', 'Hạn đặt'), L('판정', 'Đánh giá')]]
-      .concat(A.mats.map(m => [m.code, m.name, m.stage, m.unit, ERP.procName(m.via), r2(m.need), r2(m.stock), r2(m.inc) || null, r2(m.short), m.first ? m.first.po + ' ' + m.first.item : '', m.first ? m.first.due : '', m.first ? m.first.date : '', m.lead, m.orderBy, P.mjudgeName(m.judge) + (m.arrive ? ' (' + L('도착 ', 'đến ') + m.arrive + ')' : '')]));
+    const matAoa = [[L('품목코드', 'Mã'), L('품명', 'Tên'), L('구분', 'Loại'), L('단계', 'Công đoạn'), L('단위', 'ĐV'), L('쓰는 공정', 'Công đoạn dùng'), L('필요량', 'Cần'), L('지금 재고', 'Tồn'), L('입고 예정', 'Sắp nhập'), L('모자람', 'Thiếu'), L('처음 모자라는 수주', 'PO thiếu đầu tiên'), L('그 수주 납기', 'Hạn PO đó'), L('필요한 날', 'Ngày cần'), L('리드타임 (일)', 'Thời gian giao'), L('발주 마감일', 'Hạn đặt'), L('판정', 'Đánh giá')]]
+      .concat(A.mats.map(m => [m.code, m.name, P.matKindName(m.mkind), m.stage, m.unit, ERP.procName(m.via), r2(m.need), r2(m.stock), r2(m.inc) || null, r2(m.short), m.first ? m.first.po + ' ' + m.first.item : '', m.first ? m.first.due : '', m.first ? m.first.date : '', m.lead, m.orderBy, P.mjudgeName(m.judge) + (m.arrive ? ' (' + L('도착 ', 'đến ') + m.arrive + ')' : '')]));
     const capAoa = [[L('공정 · 품목군', 'Công đoạn · nhóm'), L('일보 실적 합', 'Tổng báo cáo') + ' (' + (cap.from || '') + ' ~ ' + (cap.to || '') + ')', L('일한 날', 'Số ngày'), L('일보 실적 하루', 'Báo cáo / ngày'), L('그동안 하루 조 수', 'Số ca TB'), L('계획 조 수', 'Số ca KH'), L('계산에 쓰는 하루', 'Dùng để tính / ngày'), L('설비 (사용 · 조당 표준 있음)', 'Máy (đang dùng · có SL chuẩn)'), L('설비 기준 최대 하루', 'Tối đa theo máy')]]
       .concat(P.PROCS.map(p => [ERP.procName(p), r0(cap.real[p]), cap.days[p], r0(cap.logDay[p]), r2(cap.histN[p]), A.base.shift[p].n, r0(cap.perDay[p]), cap.machN[p] || 0, p === 'PCK' ? (cap.mach.PCK ? r0(cap.mach.PCK) + ' set' : '') : r0(cap.mach[p])]))
       .concat(Object.keys(cap.famDay).sort().map(f => [ERP.procName('ASM') + ' · ' + P.famName(f), r0(cap.fam[f] || 0), cap.days.ASM, r0(cap.famLog[f]), '', '', r0(cap.famDay[f]), '', r0(cap.machFam[f])]));
     const noteAoa = [[L('무엇', 'Mục'), L('내용', 'Nội dung'), L('왜 · 할 일', 'Vì sao · cần làm')]].concat(A.notes.map(x => [x.title, x.text, x.why]));
     return [{ name: L('요약', 'Tóm tắt'), aoa: summary, cols: [30, 70, 70] }, { name: L('수주별 완료 예상', 'Dự kiến theo PO'), aoa: ordAoa, cols: [6, 14, 16, 10, 14, 10, 12, 11, 11, 11, 11, 11, 11, 12, 9, 12, 12, 34] },
-      { name: L('공정별 부하', 'Tải công đoạn'), aoa: loadAoa, cols: [24, 18, 16, 12, 14, 12, 12, 18, 16] }, { name: L('자재', 'Vật tư'), aoa: matAoa, cols: [16, 30, 7, 6, 12, 14, 12, 12, 12, 26, 11, 11, 10, 12, 26] },
+      { name: L('공정별 부하', 'Tải công đoạn'), aoa: loadAoa, cols: [24, 18, 16, 12, 14, 12, 12, 18, 16] }, { name: L('자재', 'Vật tư'), aoa: matAoa, cols: [16, 30, 12, 7, 6, 12, 14, 12, 12, 12, 26, 11, 11, 10, 12, 26] },
       { name: L('능력 근거', 'Cơ sở năng lực'), aoa: capAoa, cols: [26, 22, 8, 14, 12, 10, 16, 18, 16] }, { name: L('확인할 것', 'Cần kiểm tra'), aoa: noteAoa, cols: [26, 90, 80] }];
   };
 })();
