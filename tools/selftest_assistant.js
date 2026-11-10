@@ -419,6 +419,24 @@ const TABLE = [
   }
 
   // =====================================================================================================
+  section('4-2. 1.15.3: AI 답 보기 — 표는 칸마다 줄, 덩어리마다 제목 · 가로 줄 (사용자 "칸이 제대로 안나눠져있어 … 표나 줄같은거 로 구분되서 답변하게 해줘")');
+  {
+    const r = await ev(async () => {
+      await ERP.ai.open(); const panel = document.getElementById('aiPanel');
+      const d = document.createElement('div'); d.className = 'b a rich';
+      ERP.ai.renderMd('**안전재고 미달 자재 — 25건**\n\n| 자재 | 단위 | 재고 | 안전재고 |\n|---|---|---:|---:|\n| R-031A KAOLIN | kg | 0 | 700 |\n| R-201 HOT FOIL | pcs | 3,024,000 | 8,000,000 |\n\n※ KAOLIN 은 재고 0\n\n**다음에 할 일**\n- 발주\n- 입고 확인').forEach(n => d.appendChild(n));
+      panel.appendChild(d);
+      const cs = (el) => getComputedStyle(el); const td = d.querySelector('table.at td:nth-child(2)'), th = d.querySelector('table.at th:nth-child(2)'); const hs = d.querySelectorAll('.ah1');   // 칸 사이 세로 줄 (바깥 테두리는 표 틀)
+      const out = { heads: Array.from(hs).map(x => x.textContent), tdL: td ? [cs(td).borderLeftWidth, cs(td).borderLeftStyle] : null, thL: th ? [cs(th).borderLeftWidth, cs(th).borderLeftStyle] : null,
+        h2Top: hs[1] ? [cs(hs[1]).borderTopWidth, cs(hs[1]).borderTopStyle] : null, h1Top: hs[0] ? cs(hs[0]).borderTopWidth : null };
+      d.remove(); return out;
+    });
+    eq('굵은 글자만 있는 줄 = 제목 (덩어리마다 제목)', r.heads, ['안전재고 미달 자재 — 25건', '다음에 할 일']);
+    eq('표 칸마다 세로 줄 (td · th 왼쪽 테두리 1px)', [r.tdL, r.thL], [['1px', 'solid'], ['1px', 'solid']]);
+    eq('둘째 제목부터 위에 가로 줄 (덩어리 나눔) · 첫 제목은 줄 없음', [r.h2Top, r.h1Top], [['1px', 'solid'], '0px']);
+  }
+
+  // =====================================================================================================
   section('5. AI 모드: 가짜 Anthropic API (도구 호출 · 오류 복구 · 내장 모드로 전환)');
   {
     const r = await ev(async () => {
@@ -478,6 +496,7 @@ const TABLE = [
     ok('시스템 프롬프트: 비서 이름·호칭', /Your name is "소미"/.test(r.sys) && /Address the user as "박 팀장님"/.test(r.sys), r.sys.slice(-500));
     ok('시스템 프롬프트: 자세히 스타일 + 우리 공장 지침', /more detail — tables/.test(r.sys) && /COMPANY-SPECIFIC INSTRUCTIONS[\s\S]*서리/.test(r.sys));
     ok('시스템 프롬프트: 표(Markdown) + 표 밑 ※ 코멘트 형식', /Markdown table/.test(r.sys) && /starting with "※"/.test(r.sys), r.sys.slice(0, 200));
+    ok('시스템 프롬프트 (1.15.3): 덩어리마다 굵은 제목 줄 · 한 줄에 한 가지 · 단위는 따로 칸', /bold heading line/.test(r.sys) && /own line/.test(r.sys) && /unit column/.test(r.sys), r.sys.slice(0, 300));
     ok('시스템 프롬프트: 60일 기준·MRP 경고 규칙', /60 days/.test(r.sys) && /NO_COMPONENTS/.test(r.sys) && /never say "no shortage"/.test(r.sys));
     ok('응답 한도 16000 · 자세히 스타일은 effort medium', r.maxTokens === 16000 && r.effort === 'medium', [r.maxTokens, r.effort]);
     ok('중간 오류(429)는 한 번 다시 시도 → 그래도 실패하면 내장 모드로 답하고 이유를 알림', r.b.via === 'local' && r.b.has && /사용 한도|요청이 많/.test(r.b.note) && r.b.hist === 0 && r.b.calls === 3, r.b);

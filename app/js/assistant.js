@@ -40,9 +40,11 @@
     '- Production plan (`production_plan`, same as the 생산 계획 screen): an estimate at average speed from the last 3 months of production reports (or the planner\'s own daily capacity). Its judge "late" means the line is EXPECTED to miss its due date — not the overdue "late" PO above; "past" = due date already passed. Lines without a PO number are "PO미정" (not confirmed): scope all includes them (default) — say so, and use scope firm when the user asks about confirmed POs only. Mention items in `check` that affect the answer.',
     'FORMAT (the chat window renders Markdown tables)',
     '- Start with one short bold title line (e.g. **납기 경과 PO — 26건**).',
-    '- Whenever the answer has more than two items or numbers (POs, items/materials, processes, machines, days), put them in a Markdown table (| col | col |, header separator row) with only the useful columns: code, name, quantity with unit, date, %. At most 12 rows; if there are more, say how many more under the table.',
+    '- Split a longer answer into parts (e.g. the list, the reason, what to do next). Give each later part its own bold heading line (e.g. **다음에 할 일**) and leave a blank line between parts; the chat window draws a line above each heading.',
+    '- Whenever the answer has more than two items or numbers (POs, items/materials, processes, machines, days), put them in a Markdown table (| col | col |, header separator row) with only the useful columns: code, name, quantity, unit, date, %. At most 12 rows; if there are more, say how many more under the table.',
+    '- Keep number cells to plain numbers: when every row has the same unit put it in the header (e.g. 재고 (kg)); when rows have different units (kg, pcs, set …) add a separate unit column (단위 / ĐVT) instead of writing units after the numbers.',
     '- Directly under every table write a comment of one or two short lines starting with "※": what matters in that table (the biggest risk or gap, a trend, what to check next). Do not repeat the table in prose.',
-    '- Use plain sentences only for single facts. No long paragraphs.',
+    '- Write every point on its own line: several facts, steps or checks become a "- " list (one point per line, at most 8), never one run-on sentence or paragraph. Use plain sentences only for single facts.',
   ].join('\n');
 
   const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -290,18 +292,21 @@
   #aiPanel.on{display:flex}
   #aiPanel.wide{width:min(980px,calc(100vw - 24px));height:min(860px,calc(100vh - 100px))}
   #aiPanel .b.rich{white-space:normal;max-width:100%;width:100%;box-sizing:border-box}
-  #aiPanel .b.rich>*+*{margin-top:8px}
-  #aiPanel .b.rich p{margin:0}
+  #aiPanel .b.rich>*+*{margin-top:10px}
+  #aiPanel .b.rich p{margin:0;line-height:1.55}
   #aiPanel .ah1{font-weight:700;font-size:14.5px;line-height:1.4}
+  #aiPanel .b.rich>.ah1:not(:first-child){border-top:1px solid #CBD3DF;padding-top:9px;margin-top:12px}
+  /* 1.15.3: 덩어리마다 위에 가로 줄 · 표는 칸마다 줄 (사용자 "칸이 제대로 안나눠져있어") */
   #aiPanel .asec{font-weight:700;font-size:13px;color:#174A94;padding-top:6px;border-top:1px solid #DDE2EA}
   #aiPanel .atb{display:flex;flex-direction:column;gap:4px}
   #aiPanel .att{font-size:12px;font-weight:700;color:#5b6575}
-  #aiPanel .atw{overflow:auto;max-height:340px;border:1px solid #D5DBE4;border-radius:8px;background:#fff}
+  #aiPanel .atw{overflow:auto;max-height:340px;border:1px solid #C9D1DC;border-radius:8px;background:#fff}
   #aiPanel table.at{border-collapse:collapse;width:100%;font-size:12.5px;line-height:1.35}
-  #aiPanel table.at th{position:sticky;top:0;background:#F3F5F8;color:#4B5563;font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid #D5DBE4;white-space:nowrap}
-  #aiPanel table.at td{padding:5px 8px;border-bottom:1px solid #EEF0F3;white-space:nowrap;vertical-align:top}
-  #aiPanel table.at tr:last-child td{border-bottom:0}
-  #aiPanel table.at tbody tr:nth-child(even) td{background:#FAFBFC}
+  #aiPanel table.at th{position:sticky;top:0;background:#E9EEF5;color:#374151;font-weight:700;text-align:left;padding:6px 9px;border:1px solid #C9D1DC;border-top:0;white-space:nowrap}
+  #aiPanel table.at td{padding:6px 9px;border:1px solid #DDE3EB;white-space:nowrap;vertical-align:top}
+  #aiPanel table.at tr>:first-child{border-left:0}#aiPanel table.at tr>:last-child{border-right:0}
+  #aiPanel table.at tbody tr:last-child td{border-bottom:0}
+  #aiPanel table.at tbody tr:nth-child(even) td{background:#F6F8FB}
   #aiPanel table.at .n{text-align:right;font-variant-numeric:tabular-nums}
   #aiPanel table.at .b{font-weight:700}
   #aiPanel table.at .t-bad{color:#B3261E;font-weight:600}#aiPanel table.at .t-warn{color:#9A5B00;font-weight:600}#aiPanel table.at .t-ok{color:#0B6B52;font-weight:600}#aiPanel table.at .t-muted{color:#8A93A0}
@@ -372,7 +377,8 @@
       return null;
     });
   }
-  /** a small, safe Markdown subset: # headings, **bold**, `code`, - lists, | tables |, ※ comment lines, --- */
+  const BOLD_LINE = /^\s*\*\*([^*]+)\*\*\s*:?\s*$/;
+  /** a small, safe Markdown subset: # headings and **bold-only** lines (headings), **bold**, `code`, - lists, | tables |, ※ comment lines, --- */
   function renderMd(text) {
     const lines = String(text || '').replace(/\r/g, '').split('\n'); const out = []; let i = 0;
     const isRow = (l) => /^\s*\|.*\|\s*$/.test(l); const isSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
@@ -387,11 +393,12 @@
         out.push(tableEl(head, body, numCol, true)); continue;
       }
       if (/^\s*#{1,4}\s+/.test(l)) { out.push(h('div', { class: 'ah1' }, inline(l.replace(/^\s*#{1,4}\s+/, '')))); i++; continue; }
+      const bh = l.match(BOLD_LINE); if (bh) { out.push(h('div', { class: 'ah1' }, h('b', bh[1].trim()))); i++; continue; }   // 1.15.3: 굵은 글자만 있는 줄 = 제목 (덩어리마다 위에 가로 줄)
       if (/^\s*([-*·•]|\d+[.)])\s+/.test(l)) { const ul = h('ul', { class: 'al' }); while (i < lines.length && /^\s*([-*·•]|\d+[.)])\s+/.test(lines[i])) { ul.appendChild(h('li', inline(lines[i].replace(/^\s*([-*·•]|\d+[.)])\s+/, '')))); i++; } out.push(ul); continue; }
       if (/^\s*(---+|\*\*\*+)\s*$/.test(l)) { out.push(h('hr')); i++; continue; }
       if (/^\s*(※|⚠)/.test(l)) { const prevTable = out.length && out[out.length - 1].classList && out[out.length - 1].classList.contains('atw'); out.push(h('div', { class: prevTable ? 'acmt' : 'anote' }, inline(l.trim()))); i++; continue; }
       if (!l.trim()) { i++; continue; }
-      const para = []; while (i < lines.length && lines[i].trim() && !special.test(lines[i]) && !(isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1]))) { para.push(lines[i]); i++; }
+      const para = []; while (i < lines.length && lines[i].trim() && !special.test(lines[i]) && !BOLD_LINE.test(lines[i]) && !(isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1]))) { para.push(lines[i]); i++; }
       if (!para.length) { out.push(h('p', inline(l))); i++; continue; }
       const p = h('p'); para.forEach((x, k) => { if (k) p.appendChild(h('br')); inline(x).forEach(n => p.append(n)); }); out.push(p);
     }

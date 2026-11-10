@@ -137,6 +137,7 @@ Dán nguyên prompt dưới đây vào Claude để tạo lại hoặc mở rộ
 **비서 답변 = 블록** (`assistant_local.js` → `assistant.js`)
 - 블록: `{t:'h'}` 제목 · `{t:'sec'}` 구역 · `{t:'p'}` · `{t:'note'}` · `{t:'list', items}` · `{t:'table', cols:[{l, num}], rows, title, more, cmt}` (`cmt` = 표 밑 ※ 코멘트). `answer()` 는 `{blocks, text, actions}` 를 주고, `A.blocksToText` 가 글자 버전을 만든다.
 - AI 모드는 FORMAT 규칙(굵은 제목 · Markdown 표 · 표 밑 ※ 코멘트)으로 답하고 `A.renderMd` 가 안전한 Markdown 일부만 그린다.
+- **1.15.3 (사용자 "ai 발하는거에 칸이 제대로 안나눠져있어 바로이어서 쓰면 보기가 힘들다. 보기편하게 표나 줄같은거 로 구분되서 답변하게 해줘")**: 비서 표 (`table.at`, 내장 모드 · AI 모드 같음) 는 칸마다 줄 (바깥 테두리는 표 틀) · 머리 줄 진하게 · 짝수 줄 바탕. AI 답의 굵은 글자만 있는 줄 (`**…**`) = 제목 (`.ah1`), 둘째 제목부터 위에 가로 줄. FORMAT 규칙에 더함: 긴 답은 덩어리 (목록 · 까닭 · 할 일) 마다 굵은 제목 줄 + 빈 줄, 숫자 칸은 숫자만 (단위가 같으면 머리글, 다르면 단위 칸), 여러 가지는 한 줄에 하나씩 "- " 목록 (8개까지). 새 규칙은 새 대화부터 (대화 중 시스템 프롬프트는 바꾸지 않음).
 
 **저장**: `DB.queueSave` 는 표마다 0.7초 묶어 저장(대기 수는 표마다 1). `DB.flush()` 는 대기 중인 저장을 바로 보낸다 — 설치형 창 닫기 · 재시작 전에 `electron/main.js` 가 기다린다.
 
