@@ -110,3 +110,12 @@
 - 화면 확인: 새 데모를 Ego Lite 로 열어 사용자 화면과 같은 답 (단위 칸 · ※ 코멘트 · "다음에 할 일" 목록) 을 그려 봄 — 칸마다 줄 · 단위 칸 · 제목 위 가로 줄 (`D:\ERP\14_ai_format\ego\ai-answer-1153.png`).
 - Codex 검토 (읽기 전용, `codex review`, 2026-11-10, 범위 `git diff HEAD`): "이번 변경에서 확실하게 재현되는 결함은 찾지 못했습니다. CSS는 비서 패널 안으로 제한되고 기존 대화의 시스템 프롬프트 고정도 유지됩니다." (`codex review --uncommitted` 는 검토 지시 글과 같이 쓸 수 없어 범위를 지시 글에 적음.)
 - 데모 `ERP_Demo.html`: 8,117,313 bytes, SHA-256 `c5c6c31d0c683a74cb901df2d522b8b5d00a277fd2f62f5536ce666c6b75bc23`.
+
+### 1.15.3 GitHub · Release · 이 PC (2026-11-10)
+
+- 올림 `b6b6960` → 자동 업데이트 시험 (Windows) 성공 (Actions 42789869594, 16:31) → Release v1.15.3 (Actions 42791414332 #27, 16:35).
+  - `ColorPencil-ERP-Setup-1.15.3.exe` 114,243,039 bytes · SHA-256 `b52b37a9a4b1aed00c6b32aadf9c1432c929c846317da4d128dbe707679ef1b1` (= Release 지문 · `latest.json`, `D:\ERP\02_installer`). 처음 `get_installers.ps1` 의 `gh release download` 가 GitHub 이 아주 느려 16분 동안 멈춤 → 멈추고 `curl.exe` 로 다시 받음 (40초).
+  - `ERP_Demo.html` 8,117,313 bytes · SHA-256 `c5c6c31d…bc23` (이 PC 데모와 같음, `D:\ERP\03_demo`).
+- 이 PC ERP: 꺼져 있어서 16:37 에 켬 → 새 버전을 받는 중 (GitHub 이 느려 30초에 1% 쯤) 16:43 에 ERP 가 꺼짐 (Claude 가 끄지 않음 — 누가 닫은 것으로 보임) → GitHub 이 빨라진 뒤 16:57 다시 켜서 1.15.2 → 1.15.3 (16:58, `update_backup\2026-11-10_165821_v1.15.2_to_v1.15.3`).
+  - 읽기만 확인 (Ego Lite 로 `127.0.0.1:3210`): 비서 창에 내장 모드 답 ("안전재고 미달 자재" 25종, 15줄) 을 그려 봄 — 칸 사이 세로 줄 1px · 화면 오류 없음 (그린 것은 바로 지움, AI 에 질문을 보내지 않음 · 대화 기록 그대로). 비서 머리에 "AI · claude-sonnet-5-5" — 사용자가 API 키를 넣어 AI 모드가 켜져 있음.
+  - 16:59 다시 꺼짐.
