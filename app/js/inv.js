@@ -292,6 +292,42 @@
     return { m, u, get: (c) => { const k = str(c); return m.get(k) || u.get(k.toUpperCase()) || null; } };
   });
   INV.item = (c) => INV.items().get(c);
+  // 1.15.4: 대체 자재 (mat_alt) — 같은 자재 · 다른 수입지 코드. 양쪽으로 이어지고, 이어진 코드끼리 한 묶음 (A ↔ B, B ↔ C 면 A · B · C).
+  //   소요량 계산 (MRP) · 생산 계획 모자랄 자재만 묶음의 남는 재고를 같이 센다 — 실제 재고 · 수불 · 안전재고 · 해외 주문은 코드마다 그대로
+  INV.altGroups = () => DB.memo('inv.altGroups', ['mat_alt', 'items'], () => {
+    const par = new Map(); const root = (x) => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
+    const key = (c) => { const it = INV.item(c); return it ? str(it.code) : str(c); };   // 품목 코드 (대소문자) 로 맞춤
+    (ERP.TABLES.mat_alt ? DB.rows('mat_alt') : []).forEach(r => { const a = key(r.code), b = key(r.alt); if (!a || !b || a === b) return;
+      [a, b].forEach(x => { if (!par.has(x)) par.set(x, x); }); const ra = root(a), rb = root(b); if (ra !== rb) par.set(ra, rb); });
+    const groups = new Map(); par.forEach((_, c) => { const r = root(c); let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(c); });
+    const of = new Map(); groups.forEach(g => { g.sort(); g.forEach(c => of.set(c, g)); });
+    return of;   // 코드 → 묶음 (자기 포함, 코드 순)
+  });
+  /** 모자람을 같은 묶음의 남는 재고로 메움 (계산만). list: [{code, need, have}] — have = 그 코드가 지금 가진 양 (재고, 마이너스면 그만큼 더 모자람 — MRP 와 같음).
+      같은 코드가 여러 줄이면 필요량을 합친다 (Codex 검토 2026-11-12 — 첫 줄만 보면 없는 재고를 빌려줌).
+      남는 재고 = list 에 있는 코드는 have − need, 없는 코드는 stockOf(code). 줄마다 자기 재고를 먼저 쓰고, 모자란 만큼만 list 순서대로 빌림.
+      돌려줌: Map 코드 → { from: [{code, qty}], got } */
+  INV.altCover = function (list, stockOf) {
+    const G = INV.altGroups(); const out = new Map(); if (!G.size) return out;
+    const byCode = new Map(); (list || []).forEach(x => { if (!x || !x.code) return; const e = byCode.get(x.code); if (e) e.need += num(x.need); else byCode.set(x.code, { code: x.code, need: num(x.need), have: num(x.have) }); });
+    const spare = new Map(); const spareOf = (c) => { if (!spare.has(c)) { const x = byCode.get(c); spare.set(c, Math.max(0, x ? x.have - x.need : num(stockOf ? stockOf(c) : 0))); } return spare.get(c); };
+    // 단위가 같은 품목끼리만 (kg ↔ kg) — 단위가 다르거나 · 비었거나 · 품목 마스터에 없으면 이어 두어도 재고를 합치지 않는다 (INV.altBad 가 대체 자재 탭에 알림)
+    const unitOf = (c) => { const it = INV.item(c); return it ? INV.unitN(it.unit) : null; };
+    byCode.forEach(x => { const g = G.get(x.code); if (!g) return; let lack = x.need - x.have; if (!(lack > 1e-9)) return; const u = unitOf(x.code); if (!u) return;
+      const from = []; g.forEach(c => { if (c === x.code || lack <= 1e-9 || unitOf(c) !== u) return; const s = spareOf(c); if (!(s > 1e-9)) return; const t = Math.min(s, lack); spare.set(c, s - t); lack -= t; from.push({ code: c, qty: t }); });
+      if (from.length) out.set(x.code, { from, got: from.reduce((a, f) => a + f.qty, 0) }); });
+    return out;
+  };
+  /** 재고를 합치지 않는 대체 자재 줄 (화면 알림): [{code, alt, why: 'missing' | 'unit', units: [a, b], miss: [코드]}] */
+  INV.altBad = function () {
+    const out = []; if (!ERP.TABLES.mat_alt) return out;
+    DB.rows('mat_alt').forEach(r => { const a = str(r.code), b = str(r.alt); if (!a || !b) return;
+      const ia = INV.item(a), ib = INV.item(b);
+      if (!ia || !ib) { out.push({ code: a, alt: b, why: 'missing', miss: [!ia ? a : null, !ib ? b : null].filter(Boolean) }); return; }
+      const ua = INV.unitN(ia.unit), ub = INV.unitN(ib.unit);
+      if (!ua || !ub || ua !== ub) out.push({ code: a, alt: b, why: 'unit', units: [ua, ub] }); });
+    return out;
+  };
   /** RM items by normalized name (for recipe materials) */
   INV.rmByName = () => DB.memo('inv.rmByName', ['items', 'materials'], () => {
     const m = new Map();

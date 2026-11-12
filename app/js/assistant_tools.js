@@ -174,7 +174,8 @@
       const show = onlyShort ? shortRows : res.rows;
       return { lines, route_info: res.info.map(i => { const o = { code: i.code, route: i.route, pcs: Math.round(i.pcs), colors: i.colors }; if (i.route === 'retail' && ERP.bomFor) { const b = ERP.bomFor(i.code); if (b && b.key && b.key !== i.code) o.bom_key_used = b.key; } return o; }), unknown_items: res.unknown,
         rows_total: res.rows.length, shortage_count: shortRows.length, shortage_by_kind: kinds, stock_unknown_count: unknownStock.length, warnings,
-        rows: show.slice(0, 40).map(r => ({ code: r.code, name: r.name, kind: r.kind, unit: r.unit, need: r1(r.need), stock: r.stock === null ? null : r1(r.stock), short: r.short === null ? null : r1(r.short) })),
+        rows: show.slice(0, 40).map(r => Object.assign({ code: r.code, name: r.name, kind: r.kind, unit: r.unit, need: r1(r.need), stock: r.stock === null ? null : r1(r.stock), short: r.short === null ? null : r1(r.short) },
+          r.alt && r.alt.length ? { alternates_used: r.alt.map(a => ({ code: a.code, qty: r1(a.qty) })) } : {})),   // 1.15.4: 대체 자재 (같은 자재 · 다른 수입지 코드) 의 남는 재고로 메운 양 — 계산만
         stock_unknown: unknownStock.slice(0, 10).map(r => ({ code: r.code, name: r.name, need: r1(r.need), unit: r.unit })) };
     },
 
@@ -188,7 +189,8 @@
         finish: { injection: dOut(o.F.INJ), refill: dOut(o.F.REF), assembly: dOut(o.asmEff), wrapping: dOut(o.wrpEff), packing: dOut(o.pckEff) }, basis: o.acc.how };
         if (o.none) x.po_not_fixed = true; return x; };
       const mat = (m) => ({ code: m.code, name: clean(m.name), category: PL.matKindName ? PL.matKindName(m.mkind) : undefined, unit: m.unit, process: m.via, need: r1(m.need), stock: r1(m.stock), incoming: m.inc ? r1(m.inc) : undefined, short: r1(m.short),
-        first_short_po: m.first ? m.first.po + ' ' + m.first.item : null, need_date: m.first ? m.first.date : null, lead_days: m.lead, order_by: m.orderBy, judge: m.judge, arrives_if_ordered_now: m.arrive || undefined });
+        first_short_po: m.first ? m.first.po + ' ' + m.first.item : null, need_date: m.first ? m.first.date : null, lead_days: m.lead, order_by: m.orderBy, judge: m.judge, arrives_if_ordered_now: m.arrive || undefined,
+        alternates_used: m.alt && m.alt.length ? m.alt.map(a => ({ code: a.code, qty: r1(a.qty) })) : undefined });   // 1.15.4: 대체 자재
       const out = { today: R.today, scope, capacity_from_reports: { from: R.cap.from || null, to: R.cap.to || null }, open_lines: R.orders.length, remaining_sets: R.remSets, all_shipped_by: R.lastShip,
         counts: R.counts, bottleneck: R.bottle ? { process: R.bottle.id, name: PL.loadName(R.bottle.id), remaining_pcs: Math.round(R.bottle.load), per_day: Math.round(R.bottle.perDay), work_days: r1(R.bottle.days), finish: dOut(R.bottle.end) } : null,
         materials_short: R.short.length, materials_urgent: R.urgent.length };

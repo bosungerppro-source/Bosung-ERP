@@ -446,6 +446,86 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('되돌리면 처음 계산과 같음 (자재 3종)', await ev(() => { const R = ERP.plan.run('all'); return [R.mats.map(m => m.code).sort(), R.counts]; }), [['CASE-M', 'CTN-M', 'RES-1'], R1.counts]);
   });
 
+  await sec('15. 대체 자재 (1.15.4): 같은 자재 · 다른 수입지 코드 — 소요량 계산 · 생산 계획 자재가 두 재고를 같이 셈 (계산만)', async () => {
+    // 사용자 2026-11-12 "대신 BOM에 양쪽다 사용가능해서 MRP에서 빠질수있게 할수있어?" (KAOLIN R-031 한국산 ↔ R-031A 미국산) · "MRP는 실제 빠지는게 아니고 필요량 계산만하는거야"
+    const MRP_LINE = [{ code: 'CT-M', qty: 100, unit: 'ea' }];
+    const look = () => ev((ln) => { const r1 = (x) => (x === null || x === undefined ? x : Math.round(x * 100) / 100);
+      const mr = ERP.mrp(ln, { netSemi: true }).rows.find(r => r.code === 'RES-1') || {}; const R = ERP.plan.run('all'); const pm = R.mats.find(m => m.code === 'RES-1') || {};
+      const st = ERP.calc.stock(); const bal = (c) => { const s = st.get(c); return s ? r1(s.bal) : null; };
+      return { mrp: { need: r1(mr.need), stock: r1(mr.stock), short: r1(mr.short), alt: (mr.alt || []).map(a => [a.code, r1(a.qty)]) },
+        plan: { need: r1(pm.need), stock: r1(pm.stock), short: r1(pm.short), first: pm.first ? pm.first.po : null, judge: pm.judge, alt: (pm.alt || []).map(a => [a.code, r1(a.qty)]) },
+        planCodes: R.mats.map(m => m.code).sort(), bal: [bal('RES-1'), bal('RES-1US')], table: !!ERP.TABLES.mat_alt }; }, MRP_LINE);
+    const b0 = await look();
+    ok('처음: RES-1 이 MRP · 생산 계획 모두 30 kg 넘게 모자람 (시험 전제)', b0.mrp.short > 30 && b0.plan.need - b0.plan.stock > 30, b0);
+    // 미국산 RES-1US (재고 30 kg) 를 RES-1 과 같은 자재로
+    await ev(async (o) => { const DB = ERP.db; DB.add('items', { code: 'RES-1US', name: 'RESIN USA', stage: 'RM', unit: 'kg', src: 'test' }); DB.add('stock_open', { date: o.EC, scope: 'WH', code: 'RES-1US', qty: 30, unit: 'kg' });
+      try { DB.add('mat_alt', { code: 'RES-1', alt: 'RES-1US', note: '수입지 미국' }); } catch (e) { /* 1.15.3 까지는 표가 없음 */ } await DB.flush(); }, { EC: D(-60) });
+    const b1 = await look();
+    ok('대체 자재 표 (mat_alt) 가 있음', b1.table, b1);
+    eq('소요량 계산 (MRP): RES-1 필요량 · 재고는 그대로, 모자람이 미국산 30 kg 만큼 줄고 대체 자재 = RES-1US 30', [b1.mrp.need, b1.mrp.stock, b1.mrp.short, b1.mrp.alt],
+      [b0.mrp.need, b0.mrp.stock, Math.round((b0.mrp.short - 30) * 100) / 100, [['RES-1US', 30]]]);
+    eq('생산 계획 자재: 필요량 · 자기 재고 그대로 (해외 주문 권장 주문량은 코드마다), 모자람만 30 kg 줄고 대체 자재 = RES-1US 30', [b1.plan.need, b1.plan.stock, b1.plan.short, b1.plan.alt],
+      [b0.plan.need, b0.plan.stock, Math.max(0, Math.round((b0.plan.short - 30) * 100) / 100), [['RES-1US', 30]]]);
+    eq('미국산은 따로 필요한 곳이 없어 자재 줄이 생기지 않음 · 실제 재고는 그대로 (계산만)', [b1.planCodes, b1.bal], [b0.planCodes, [b0.bal[0], 30]]);
+    // 화면: 제품 · BOM · 배합 → 대체 자재 탭 · 소요량 계산 표 · 생산 계획 자재 탭 · AI 비서
+    await ev(() => { ERP.setLang('ko'); ERP.state.bomTab = 'mat_alt'; ERP.state.params = {}; location.hash = '#/bom'; ERP.render(); }); await settle();
+    const tab = await ev(() => ({ tabs: Array.from(document.querySelectorAll('#main .tabs .tab')).map(t => t.textContent.trim()), txt: (document.querySelector('#main .card') || {}).innerText || '' }));
+    ok('제품 · BOM · 배합 → "대체 자재" 탭: RES-1 · RES-1US · 메모 · 설명 (실제 재고는 그대로)', tab.tabs.includes('대체 자재') && /RES-1US/.test(tab.txt) && /수입지 미국/.test(tab.txt) && /실제 재고/.test(tab.txt), tab);
+    await ev((ln) => { ERP.db.setSetting('mrpLines', ln); ERP.state.bomTab = 'mrp'; ERP.render(); }, MRP_LINE); await settle();
+    const mt = await ev(() => { const t = Array.from(document.querySelectorAll('#main table')).pop(); const hd = Array.from(t.querySelectorAll('thead th')).map(x => x.innerText.trim());
+      const tr = Array.from(t.querySelectorAll('tbody tr')).find(x => Array.from(x.children).some(td => td.innerText.trim() === 'RES-1')); return { hd, row: tr ? Array.from(tr.children).map(td => td.innerText.replace(/\s+/g, ' ').trim()) : null }; });
+    ok('소요량 계산 표: "대체 자재" 칸에 RES-1US 30', mt.hd.includes('대체 자재') && mt.row && mt.row[mt.hd.indexOf('대체 자재')] === 'RES-1US 30', mt);
+    await ev(() => { ERP.state.plan = { tab: 'mats', matAll: true }; location.hash = '#/plan'; ERP.render(); }); await settle();
+    const pt = await ev(() => { const t = document.querySelector('#main .card table'); const hd = Array.from(t.querySelectorAll('thead th')).map(x => x.innerText.trim());
+      const tr = Array.from(t.querySelectorAll('tbody tr')).find(x => /^RES-1\b/.test(x.children[0].innerText.trim())); return { hd, row: tr ? Array.from(tr.children).map(td => td.innerText.replace(/\s+/g, ' ').trim()) : null }; });
+    ok('생산 계획 자재 탭: "대체 자재" 칸에 RES-1US 30', pt.hd.includes('대체 자재') && pt.row && pt.row[pt.hd.indexOf('대체 자재')] === 'RES-1US 30', pt);
+    const ai = await ev((ln) => { const T = ERP.ai.tools; const m = T.mrp({ lines: ln, only_short: false }).rows.find(r => r.code === 'RES-1'); const p = T.production_plan({ view: 'materials' }).materials.find(r => r.code === 'RES-1');
+      return [m && m.alternates_used, p && p.alternates_used]; }, MRP_LINE);
+    eq('AI 비서 mrp · production_plan 에도 대체 자재 (alternates_used)', ai, [[{ code: 'RES-1US', qty: 30 }], [{ code: 'RES-1US', qty: 30 }]]);
+    // 미국산이 넉넉하면 (1,000 kg): 모자람 0 · 첫 모자람 없음 · 충분 — 미국산 재고가 MRP 필요량만큼 쓰임
+    await ev(async () => { const DB = ERP.db; const s = DB.rows('stock_open').find(r => r.code === 'RES-1US'); DB.update('stock_open', s._id, { qty: 1000 }); await DB.flush(); });
+    const b2 = await look();
+    eq('미국산 1,000 kg: MRP 모자람 0 (대체 = 모자랐던 만큼) · 생산 계획 모자람 0 · 첫 모자람 없음 · 충분', [b2.mrp.short, b2.mrp.alt, b2.plan.short, b2.plan.first, b2.plan.judge],
+      [0, [['RES-1US', b0.mrp.short]], 0, null, 'enough']);
+    // 반대쪽도: 같은 묶음이면 어느 코드가 BOM 에 있어도 (BOM 이 미국산을 쓰고 한국산 재고가 남을 때)
+    const rev = await ev(async () => { const DB = ERP.db; const l = DB.rows('bom_lines').find(x => x.child === 'RES-1'); DB.update('bom_lines', l._id, { child: 'RES-1US' });
+      const s = DB.rows('stock_open').find(r => r.code === 'RES-1US'); DB.update('stock_open', s._id, { qty: 0 }); const r = DB.rows('stock_open').find(x => x.code === 'RES-1'); DB.update('stock_open', r._id, { qty: 1000 }); await DB.flush();
+      const m = ERP.mrp([{ code: 'CT-M', qty: 100, unit: 'ea' }], { netSemi: true }).rows.find(x => x.code === 'RES-1US') || {};
+      DB.update('bom_lines', l._id, { child: 'RES-1' }); DB.update('stock_open', r._id, { qty: 5 }); await DB.flush(); return [Math.round((m.short || 0) * 100) / 100, (m.alt || []).map(a => a.code)]; });
+    eq('반대쪽: BOM 이 미국산 (재고 0) 이면 한국산 남는 재고로 메움 → 모자람 0 · 대체 = RES-1', rev, [0, ['RES-1']]);
+    // 단위가 다른 코드 (PCS 1,000) · 품목에 없는 코드는 이어 두어도 재고를 합치지 않음 — 대체 자재 탭에 알림 (지금 미국산 재고 0 · 한국산 5)
+    await ev(async (o) => { const DB = ERP.db; DB.add('items', { code: 'RES-1PC', name: 'RESIN BAG', stage: 'RM', unit: 'PCS', src: 'test' }); DB.add('stock_open', { date: o.EC, scope: 'WH', code: 'RES-1PC', qty: 1000, unit: 'PCS' });
+      DB.add('mat_alt', { code: 'RES-1', alt: 'RES-1PC' }); DB.add('mat_alt', { code: 'NOPE-77', alt: 'RES-1' }); await DB.flush(); }, { EC: D(-60) });
+    const b3 = await look();
+    eq('단위가 다른 코드 (PCS) · 품목에 없는 코드: 합치지 않음 → MRP · 생산 계획 모자람이 처음과 같음 · 대체 없음', [b3.mrp.short, b3.mrp.alt, b3.plan.short, b3.plan.alt], [b0.mrp.short, [], b0.plan.short, []]);
+    await ev(() => { ERP.setLang('ko'); ERP.state.bomTab = 'mat_alt'; ERP.state.params = {}; location.hash = '#/bom'; ERP.render(); }); await settle();
+    const wb = await ev(() => { const w = document.querySelector('#main .card .warn-box'); return w ? w.innerText : ''; });
+    ok('대체 자재 탭 알림: RES-1 ↔ RES-1PC 단위 kg / PCS · NOPE-77 품목에 없는 코드 (RES-1 ↔ RES-1US 는 알림 없음)', /RES-1 ↔ RES-1PC — 단위 kg \/ PCS/.test(wb) && /NOPE-77 ↔ RES-1 — 품목에 없는 코드 NOPE-77/.test(wb) && !/RES-1US/.test(wb), wb);
+    // Codex 검토 (2026-11-12) 1: 같은 코드가 목록에 두 줄 (BOM 에 b · B) 이면 필요량을 합쳐 남는 재고를 셈 — 첫 줄만 보면 없는 재고를 빌려줌
+    const dupCov = await ev(() => Array.from(ERP.inv.altCover([{ code: 'RES-1', need: 5, have: 10 }, { code: 'RES-1', need: 5, have: 10 }, { code: 'RES-1US', need: 8, have: 0 }], () => 0).entries()).map(([k, v]) => [k, v.got]));
+    eq('대체 계산: RES-1 이 두 줄 (5 + 5 kg, 재고 10) 이면 남는 재고 0 → RES-1US 에 빌려주지 않음', dupCov, []);
+    //   생산 계획: BOM 에 대소문자만 다른 자식 (res-1) 이 더 있으면 품목 코드 하나로 모아 한 줄 (필요량 합 — 예전에는 두 줄이 재고를 따로 다 셈)
+    const dup = await ev(async () => { const DB = ERP.db; const n0 = ERP.plan.run('all').mats.find(m => m.code === 'RES-1').need; const l = DB.rows('bom_lines').find(x => x.child === 'RES-1');
+      const nl = DB.add('bom_lines', { parent: l.parent, child: 'res-1', qty: l.qty, loss: l.loss, note: l.note }); await DB.flush();
+      const rows = ERP.plan.run('all').mats.filter(m => String(m.code).toUpperCase() === 'RES-1'); const out = { n: rows.length, codes: rows.map(m => m.code), twice: rows.length === 1 && Math.abs(rows[0].need - 2 * n0) < 1e-6 };
+      DB.remove('bom_lines', nl._id); await DB.flush(); return out; });
+    eq('생산 계획: BOM 자식 RES-1 · res-1 → 자재 줄 RES-1 하나 · 필요량 = 두 줄 합', dup, { n: 1, codes: ['RES-1'], twice: true });
+    // Codex 검토 2: 소요량 계산 (MRP) 은 마이너스 재고만큼 더 모자람 (예전 그대로) → 대체 자재도 그만큼 같이 셈 (생산 계획은 마이너스 재고 = 0)
+    await ev(async () => { const DB = ERP.db; const r = DB.rows('stock_open').find(x => x.code === 'RES-1'); DB.update('stock_open', r._id, { qty: -5 }); const s = DB.rows('stock_open').find(x => x.code === 'RES-1US'); DB.update('stock_open', s._id, { qty: 1000 }); await DB.flush(); });
+    const b4 = await look();
+    eq('한국산 재고 −5 · 미국산 1,000 kg: MRP 모자람 0 · 대체 = 필요량 + 5 / 생산 계획 재고 0 · 모자람 0 · 대체 = 필요량', [b4.mrp.stock, b4.mrp.short, b4.mrp.alt, b4.plan.stock, b4.plan.short, b4.plan.alt],
+      [-5, 0, [['RES-1US', Math.round((b0.mrp.need + 5) * 100) / 100]], 0, 0, [['RES-1US', b0.plan.need]]]);
+    await ev(async () => { const DB = ERP.db; const r = DB.rows('stock_open').find(x => x.code === 'RES-1'); DB.update('stock_open', r._id, { qty: 5 }); const s = DB.rows('stock_open').find(x => x.code === 'RES-1US'); DB.update('stock_open', s._id, { qty: 0 }); await DB.flush(); });
+    // 베트남어 탭 이름 · 알림
+    await ev(() => { ERP.setLang('vi'); ERP.state.bomTab = 'mat_alt'; location.hash = '#/bom'; ERP.render(); }); await settle();
+    const vt = await ev(() => ({ tabs: Array.from(document.querySelectorAll('#main .tabs .tab')).map(t => t.textContent.trim()), warn: (document.querySelector('#main .card .warn-box') || {}).innerText || '' }));
+    ok('베트남어: 탭 = Vật tư thay thế · 알림에 한글 없음', vt.tabs.includes('Vật tư thay thế') && /đơn vị kg \/ PCS/.test(vt.warn) && !/[가-힣]/.test(vt.warn), vt);
+    // 되돌림
+    await ev(async () => { const DB = ERP.db; ERP.setLang('ko'); ERP.state.plan = null; ERP.state.bomTab = null; const del = (t, f) => { if (!ERP.TABLES[t]) return; DB.rows(t).filter(f).forEach(r => DB.remove(t, r._id)); };
+      del('items', r => ['RES-1US', 'RES-1PC'].includes(r.code)); del('stock_open', r => ['RES-1US', 'RES-1PC'].includes(r.code)); del('mat_alt', () => true); DB.setSetting('mrpLines', null); await DB.flush(); });
+    eq('되돌리면 처음 계산과 같음', await look().then(x => [x.mrp, x.plan]), [b0.mrp, b0.plan]);
+  });
+
   await sec('12. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => { ERP.setLang('vi'); ERP.state.plan = { tab: 'orders' }; location.hash = '#/plan'; ERP.render(); }); await settle();
     for (const t of [1, 2, 3, 4, 5]) { await A.click('.tabs .tab:nth-child(' + t + ')'); await settle(); }

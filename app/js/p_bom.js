@@ -102,6 +102,12 @@
       r.short = r.stock === null ? null : Math.max(0, r.need - r.stock);
       return r;
     });
+    // 1.15.4: 대체 자재 — 모자라는 원부자재는 같은 묶음 (mat_alt) 의 남는 재고로 메운다 (계산만, 실제 재고는 그대로). r.alt = [{code, qty}]
+    const rawRows = rows.filter(r => r.kind === 'raw' && r.mcode && r.stock !== null);
+    if (ERP.inv && ERP.inv.altCover && rawRows.length) {
+      const cov = ERP.inv.altCover(rawRows.map(r => ({ code: r.mcode, need: r.need, have: r.stock })), (c) => { const s = st.get(c); return s ? Math.max(0, s.bal) : 0; });
+      rawRows.forEach(r => { const c = cov.get(r.mcode); if (!c) return; r.alt = c.from; r.short = Math.max(0, r.short - c.got); });
+    }
     const ord = { raw: 0, semi: 1, asm: 2 };
     rows.sort((a, b) => ((b.short || 0) > 0) - ((a.short || 0) > 0) || (ord[a.kind] - ord[b.kind]) || String(a.code).localeCompare(String(b.code)));
     return { rows, info, unknown };
@@ -217,9 +223,11 @@
               inf.alt ? ERP.chip('warn', L('비슷한 품번 BOM ', 'BOM mã gần giống ') + inf.alt) : null] : ''),
             h('td', h('button', { class: 'icon-btn', 'aria-label': 'remove', onclick: () => { lines.splice(i, 1); if (!lines.length) lines.push({ code: '', qty: '', unit: 'set' }); save(); draw(); } }, '×'))); })));
       const view = st.view; const show = res.rows.filter(r => view === 'all' ? true : view === 'short' ? r.short > 0 : view === 'raw' ? r.kind === 'raw' : r.kind !== 'raw');
+      const altText = (r) => (r.alt && r.alt.length ? r.alt.map(a => a.code + ' ' + F.n(a.qty, r.unit === 'kg' ? 2 : 0)).join(' · ') : '');
       const kindChip = (r) => r.kind === 'raw' ? ERP.chip('info', L('원부자재', 'NVL')) : r.kind === 'asm' ? ERP.chip('neutral', L('조립품', 'Cụm lắp')) : ERP.chip('neutral', r.part || L('세미/부품', 'Bán TP/chi tiết'));
       const cols = [{ label: L('구분', 'Loại'), render: kindChip }, { label: L('코드', 'Mã'), render: r => r.kind === 'raw' && !r.mcode ? h('span', { class: 'muted' }, '–') : r.code }, { label: L('품명', 'Tên'), render: r => r.name || '' },
         { label: L('소요량', 'Cần'), num: 1, render: r => F.n(r.need, r.unit === 'kg' ? 2 : 0) }, { label: L('현재 재고', 'Tồn hiện có'), num: 1, render: r => r.stock === null ? '?' : F.n(r.stock, r.unit === 'kg' ? 1 : 0) },
+        { label: L('대체 자재', 'Vật tư thay thế'), render: r => altText(r) },   // 1.15.4: 같은 묶음에서 빌린 재고 (계산만)
         { label: L('부족분', 'Thiếu'), num: 1, render: r => r.short === null ? '–' : r.short > 0 ? h('b', { style: { color: '#9F1F18' } }, F.n(r.short, r.unit === 'kg' ? 2 : 0)) : '0' }, { label: L('단위', 'ĐV'), render: r => r.unit },
         { label: L('판정', 'KQ'), render: r => r.short === null ? ERP.chip('neutral', L('재고 매칭 없음', 'Chưa khớp kho')) : r.short > 0 ? ERP.chip('bad', L('부족', 'Thiếu')) : ERP.chip('ok', L('충분', 'Đủ')) }];
       const seg = (id, label) => h('button', { class: 'btn sm' + (view === id ? ' primary' : ''), onclick: () => { st.view = id; draw(); } }, label);
@@ -238,7 +246,7 @@
             ERP.kpi(L('부족 원료 합계', 'Tổng NL thiếu'), F.n(rawShort.filter(r => r.unit === 'kg').reduce((a, r) => a + r.short, 0), 1), 'kg', rawShort.length ? 'warn' : 'ok', null, L('발주 필요량', 'Cần đặt mua')),
             ERP.kpi(L('재고 미매칭 원료', 'NL chưa khớp kho'), F.n(unmatched.length), L('종', 'mã'), unmatched.length ? 'warn' : 'ok', null, L('배합표 원료명 ≠ 재고 마스터', 'Tên NL khác danh mục kho'))),
           h('div', { class: 'toolbar' }, seg('all', L('전체', 'Tất cả') + ' ' + res.rows.length), seg('short', L('부족만', 'Chỉ thiếu') + ' ' + shortRows.length), seg('raw', L('원부자재', 'NVL')), seg('semi', L('세미/부품', 'Bán TP/chi tiết')), h('span', { class: 'sp' }),
-            h('button', { class: 'btn primary', onclick: () => ERP.xl.exportAoa('mrp_shortage', cols.map(c => c.label).slice(0, 7), show.map(r => [r.kind, r.code, r.name, +r.need.toFixed(3), r.stock === null ? null : +r.stock.toFixed(2), r.short === null ? null : +r.short.toFixed(3), r.unit])) }, L('엑셀로 내보내기', 'Xuất Excel'))),
+            h('button', { class: 'btn primary', onclick: () => ERP.xl.exportAoa('mrp_shortage', cols.map(c => c.label).slice(0, 8), show.map(r => [r.kind, r.code, r.name, +r.need.toFixed(3), r.stock === null ? null : +r.stock.toFixed(2), altText(r), r.short === null ? null : +r.short.toFixed(3), r.unit])) }, L('엑셀로 내보내기', 'Xuất Excel'))),
           ERP.simpleTable(cols, show, { maxH: '58vh' }),
           unmatched.length ? h('p', { class: 'help' }, L('재고 매칭 없음: ', 'Chưa khớp kho: ') + unmatched.slice(0, 8).map(r => r.name).join(', ') + (unmatched.length > 8 ? ' …' : '') + L(' — 원부자재 마스터의 영문명을 배합표의 원료명과 같게 맞추면 재고와 자동 비교됩니다.', ' — hãy đặt tên tiếng Anh trong danh mục NVL trùng tên trong công thức để tự so sánh tồn.')) : null]) : h('div', { class: 'empty' }, L('위에 품번과 수량을 입력하면 소요량·재고·부족분이 표시됩니다.', 'Nhập mã hàng và số lượng ở trên để xem nhu cầu, tồn kho và phần thiếu.')));
     }
@@ -379,10 +387,21 @@
     const cur = ERP.state.bomTab = ERP.state.bomTab || 'mrp';
     root.appendChild(ERP.pageHead([L('제품 · BOM · 배합', 'Sản phẩm · BOM · Công thức'), ERP.sampleChip ? ERP.sampleChip('bom') : null], L('자재 소요량(MRP) · 품목 구성 · 색상별 BOM · 배합표 · 세미 재고', 'Nhu cầu vật tư (MRP) · cấu thành · BOM theo màu · công thức · tồn bán TP'),
       [h('button', { class: 'btn', onclick: () => ERP.goto('data') }, L('엑셀 업로드', 'Tải Excel'))]));
-    const tabs = [['mrp', L('소요량 계산 (MRP)', 'Tính nhu cầu (MRP)')], ['struct', L('품목 · 구성 (BOM 설정)', 'Mặt hàng · Cấu thành')], ['asm', L('조립 BOM 자동 구성', 'Tự tạo BOM lắp ráp')], ['semi_stock', L('세미 재고', 'Tồn bán TP')], ['bom', L('색상별 BOM', 'BOM theo màu')], ['products', L('제품 색상', 'Màu sản phẩm')], ['item_bom', L('품목 구성(Retail)', 'Item BOM')], ['recipes', L('배합표', 'Công thức')], ['semi_items', L('반제품 목록', 'DM bán TP')], ['sub_materials', L('부자재', 'Vật liệu phụ')], ['refill_specs', L('리필 규격', 'Quy cách refill')]];
+    const tabs = [['mrp', L('소요량 계산 (MRP)', 'Tính nhu cầu (MRP)')], ['struct', L('품목 · 구성 (BOM 설정)', 'Mặt hàng · Cấu thành')], ['asm', L('조립 BOM 자동 구성', 'Tự tạo BOM lắp ráp')], ['semi_stock', L('세미 재고', 'Tồn bán TP')], ['bom', L('색상별 BOM', 'BOM theo màu')], ['products', L('제품 색상', 'Màu sản phẩm')], ['item_bom', L('품목 구성(Retail)', 'Item BOM')], ['recipes', L('배합표', 'Công thức')], ['semi_items', L('반제품 목록', 'DM bán TP')], ['sub_materials', L('부자재', 'Vật liệu phụ')], ['refill_specs', L('리필 규격', 'Quy cách refill')], ['mat_alt', L('대체 자재', 'Vật tư thay thế')]];
     const host = h('div', { class: 'card' });
     root.append(ERP.tabs(tabs.map(t => ({ id: t[0], label: t[1] })), cur, (id) => { ERP.state.bomTab = id; ERP.state.params = {}; ERP.render(); }), host);
     if (cur === 'mrp') mrpTab(host); else if (cur === 'struct') structTab(host); else if (cur === 'asm') asmTab(host); else if (cur === 'recipes') recipeTab(host);
+    else if (cur === 'mat_alt') {   // 1.15.4 (사용자 2026-11-12 "BOM에 양쪽다 사용가능해서 MRP에서 빠질수있게")
+      host.append(h('p', { class: 'help' }, L('같은 자재인데 수입지만 다른 코드를 이어 둡니다 (예: R-031 KAOLIN 한국산 ↔ R-031A 미국산). BOM · 배합표에 어느 코드가 있든, 소요량 계산 (MRP) 과 생산 계획의 모자랄 자재가 이어진 코드의 남는 재고를 같이 셉니다 — 자기 재고를 먼저 쓰고 모자란 만큼만. 계산만 하므로 실제 재고 · 수불 · 안전재고 · 해외 주문은 코드마다 그대로입니다. 한 줄 = 두 코드 (양쪽으로 이어짐).',
+        'Nối các mã cùng một vật tư nhưng khác nơi nhập (vd: R-031 KAOLIN Hàn Quốc ↔ R-031A Mỹ). Dù BOM ghi mã nào, tính nhu cầu (MRP) và vật tư thiếu của kế hoạch sản xuất sẽ cộng phần tồn còn dư của mã đã nối — dùng tồn của mình trước, chỉ thiếu mới lấy thêm. Chỉ là tính toán: tồn kho thật · nhập xuất · tồn an toàn · đặt hàng nước ngoài vẫn theo từng mã. Một dòng = hai mã (nối hai chiều).')));
+      // 단위가 다르거나 품목에 없는 코드는 이어 두어도 재고를 합치지 않는다 — 어느 줄인지 알려 줌
+      const bad = ERP.inv.altBad ? ERP.inv.altBad() : [];
+      if (bad.length) host.append(h('div', { class: 'warn-box', style: { marginBottom: '10px' } },
+        L('재고를 합치지 않는 줄 (단위가 같은 품목끼리만 합칩니다): ', 'Dòng không cộng tồn (chỉ cộng khi cùng đơn vị): ') + bad.slice(0, 8).map(b => b.code + ' ↔ ' + b.alt + ' — ' + (b.why === 'missing'
+          ? L('품목에 없는 코드 ', 'mã không có trong danh mục ') + b.miss.join(', ')
+          : L('단위 ', 'đơn vị ') + (b.units[0] || '?') + ' / ' + (b.units[1] || '?'))).join(' · ') + (bad.length > 8 ? ' …' : '')));
+      simple('mat_alt')(host);
+    }
     else if (cur === 'semi_stock') { host.append(h('p', { class: 'help' }, L('세미(반제품·리필·노즈·배럴 등) 현재 재고를 입력/엑셀 업로드하면 MRP가 이만큼 차감하여 부족분을 계산합니다. 기준일에 실사한 수량을 넣으세요.', 'Nhập/tải tồn bán thành phẩm (refill, nose, barrel…) — MRP sẽ trừ khi tính phần thiếu. Dùng số kiểm kê theo ngày.'))); simple('semi_stock')(host); }
     else simple(cur)(host);
   } };

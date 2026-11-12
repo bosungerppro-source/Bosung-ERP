@@ -20,7 +20,7 @@ ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci     # 의존성 (Electron 실행 파일�
 export NODE_PATH=/opt/node22/lib/node_modules   # 전역 Playwright 사용 (Chromium: /opt/pw-browsers/chromium)
 npm run server                              # http://127.0.0.1:3210
 npm run test:v20                            # 현장 재고 = 공정 카드 · 현장 분류 (ERP CODE 안 씀) (20차)
-npm run test:v19                            # 생산 계획 (19차: 하루 능력 · 끝나는 날 · 자재 · 기준 자료 · 양식 · AI 비서)
+npm run test:v19                            # 생산 계획 (19차: 하루 능력 · 끝나는 날 · 자재 · 기준 자료 · 양식 · AI 비서 · 1.15.4 대체 자재)
 npm run test:v18                            # 여러 PC 자료 공유 — 구글 드라이브 (18차, 가짜 구글 웹 앱)
 npm run test:v17                            # 현장 재고 피벗 표 (17차)
 npm run test:v16                            # 해외 주문 품목 (자재구매 파일 · 리드타임) (16차)

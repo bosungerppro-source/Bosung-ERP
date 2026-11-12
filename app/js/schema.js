@@ -403,6 +403,14 @@
       { k: 'note', ko: '비고', vi: 'Ghi chú', t: 't', list: 1 },
     ] },
 
+    // 1.15.4: 대체 자재 — 같은 자재 · 다른 수입지 코드 (예: KAOLIN R-031 한국산 ↔ R-031A 미국산, 사용자 2026-11-12 "BOM에 양쪽다 사용가능해서 MRP에서 빠질수있게").
+    //         양쪽으로 이어짐. 소요량 계산 (MRP) · 생산 계획 모자랄 자재만 묶음의 남는 재고를 같이 센다 (계산만 — 실제 재고 · 안전재고 · 해외 주문은 코드마다)
+    mat_alt: { ko: '대체 자재', vi: 'Vật tư thay thế', nat: ['code', 'alt'], sort: ['code', 1], cols: [
+      { k: 'code', ko: '자재 코드', vi: 'Mã vật tư', t: 't', list: 1, req: 1 },
+      { k: 'alt', ko: '같이 쓸 수 있는 자재 코드', vi: 'Mã dùng thay được', t: 't', list: 1, req: 1 },
+      { k: 'note', ko: '메모 (예: 수입지)', vi: 'Ghi chú (vd: nơi nhập)', t: 't', list: 1 },
+    ] },
+
     semi_stock: { ko: '반제품(세미) 재고', vi: 'Tồn bán thành phẩm', nat: ['code'], sort: ['code', 1], cols: [
       { k: 'code', ko: '코드', vi: 'Mã', t: 't', list: 1, req: 1 },
       { k: 'name', ko: '품명', vi: 'Tên', t: 't', list: 1 },
