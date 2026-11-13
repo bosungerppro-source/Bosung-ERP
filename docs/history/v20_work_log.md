@@ -162,3 +162,19 @@
   - 알게 된 것 (아직 안 고침): 배합표 원료 이름 → 품목 코드 (`INV.rmByName`, 이름이 같으면 품목 표에서 먼저 나온 코드) 가 안료 8가지에서 B 코드로 감 — BBB 53 · BC6B 101 · BGG 61 · BOP 51 · BR304 48 · BSBN 59 · BV23R 42 · BY2GS 79 줄. 그래서 색상별 BOM 으로 푸는 소요량 계산 (MRP) 은 그 안료를 B 코드 재고로 셈. 생산 계획 (사용자 구성 BOM) 은 R- 코드를 씀.
 - 2026-11-13 (이어서) 사용자 "BC로 시작하는 코드만 BIC꺼다" → BIC = BC6B · BCB 뿐. 나머지 B 코드 10개를 R- 코드와 이음 (08:17, 같은 방법): R-024 ↔ BBB · R-025 ↔ BGG · R-012 ↔ BOP · R-013 ↔ BP122 · R-039 ↔ BR039 · R-036 ↔ BR147 · R-027 ↔ BR304 · R-023 ↔ BSBN · R-043 ↔ BV23R · R-021 ↔ BY2GS (모두 kg, 알림 없음) → 대체 자재 25줄 · 묶음 20개. 08:17:58 구글 공유로 보냄, 08:18 ERP 닫음.
   - 이제 배합표가 보는 B 코드 중 이어지지 않은 것: BC6B (CARMINE 6B, 101줄 — BIC) · BY10G (YELLOW F10G, 52줄 · 재고 100 kg · 해외 주문 구분 BIC Pigment · BOM 3줄 — 이름이 R-011 "YELLOW 10G" 와 달라 후보 목록에 없었음, 같은 자재인지 사용자에게 물음). CARMINE 6B 는 MRP 가 BIC 재고 (BC6B) 로 셈 — 고칠지 사용자에게 물음.
+
+## 1.15.5 — 배합표 원료 연결: 이름이 같은 원재료가 여러 코드면 소요량 계산이 볼 코드를 고름 (2026-11-13)
+
+- 요청: "배합표 CARMINE 6B 가 BC6B 대신 R-029 를 보게 고칠까요?" → "네, 고쳐줘" (앞서 "BIC은 따로다" · "BC로 시작하는 코드만 BIC꺼다").
+- 진단 (코드): 배합표 원료 → 품목은 `INV.rmByName` (이름이 같으면 품목 표에서 먼저 나온 RM). 생산 반영 (`postRows` rawItem) 은 예전부터 원료 연결 (`code_map` raw) 이 먼저인데, 소요량 계산 (`p_bom.js` matByName) 만 이름만 봄. 원료 연결을 고르는 화면은 생산 반영의 "원료 이름 → 원재료 품목 연결" (맞는 이름이 없는 것만) 뿐이라 이름이 같은 코드 중 고를 곳이 없었음.
+- 실제 자료 사본 (확인용 서버 127.0.0.1:7932, 구글 공유 · AI · 비밀 글자 뺀 사본, 끝나고 지움 — `D:\ERP\17_raw_link`):
+  - 원재료 여러 코드와 이름이 같은 배합표 원료 8가지: Blue B (BBB · R-024 · R-024P, 53줄) · Carmine 6B (BC6B · R-029 · R-029P, 101) · Green GY (BGG · R-025 · R-025P, 61) · Orange P (BOP · R-012 · R-012P, 51) · Red CL-304G (BR304 · R-027, 48) · Sky Blue N (BSBN · R-023, 59) · Violet 23R (BV23R · R-043 · R-043P, 42) · Yellow 2GS (BY2GS · R-021 · R-021P, 79). 모두 지금 B 코드를 봄.
+  - 소요량 계산이 배합표를 쓰는 것은 사용자 구성 BOM 이 없는 품번: 진행 중 수주 39 품번 중 4 (Glass · 52-7412-K-000 · 52-7412-k-000 · 68-7424-M-010 — 사용자 구성 30 · 품번 모름 5).
+  - 그 4 품번 (남은 set) + 52-9724-A 1,000 set 의 소요량: 고치기 전 BC6B 필요 76.43 kg · 재고 150 → 고친 뒤 (Carmine 6B → R-029 연결) R-029 필요 76.43 kg · 재고 200.
+- 바꾼 것: `inv.js` `INV.rawByName` (rmByName 에 원료 연결을 덮어씀, memo items · materials · code_map) · `INV.rawChoices` (고를 이름 목록) · `INV.setRawLink` (같은 이름 줄을 고치거나 한 줄 더함 + `DB.ver.prod_log++`, p_stock.js saveMap 과 같음) / `p_bom.js` matByName → rawByName · 배합표 탭 위 "원료 이름이 같은 원재료 — 소요량 계산이 볼 코드" 칸 (고르기 · 어떻게 정했나).
+- 시험: test:v19 16장 (10개) 을 먼저 씀 → 고치기 전 3개 실패 + 예외 (`v19_before.log` — 원료 연결이 있어도 BCTEST · 칸 없음) → 고친 뒤 165 / 165 (`v19_after.log`). Codex 지적 2개를 더해 167.
+  - 전체 (따로 작업 폴더 `D:\ERP\01_source\colorpencil-erp-rawlink`, 가지 `rawlink-1155`, 기록 `D:\ERP\17_raw_link\tests`, Codex 고친 뒤 08:39 ~ 08:46): v20 63 · v19 167 · v18 205 · v17 216 · v16 85 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · assistant 305 · v7 148 (ERP_PREV = 1.15.4 `8fe55d7` 업그레이드 시험 포함) 통과, v9 는 예전부터의 1개 ("상대 경로 · 쓸 수 없는 폴더 → 400" — 이 PC 환경) 말고 통과 (86 / 87). 버전 1.15.5 (package.json · core.js · installer.nsi · release.yml · test:v18).
+- Codex 검토 (읽기 전용, `codex review`, 2026-11-13, 범위 `git diff HEAD`, `D:\ERP\17_raw_link\codex_prompt_1.15.5.txt` · `codex_review_1.15.5.log`): "일반적인 단일 연결의 계산 · 저장 경로에서는 심각한 문제를 발견하지 못했습니다" + 2개 (P2, 같은 이름의 원료 연결이 여러 줄일 때) — 둘 다 코드로 확인해 맞음 → 재현 시험 먼저 (고치기 전 2개 실패, `v19_codex_before.log`) → 고침 → 167 / 167 (`v19_codex_after.log`).
+  1. `setRawLink` 가 같은 이름의 첫 줄만 고치는데 `codeMap` · `rawByName` 은 마지막 줄을 씀 → 고른 코드가 들어가지 않음. 고침: 같은 이름 줄을 모두 고침.
+  2. `rawByName` 은 품목이 없는 연결 줄을 건너뛰어 앞 줄을 쓰고, 생산 반영 (`codeMap` 마지막 줄 → 품목 없음 → 이름) 과 달라짐. 고침: `codeMap` 과 같이 마지막 줄을 먼저 정하고, 그 품목이 없으면 이름으로. 배합표 탭 "어떻게 정했나" 에 "연결한 품목이 없음 (코드) — 이름으로" 를 보임.
+- 데모 `ERP_Demo.html`: 8,133,422 bytes, SHA-256 `e5bbe0972103338219942414a52df8a4cecb7b8b905e032a88f745ce7f4c7f61`.

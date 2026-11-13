@@ -337,6 +337,36 @@
     DB.rows('materials').forEach(r => { const it = IT.get(r.code); if (!it) return; [r.name_en, r.name_vn, r.name_kr].forEach(n => { const k = normName(n); if (k && !m.has(k)) m.set(k, it); }); });
     return m;
   });
+  /** 1.15.5: 원료 이름 → 품목 (배합표 → 소요량 계산): 사용자가 연결한 것 (code_map raw — 코드 연결 · 원료 이름) 이 먼저, 그다음 이름이 같은 RM (rmByName).
+      생산 반영 (postRows 의 rawItem) 과 같은 순서. 사용자 2026-11-13 "네, 고쳐줘": 배합표 CARMINE 6B 가 품목 표에서 먼저 나온 BIC 코드 BC6B 를 봐서 MRP 가 BIC 재고로 셈 */
+  INV.rawByName = () => DB.memo('inv.rawByName', ['items', 'materials', 'code_map'], () => {
+    const m = new Map(INV.rmByName()); const IT = INV.items();
+    // INV.codeMap().raw 와 같은 줄을 고름 (같은 이름이 여러 줄이면 마지막 줄) → 그 품목이 없으면 이름으로 (생산 반영 rawItem 과 같음 — Codex 검토 2026-11-13)
+    const last = new Map(); DB.rows('code_map').forEach(r => { if (!str(r.src) || !str(r.item)) return; if (r.kind === 'raw') last.set(normName(r.src), str(r.item)); });
+    last.forEach((c, k) => { const it = IT.get(c); if (k && it) m.set(k, it); });
+    return m;
+  });
+  /** 1.15.5: 배합표 원료 이름 중 원재료 여러 코드와 같은 이름 (또는 원료 연결이 있는 이름) — 배합표 탭에서 소요량 계산이 볼 코드를 고름.
+      [{key, name, n (배합표 줄), cands: [품목], cur: 지금 보는 품목, link: code_map 줄 | null}] */
+  INV.rawChoices = () => DB.memo('inv.rawChoices', ['recipes', 'items', 'materials', 'code_map'], () => {
+    const names = new Map(); DB.rows('recipes').forEach(r => { const k = normName(r.material); if (!k) return; const e = names.get(k); if (e) e.n++; else names.set(k, { key: k, name: str(r.material), n: 1 }); });
+    const byName = new Map(); DB.rows('items').forEach(r => { if (INV.info(r).stage !== 'RM') return; const k = normName(r.name); if (!k) return; const a = byName.get(k) || []; a.push(r); byName.set(k, a); });
+    const links = new Map(); DB.rows('code_map').forEach(r => { if (r.kind === 'raw' && str(r.src) && str(r.item)) links.set(normName(r.src), r); });
+    const cur = INV.rawByName(); const out = [];
+    names.forEach(x => { const c = (byName.get(x.key) || []).slice(); const it = cur.get(x.key) || null; if (it && !c.some(y => y.code === it.code)) c.push(it);
+      const link = links.get(x.key) || null; if (c.length < 2 && !link) return;
+      out.push({ key: x.key, name: x.name, n: x.n, cands: c, cur: it, link, eff: !!(link && INV.item(link.item)) }); });   // eff = 연결한 품목이 있어 연결대로 셈
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  /** 1.15.5: 원료 이름 → 품목 연결 (code_map raw) 저장 — 같은 이름 (대소문자 · 기호 무시) 줄이 있으면 그 줄들을 모두 고침 (줄이 늘지 않음 · 어느 줄이 이겨도 고른 코드, Codex 검토 2026-11-13) */
+  INV.setRawLink = function (src, code, note) {
+    const k = normName(src), c = str(code); if (!k || !c) return null;
+    const ex = DB.rows('code_map').filter(r => r.kind === 'raw' && normName(r.src) === k);
+    ex.forEach(r => { if (str(r.item) !== c) DB.update('code_map', r._id, { item: c }); });
+    const row = ex.length ? ex[ex.length - 1] : DB.add('code_map', Object.assign({ kind: 'raw', src: str(src), item: c }, note ? { note } : {}));
+    DB.ver.prod_log++;   // 생산 반영 진단도 다시 (p_stock.js saveMap 과 같음)
+    return row;
+  };
 
   const openRows = () => DB.memo('inv.open', ['stock_open'], () => {
     // 11차: grp 'floor' = 현장 실사(TỒN KHO) 로 올린 공정 중 재고 — ECOUNT 기초재고(창고 · 공장)와 따로 모은다

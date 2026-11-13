@@ -8,7 +8,8 @@
 
   // ---------- lookups ----------
   // 6차: 원료명 → 품목 마스터(원재료 RM) 우선, 없으면 예전 원부자재 마스터 이름으로 같은 코드의 품목을 찾는다
-  function matByName() { return ERP.inv ? ERP.inv.rmByName() : new Map(); }
+  // 1.15.5: 사용자가 연결한 것 (코드 연결 · 원료 이름) 이 먼저 — 생산 반영과 같은 순서 (이름이 같은 코드가 여럿이면 배합표 탭에서 고름)
+  function matByName() { return ERP.inv ? (ERP.inv.rawByName ? ERP.inv.rawByName() : ERP.inv.rmByName()) : new Map(); }
   function recipeByCode() { return DB.memo('bom.recIdx', ['recipes'], () => { const m = new Map(); DB.rows('recipes').forEach(r => { let a = m.get(r.code); if (!a) m.set(r.code, a = []); a.push(r); }); return m; }); }
   function bomIdx() { return DB.memo('bom.bomIdx', ['bom'], () => { const byRetail = new Map(), byColor = new Map(); DB.rows('bom').forEach(b => { let a = byRetail.get(b.retail_no); if (!a) byRetail.set(b.retail_no, a = []); a.push(b); if (!byColor.has(b.color_code)) byColor.set(b.color_code, b); }); return { byRetail, byColor }; }); }
   function linesByParent() { return DB.memo('bom.lines', ['bom_lines'], () => { const m = new Map(); DB.rows('bom_lines').forEach(l => { let a = m.get(l.parent); if (!a) m.set(l.parent, a = []); a.push(l); }); return m; }); }
@@ -378,6 +379,21 @@
         src.dups && src.dups.length ? [' · ', ERP.chip('warn', L('중복 코드 ' + src.dups.length + '개 (첫 행 사용)', src.dups.length + ' mã trùng (dùng dòng đầu)')), ' ', h('small', { class: 'muted' }, src.dups.slice(0, 12).join(', ') + (src.dups.length > 12 ? ' …' : ''))] : null]
         : L('아직 BOM 사용량(배합표) 파일을 올리지 않았습니다.', 'Chưa tải file định mức NVL.'),
       h('br'), L('최신 판은 엑셀 업로드에 올리면 "전체 교체"로 통째로 바뀝니다. 배합표는 원재료 소요량(MRP) · 신고서 계산에만 쓰고, 재고(원부자재)는 차감하지 않습니다.', 'Tải bản mới nhất ở Tải Excel → "Thay toàn bộ". Chỉ dùng tính nhu cầu NVL (MRP) · tờ khai; không trừ tồn NVL.')));
+    // 1.15.5 (사용자 2026-11-13 "네, 고쳐줘" — CARMINE 6B 가 BIC 코드 BC6B 를 봄): 원료 이름이 같은 원재료가 여러 코드면 소요량 계산이 볼 코드를 고름 → 코드 연결 (원료 이름) 에 저장
+    const ch = ERP.inv.rawChoices ? ERP.inv.rawChoices() : [];
+    if (ch.length) {
+      const stk = C.stock();
+      const pick = (x) => { const s = h('select', { 'data-raw-key': x.key, onchange: () => { ERP.inv.setRawLink(x.name, s.value, L('배합표 탭에서 고름', 'Chọn ở tab công thức')); ERP.toast(L('연결했습니다: ', 'Đã liên kết: ') + x.name + ' → ' + s.value, 'ok'); ERP.render(); } },
+        x.cands.map(it => { const b = stk.get(it.code); return h('option', { value: it.code }, it.code + ' · ' + (it.name || '') + ' · ' + L('재고 ', 'tồn ') + F.n(b ? b.bal : 0, 1) + ' ' + (ERP.inv.unitShow(it.unit) || '')); }));
+        if (x.cur) s.value = x.cur.code; return s; };
+      host.appendChild(h('div', { class: 'card', 'data-raw-choices': '1', style: { margin: '0 0 12px', padding: '12px 16px' } },
+        h('h3', { style: { margin: '0 0 6px' } }, L('원료 이름이 같은 원재료 — 소요량 계산이 볼 코드', 'Nguyên liệu trùng tên — mã dùng để tính nhu cầu')),
+        h('p', { class: 'help', style: { marginTop: 0 } }, L('배합표의 원료 이름이 원재료 여러 코드와 같으면, 여기서 고른 코드의 재고로 소요량 (MRP) 을 셉니다. 고르지 않으면 품목 표에서 먼저 나온 코드입니다. 고른 것은 코드 연결 (원료 이름) 에 저장되어 생산 반영도 같이 씁니다. 다른 코드의 재고도 같이 세려면 대체 자재 탭에서 이으세요.',
+          'Nếu tên nguyên liệu trong công thức trùng nhiều mã, nhu cầu (MRP) tính theo tồn của mã chọn ở đây. Chưa chọn thì dùng mã đứng trước trong danh mục. Lựa chọn được lưu vào Liên kết mã (tên NL), cập nhật SX cũng dùng. Muốn cộng tồn của mã khác, hãy nối ở tab Vật tư thay thế.')),
+        ERP.simpleTable([{ label: L('원료 이름 (배합표)', 'Tên NL (công thức)'), render: x => h('b', x.name) }, { label: L('배합표 줄', 'Số dòng'), num: 1, render: x => F.n(x.n) },
+          { label: L('소요량 계산이 볼 코드', 'Mã dùng để tính'), render: x => pick(x) },
+          { label: L('어떻게 정했나', 'Cách chọn'), render: x => (x.link ? (x.eff ? L('원료 연결 (고름)', 'Đã liên kết (đã chọn)') : L('연결한 품목이 없음 (', 'Mã đã liên kết không có (') + x.link.item + L(') — 이름으로', ') — theo tên')) : L('품목 표에서 먼저 나온 코드', 'Mã đứng trước trong danh mục')) }], ch, { maxH: '320px' })));
+    }
     host.appendChild(ERP.grid({ table: 'recipes', pageSize: 50, maxH: '66vh', extraCols: [{ label: () => L('색상 합계 g', 'Tổng g/màu'), render: r => F.n(sum.get(r.code), 3) }] }).el);
     host.appendChild(h('p', { class: 'help' }, L('배합량은 제품 1개당 원료 g 으로 해석합니다 (원료 소요 kg = 수량 × g ÷ 1000). 기준이 다르면 엑셀의 값을 환산해서 업로드하세요.', 'Định mức hiểu là g nguyên liệu cho 1 sản phẩm (kg cần = SL × g ÷ 1000). Nếu khác, hãy quy đổi trước khi tải lên.')));
   };

@@ -526,6 +526,56 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('되돌리면 처음 계산과 같음', await look().then(x => [x.mrp, x.plan]), [b0.mrp, b0.plan]);
   });
 
+  await sec('16. 배합표 원료 연결 (1.15.5): 원료 이름이 같은 원재료가 여러 코드면 소요량 계산이 원료 연결 (코드 연결 표) 을 먼저 봄 — 생산 반영과 같은 순서', async () => {
+    // 사용자 2026-11-13 "네, 고쳐줘": 배합표 CARMINE 6B 101줄이 품목 표에서 먼저 나온 BIC 코드 BC6B 를 봐서 MRP 가 BIC 재고로 셈 ("BC로 시작하는 코드만 BIC꺼다")
+    const LN = [{ code: 'TCOL1', qty: 1000, unit: 'pcs' }];
+    const cnt = () => ev(() => [ERP.db.rows('items').filter(r => /TEST$/.test(r.code)).length, ERP.db.rows('bom').length, ERP.db.rows('recipes').length, ERP.db.rows('code_map').length]);
+    const base0 = await cnt();
+    await ev(async (o) => { const DB = ERP.db;
+      DB.add('items', { code: 'BCTEST', name: 'TEST RED 6B', stage: 'RM', unit: 'kg', src: 'test' }); DB.add('items', { code: 'R-TEST', name: 'Test Red 6B', stage: 'RM', unit: 'kg', src: 'test' });
+      DB.add('stock_open', { date: o.EC, scope: 'WH', code: 'BCTEST', qty: 10, unit: 'kg' }); DB.add('stock_open', { date: o.EC, scope: 'WH', code: 'R-TEST', qty: 500, unit: 'kg' });
+      DB.add('bom', { color_code: 'TCOL1', color_name: 'TEST RED', refill_code: 'TRF1' }); DB.add('recipes', { code: 'TCOL1', material: 'Test Red 6B', coef: 20 }); await DB.flush(); }, { EC: D(-60) });
+    const mr = () => ev((ln) => ERP.mrp(ln, { netSemi: true }).rows.filter(x => x.kind === 'raw').map(x => [x.code, Math.round(x.need * 100) / 100, x.stock, Math.round((x.short || 0) * 100) / 100]), LN);
+    eq('처음 (연결 없음): 이름이 같은 두 코드 중 품목 표에서 먼저 나온 BCTEST — 필요 20 kg · 재고 10 · 모자람 10 (예전 그대로)', await mr(), [['BCTEST', 20, 10, 10]]);
+    await ev(async () => { ERP.db.add('code_map', { kind: 'raw', src: 'Test Red 6B', item: 'R-TEST', note: 'test' }); await ERP.db.flush(); });
+    eq('원료 연결 (코드 연결 표 · 원료 이름) Test Red 6B → R-TEST 가 있으면 소요량 계산도 R-TEST — 재고 500 · 모자람 0 (생산 반영과 같은 순서)', await mr(), [['R-TEST', 20, 500, 0]]);
+    await ev(async () => { const DB = ERP.db; DB.rows('code_map').filter(r => r.src === 'Test Red 6B').forEach(r => DB.remove('code_map', r._id)); await DB.flush(); });
+    eq('연결을 지우면 다시 품목 표 순서 (BCTEST)', await mr(), [['BCTEST', 20, 10, 10]]);
+    // 배합표 탭: 이름이 같은 원재료 — 소요량 계산이 볼 코드를 고르는 칸
+    const row = () => ev(() => { const box = document.querySelector('#main [data-raw-choices]'); if (!box) return null; const s = box.querySelector('select[data-raw-key="TESTRED6B"]'); if (!s) return { box: true };
+      const tr = s.closest('tr'); const ui = [box.querySelector('h3'), box.querySelector('p.help')].concat(Array.from(box.querySelectorAll('thead th'))).map(e => (e ? e.innerText : '')).join(' | ');
+      return { box: true, opts: Array.from(s.options).map(o => o.value), optTxt: Array.from(s.options).map(o => o.textContent).join(' / '), val: s.value, how: tr ? tr.lastElementChild.innerText.trim() : '', txt: ui + ' | ' + (tr ? tr.lastElementChild.innerText : '') }; });
+    await ev(() => { ERP.setLang('ko'); ERP.state.bomTab = 'recipes'; ERP.state.params = {}; location.hash = '#/bom'; ERP.render(); }); await settle();
+    const t0 = await row();
+    ok('배합표 탭: "원료 이름이 같은 원재료" 칸 — Test Red 6B 의 고르기 = BCTEST · R-TEST, 지금 BCTEST (품목 표에서 먼저 나온 코드)', t0 && t0.opts && JSON.stringify(t0.opts) === '["BCTEST","R-TEST"]' && t0.val === 'BCTEST' && /먼저 나온/.test(t0.how) && /R-TEST · Test Red 6B · 재고 500/.test(t0.optTxt) && /소요량 계산이 볼 코드/.test(t0.txt), t0);
+    await ev(() => { const s = document.querySelector('#main [data-raw-choices] select[data-raw-key="TESTRED6B"]'); s.value = 'R-TEST'; s.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(); await ev(() => ERP.db.flush());
+    const c1 = await ev(() => ERP.db.rows('code_map').filter(r => ERP.inv.normName(r.src) === 'TESTRED6B').map(r => [r.kind, r.src, r.item]));
+    eq('R-TEST 를 고르면 코드 연결 (원료 이름) 한 줄로 저장', c1, [['raw', 'Test Red 6B', 'R-TEST']]);
+    eq('고른 뒤 소요량 계산 = R-TEST (재고 500 · 모자람 0)', await mr(), [['R-TEST', 20, 500, 0]]);
+    const t1 = await row();
+    ok('고른 뒤 칸: 지금 R-TEST · 어떻게 = 원료 연결', t1 && t1.val === 'R-TEST' && /원료 연결/.test(t1.how), t1);
+    await ev(() => { const s = document.querySelector('#main [data-raw-choices] select[data-raw-key="TESTRED6B"]'); s.value = 'BCTEST'; s.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(); await ev(() => ERP.db.flush());
+    eq('다시 BCTEST 를 고르면 같은 줄을 고침 (줄이 늘지 않음) · 소요량 계산 = BCTEST', [await ev(() => ERP.db.rows('code_map').filter(r => ERP.inv.normName(r.src) === 'TESTRED6B').map(r => r.item)), await mr()], [['BCTEST'], [['BCTEST', 20, 10, 10]]]);
+    // Codex 검토 (2026-11-13) 1: 같은 이름 (대소문자 · 기호 무시) 의 원료 연결이 여러 줄이면, 고른 코드가 모든 줄에 들어가야 함 (예전: 첫 줄만 고치고 마지막 줄이 이김)
+    await ev(async () => { const DB = ERP.db; DB.add('code_map', { kind: 'raw', src: 'TEST-RED 6B', item: 'BCTEST', note: 'test dup' }); await DB.flush(); });
+    await ev(() => { ERP.state.bomTab = 'recipes'; ERP.render(); }); await settle();
+    await ev(() => { const s = document.querySelector('#main [data-raw-choices] select[data-raw-key="TESTRED6B"]'); s.value = 'R-TEST'; s.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(); await ev(() => ERP.db.flush());
+    eq('같은 이름 연결이 두 줄이어도 R-TEST 를 고르면 두 줄 모두 R-TEST · 소요량 계산 = R-TEST', [await ev(() => ERP.db.rows('code_map').filter(r => ERP.inv.normName(r.src) === 'TESTRED6B').map(r => r.item)), await mr()], [['R-TEST', 'R-TEST'], [['R-TEST', 20, 500, 0]]]);
+    // Codex 검토 2: 마지막 연결의 품목이 없으면 생산 반영 (codeMap 마지막 줄 → 품목 없음 → 이름) 과 같게 이름으로 (BCTEST) — 앞 줄의 R-TEST 를 쓰지 않음
+    await ev(async () => { const DB = ERP.db; const r = DB.rows('code_map').find(x => x.src === 'TEST-RED 6B'); DB.update('code_map', r._id, { item: 'NOPE-99' }); await DB.flush(); });
+    eq('마지막 연결의 품목이 없으면 생산 반영과 같게 이름으로 → 소요량 계산 = BCTEST (codeMap.raw = NOPE-99)', [await ev(() => ERP.inv.codeMap().raw('Test Red 6B')), await mr()], ['NOPE-99', [['BCTEST', 20, 10, 10]]]);
+    await ev(async () => { const DB = ERP.db; DB.rows('code_map').filter(x => x.src === 'TEST-RED 6B').forEach(x => DB.remove('code_map', x._id)); const r = DB.rows('code_map').find(x => x.src === 'Test Red 6B'); DB.update('code_map', r._id, { item: 'BCTEST' }); await DB.flush(); });
+    // 베트남어
+    await ev(() => { ERP.setLang('vi'); ERP.state.bomTab = 'recipes'; location.hash = '#/bom'; ERP.render(); }); await settle();
+    const tv = await row();
+    ok('베트남어: 제목 · 설명 · 머리 · 어떻게 칸에 한글 없음 · 재고 = tồn', tv && tv.txt && !/[가-힣]/.test(tv.txt) && /tồn 500/.test(tv.optTxt) && /Mã dùng để tính/.test(tv.txt), tv);
+    // 되돌림
+    await ev(async () => { const DB = ERP.db; ERP.setLang('ko'); ERP.state.bomTab = null; const del = (t, f) => DB.rows(t).filter(f).forEach(r => DB.remove(t, r._id));
+      del('items', r => ['BCTEST', 'R-TEST'].includes(r.code)); del('stock_open', r => ['BCTEST', 'R-TEST'].includes(r.code)); del('bom', r => r.color_code === 'TCOL1'); del('recipes', r => r.code === 'TCOL1');
+      del('code_map', r => ERP.inv.normName(r.src) === 'TESTRED6B'); await DB.flush(); });
+    eq('되돌리면 시험 자료 없음 (품목 · 색상별 BOM · 배합표 · 코드 연결 줄 수가 처음과 같음)', await cnt(), base0);
+  });
+
   await sec('12. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => { ERP.setLang('vi'); ERP.state.plan = { tab: 'orders' }; location.hash = '#/plan'; ERP.render(); }); await settle();
     for (const t of [1, 2, 3, 4, 5]) { await A.click('.tabs .tab:nth-child(' + t + ')'); await settle(); }
