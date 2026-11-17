@@ -188,3 +188,10 @@
   - 배합표 탭의 새 칸에서 Carmine 6B 만 골랐음 (Ego Lite 로 `127.0.0.1:3210`, 고르기 = BC6B 150 kg · R-029 200 kg · R-029P 160 kg → R-029) → 코드 연결 한 줄 (원료 이름 "Carmine 6B" → R-029, 비고 "배합표 탭에서 고름"). 09:06:36 구글 공유로 보냄.
   - 배합표로 푸는 진행 중 수주 (Glass · 52-7412-K-000 · 52-7412-k-000 · 68-7424-M-010) 의 소요량: CARMINE 6B 76.3 kg 이 BC6B (재고 150) → R-029 (재고 200) 로. 나머지 7 이름은 그대로 B 코드 (이미 R- 코드와 대체 자재로 이어져 같이 셈).
   - 09:06 ERP 닫음 (켜기 전처럼).
+
+## 2026-11-17 점검 · 현장 재고 마이너스 조사 · 배합표 원료 연결 (자료만, 프로그램 변경 없음)
+
+- 요청: "bom은 작업중이라 다음주에 업데이트 할게. 지금까지 만들어진거에 너가 수정해야될사항이나 추가하면 좋을거같은 사항들을 알려줘바" → 실제 자료 사본 (확인용 서버, 읽기만) 으로 점검 — 고칠 것 5 · 자료 채울 것 5 · 더할 것 5 (`D:\ERP\18_review\점검_2026-11-17.md`).
+- "1번부터 해줘" → 현장 재고 마이너스 219 품목 조사 (`D:\ERP\19_floor_neg`): 조립이 빼는 코드 (ECOUNT BOM `bom_lines`) 와 일보 · 현장 실사 코드가 다름. 사출 부품 113 = 사출 일보가 묶음 이름 (Barrel · Holder · Spoon · Nose cone) + 품목군만 적음 (생산은 묶음 품목으로, 사용은 MH · BP · MS … 개별 코드에서). 리필 98 중 44 = 짧은 코드 (BOM · 실사, RM1NN · RM3NN · RRNN) ↔ 긴 코드 (리필 일보, RM010NN · RM031NN · RR10NN) 짝 (품목 마스터에 116쌍, RM137 · RM138 은 번호가 서로 바뀜 — 이름대로 RM137 = RM01038 · RM138 = RM01037). 사용자 "목록 먼저 볼게" → "BOM 에서 맞출게" — ERP 에 짝을 넣지 않고 다음 주 (11-24 주) BOM 을 일보와 같은 긴 코드로. 사출 부품을 품목군으로 셀지는 BOM 을 넣을 때 정함.
+- 2번 → 배합표 원료 이름 18가지가 원재료 이름과 맞지 않음 (`D:\ERP\20_recipe_raw\배합표_원료_후보.md`). 사용자 "1~5, 8, 15, 17 이어줘" → 이 PC ERP (1.15.5) 에서 코드 연결 (원료 이름) 8줄 (11:07, `INV.setRawLink`, 비고 "배합표 원료 연결 · 사용자 2026-11-17"): Hydrogenated oil → R-004 HYDROGEN OIL · Stearic Acid → R-005 STERIC ACID (PH100) · Magiesium → R-033 MAGIESIUM CARBONATE · Bees wax → R-001 BEE WAX · Titanium R-902 → R-081 TITANIUM DIOXIDE R-902 · FeO2 R-147 → R-036 IRON OXIDE (R-147) · Pink 122 → R-013 PINK 122PN · Aluminium Alpaste → R-009 ALUMINIUM PASTE. 11:07:57 구글 공유로 보냄, 11:08 ERP 닫음 (켜기 전처럼).
+  - 진행 중 수주 전체의 소요량 계산: 재고 매칭 없음 15 → 8 (남음: Black (MA 100) · Blue HR · CaCO3 95T · Carbon (HR Carbon Black 30L) · Floating oil (KF-150) · Petroleum Palm · Polyethylene · SulO2). 새로 보이는 모자람: R-001 BEE WAX 필요 3,160.74 · 재고 1,380 → 1,780.74 kg · R-033 MAGIESIUM CARBONATE 4,777.81 · 475 (+ 대체 R-033TQ 800) → 3,502.81 kg · R-081 TITANIUM DIOXIDE 1,408.06 · 775 → 633.06 kg (원부자재 재고는 마지막 수불 10-21 기준). 나머지 5가지는 충분.
