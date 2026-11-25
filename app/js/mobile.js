@@ -36,14 +36,15 @@
         low: ctx.low.length,
         ng: { rate: day.ngRate, ng: day.ng, total: day.ea + day.ng },
         mach: { run, tot },
-        neg: { mat: inv.filter(s => s.negative && ERP.inv.groupOf(s) === 'mat').length, floor: inv.filter(s => s.negative && ERP.inv.groupOf(s) === 'floor').length },
+        // 1.15.6 (사용자 "현장재고 마이너스로 표시안되게 … 그냥 0으로"): 현장 재고는 0 으로 보이므로 휴대폰 '마이너스 재고' 에 세지 않는다 (floor 0) — 0 으로 보이는 수는 floorZero
+        neg: { mat: inv.filter(s => s.negative && ERP.inv.groupOf(s) === 'mat').length, floor: 0, floorZero: inv.filter(s => ERP.inv.floorZero(s)).length },
       },
       procs: procs.map(p => { const a = ctx.byProc[p.id] || C.agg([]); const av = ctx.avg[p.id]; const r = ctx.machRun(p.id);
         return Object.assign(pinfo(p), { val: valOf(p, a), n: a.n, avgPct: av ? Math.round(a.ea / av * 100) : null, run: r, tot: Math.max(ctx.machTotal(p.id), r) }); }),
       due: ctx.open.filter(o => o.p.due).sort((a, b) => a.p.due.localeCompare(b.p.due)).filter(o => o.dday >= -30).slice(0, 8).sort(C.byDueDesc)   // 1.13.12: 늦은 납기부터
         .map(o => ({ po: o.p.po_no || '', customer: o.p.customer || '', item: o.p.item_no || '', kind: o.p.kind || '', packed: o.packed, sets: o.sets, due: o.p.due, dday: o.dday, st: o.st })),
       low: ctx.low.slice().sort((a, b) => (a.bal / (a.safety || 1)) - (b.bal / (b.safety || 1))).slice(0, 8)
-        .map(s => ({ code: s.code, name: s.name || '', bal: Math.round(s.bal * 10) / 10, prim: s.prim || '', safety: s.safety || 0, neg: s.status === 'neg' })),
+        .map(s => ({ code: s.code, name: s.name || '', bal: Math.round(ERP.inv.showQty(s, s.bal) * 10) / 10, prim: s.prim || '', safety: s.safety || 0, neg: s.status === 'neg' && !ERP.inv.isFloorRow(s) })),
       daily: { days, procs: procs.map(p => Object.assign(pinfo(p), { vals: days.map(d => valOf(p, C.agg((ctx.ix.byDate.get(d) || []).filter(r => r.process === p.id)))) })) },
       month: procs.map(p => Object.assign(pinfo(p), { val: valOf(p, ctx.monthAgg(p.id, ctx.mStart, ref)), prev: valOf(p, ctx.monthAgg(p.id, pw[0], pw[1])) })),
       // 1.10.1: 일별 · 월별 조립 생산량 (종합 현황 위젯과 같은 계산, 품목군별)

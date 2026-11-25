@@ -42,13 +42,16 @@
   const sevRank = { neg: 0, low: 1, near: 2, ok: 3, na: 4 };
   const matRow = (s, mult) => {
     const below = s.status === 'low' || s.status === 'neg';
-    const row = { code: clean(s.code), name: clean(s.name), unit: s.prim, balance: r1(s.bal), safety_stock: s.safety,
-      pct_of_safety: s.safety ? Math.round(s.bal / s.safety * 100) : null, status: s.status, days_cover: s.cover === null || s.cover === undefined ? null : Math.round(s.cover) };
-    if (s.by) { row.warehouse = r1(s.by.WH); row.factory = r1(s.by.FAC); }
+    // 1.15.6 (사용자 2026-11-25 "현장재고 마이너스로 표시안되게 … 그냥 0으로"): 현장 재고 품목은 재고 수량이 0 아래면 0 (shown_as_zero) — 화면과 같음. 원부자재는 그대로
+    const z = ERP.inv && ERP.inv.showQty ? (v) => ERP.inv.showQty(s, v) : (v) => v; const fz = !!(ERP.inv && ERP.inv.floorZero && ERP.inv.floorZero(s));
+    const row = { code: clean(s.code), name: clean(s.name), unit: s.prim, balance: r1(z(s.bal)), safety_stock: s.safety,
+      pct_of_safety: s.safety ? Math.round(z(s.bal) / s.safety * 100) : null, status: fz && s.status === 'neg' ? 'low' : s.status, days_cover: s.cover === null || s.cover === undefined ? null : Math.round(s.cover) };
+    if (fz) row.shown_as_zero = true;
+    if (s.by) { row.warehouse = r1(z(s.by.WH)); row.factory = r1(z(s.by.FAC)); }
     if (s.stage && ERP.inv) row.stage = ERP.inv.stageTitle(s.stage);
-    if (s.sets !== null && s.sets !== undefined) row.sets = Math.round(s.sets);
+    if (s.sets !== null && s.sets !== undefined) row.sets = Math.round(z(s.sets));
     if (s.susp) row.transfer_missing_suspected = true;
-    if (below && s.safety > 0) row.recommended_order = r1(Math.max(0, s.safety * (mult || 1) - s.bal));
+    if (below && s.safety > 0) row.recommended_order = r1(Math.max(0, s.safety * (mult || 1) - z(s.bal)));   // 1.15.6: 현장 재고는 보이는 재고 (0 아래면 0) 기준 — 원부자재는 그대로
     return row;
   };
   const findPo = (po) => {
@@ -76,7 +79,8 @@
         po_without_valid_due: open.filter(g => !hasValidDue(g)).length,
         materials_below_safety: st.filter(s => s.status === 'low' || s.status === 'neg').length, materials_near_safety: st.filter(s => s.status === 'near').length,
         materials_with_safety_set: st.filter(s => s.safety > 0).length, materials_total: st.filter(s => s.m).length,
-        negative_stock_items: st.filter(x => x.negative).length, transfer_missing_suspected: st.filter(x => x.susp).length, stock_basis: stockBasis(),
+        negative_stock_items: st.filter(x => x.negative && ERP.inv && ERP.inv.groupOf(x) === 'mat').length,   // 1.15.6: 원부자재만 (현장 재고는 0 으로 보임) — 종합 현황 · 휴대폰과 같게 (Codex 검토)
+        floor_shown_as_zero: ERP.inv && ERP.inv.floorZero ? st.filter(x => ERP.inv.floorZero(x)).length : 0, transfer_missing_suspected: st.filter(x => x.susp).length, stock_basis: stockBasis(),
         latest_production_date: d || null, latest_day_output_by_process: perProc };
     },
 
@@ -241,7 +245,7 @@
       status: { type: 'string', enum: ['open', 'late', 'stale', 'due_soon', 'wait', 'prod', 'done', 'all'] },
       limit: { type: 'integer', description: 'max rows (default 15, max 60)' } }) },
     { name: 'get_po', description: 'Details of one PO: header, every item line with sets ordered / packed / remaining / progress / due, and recent packing records. If not found, similar_po_numbers lists close matches.', input_schema: S({ po_no: { type: 'string' } }, ['po_no']) },
-    { name: 'material_stock', description: 'Current stock of ANY item (raw RM, sub-material SM/CM, parts, semi-finished WIP, manila-packed SG, finished FG) by item code, ERP CODE, Mã XNK or name. balance = warehouse + factory (two scopes, see warehouse / factory). Stock = opening stock imported from ECOUNT (stock_basis.opening_date_*) + transactions + production postings from daily reports. status: neg = negative balance, low = below safety stock, near = under 120% of safety, ok, na = no safety stock set (status is only judged for items with a safety stock). recommended_order = safety − balance for items below safety. only_low returns items below safety; add include_near to include "near". transfer_missing_suspected = one scope +, the other − (a warehouse→factory transfer was probably not entered).', input_schema: S({
+    { name: 'material_stock', description: 'Current stock of ANY item (raw RM, sub-material SM/CM, parts, semi-finished WIP, manila-packed SG, finished FG) by item code, ERP CODE, Mã XNK or name. balance = warehouse + factory (two scopes, see warehouse / factory). Stock = opening stock imported from ECOUNT (stock_basis.opening_date_*) + transactions + production postings from daily reports. status: neg = negative balance, low = below safety stock, near = under 120% of safety, ok, na = no safety stock set (status is only judged for items with a safety stock). recommended_order = safety − balance for items below safety. Floor items (parts, semi-finished WIP, SG, FG) never report a quantity below 0: a calculated negative balance / warehouse / factory / sets is reported as 0 (each one separately, so balance can differ from warehouse + factory), shown_as_zero = true when the calculated total is below 0 (the ERP screens show 0 too; usually item codes in the daily report / BOM differ from the floor stocktake codes) and status is then low instead of neg; never state a negative floor stock. Raw / sub materials (RM, SM, CM) report real negatives. only_low returns items below safety; add include_near to include "near". transfer_missing_suspected = one scope +, the other − (a warehouse→factory transfer was probably not entered).', input_schema: S({
       query: { type: 'string' }, only_low: { type: 'boolean' }, include_near: { type: 'boolean' }, limit: { type: 'integer' } }) },
     { name: 'production_summary', description: 'Production output between two dates grouped by process (and optionally by day): good_pcs (pcs-equivalent), good_sets for packing (PCK, in sets), ng_qty and ng_rate_pct (same formula as the production screen).', input_schema: S({
       from: { type: 'string', description: 'YYYY-MM-DD' }, to: { type: 'string', description: 'YYYY-MM-DD' }, process: { type: 'string', description: 'INJ, REF, ASM, WRP, PCK or a custom process code' }, by_day: { type: 'boolean' } }, ['from', 'to']) },

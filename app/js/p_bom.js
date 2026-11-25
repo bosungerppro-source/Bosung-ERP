@@ -384,7 +384,7 @@
     if (ch.length) {
       const stk = C.stock();
       const pick = (x) => { const s = h('select', { 'data-raw-key': x.key, onchange: () => { ERP.inv.setRawLink(x.name, s.value, L('배합표 탭에서 고름', 'Chọn ở tab công thức')); ERP.toast(L('연결했습니다: ', 'Đã liên kết: ') + x.name + ' → ' + s.value, 'ok'); ERP.render(); } },
-        x.cands.map(it => { const b = stk.get(it.code); return h('option', { value: it.code }, it.code + ' · ' + (it.name || '') + ' · ' + L('재고 ', 'tồn ') + F.n(b ? b.bal : 0, 1) + ' ' + (ERP.inv.unitShow(it.unit) || '')); }));
+        x.cands.map(it => { const b = stk.get(it.code); return h('option', { value: it.code }, it.code + ' · ' + (it.name || '') + ' · ' + L('재고 ', 'tồn ') + F.n(b ? ERP.inv.showQty(b, b.bal) : 0, 1) + ' ' + (ERP.inv.unitShow(it.unit) || '')); }));
         if (x.cur) s.value = x.cur.code; return s; };
       host.appendChild(h('div', { class: 'card', 'data-raw-choices': '1', style: { margin: '0 0 12px', padding: '12px 16px' } },
         h('h3', { style: { margin: '0 0 6px' } }, L('원료 이름이 같은 원재료 — 소요량 계산이 볼 코드', 'Nguyên liệu trùng tên — mã dùng để tính nhu cầu')),

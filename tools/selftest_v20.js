@@ -146,8 +146,9 @@ const OLD_PIVOTS = [{ id: 'asm', title: '리필 성형 · 조립 · 사출 재�
 
   await sec('7. 경고: 마이너스 · 못 넣은 일보 · BOM 없는 생산 (생산 반영 진단과 같음)', async () => {
     await floor(); const c = await cards(); const by = Object.fromEntries(c.map(x => [x.id, x.warns]));
-    eq('사출: 마이너스 1품목 (BP −20) · 종이 권취: 못 넣은 일보 1줄 · BOM 없는 생산 1품목 · 리필: BOM 없는 생산 1품목', [by.INJ, by.WRP, by.REF, by.ASM, by.PCK],
-      [[['neg', '마이너스 1품목']], [['notItem', '못 넣은 일보 1줄'], ['noBom', 'BOM 없는 생산 1품목']], [['noBom', 'BOM 없는 생산 1품목']], [], []]);
+    // 1.15.6: 마이너스 숫자는 보이지 않음 — 경고는 '0 으로 보임 N품목' (사용자 2026-11-25 "현장재고 마이너스로 표시안되게")
+    eq('사출: 0 으로 보임 1품목 (BP 계산 −20) · 종이 권취: 못 넣은 일보 1줄 · BOM 없는 생산 1품목 · 리필: BOM 없는 생산 1품목', [by.INJ, by.WRP, by.REF, by.ASM, by.PCK],
+      [[['neg', '0 으로 보임 1품목']], [['notItem', '못 넣은 일보 1줄'], ['noBom', 'BOM 없는 생산 1품목']], [['noBom', 'BOM 없는 생산 1품목']], [], []]);
     await A.click('main .fpiv-card[data-id="INJ"] .fpiv-w[data-w="neg"]'); await settle();
     eq('마이너스 → 아래 표 = 사출 · 마이너스 품목 (BP)', [await ev(() => [ERP.state.stk_floor.proc, ERP.state.stk_floor.status]), await tableCodes()], [['INJ', 'neg'], ['BP']]);
   });
@@ -249,6 +250,124 @@ const OLD_PIVOTS = [{ id: 'asm', title: '리필 성형 · 조립 · 사출 재�
     await ev(async () => { ERP.db.setSetting('floorCards', { NONE: { scope: 'WH', hidden: true } }); await ERP.db.flush(); ERP.render(); }); await settle();
     eq('그 카드를 숨기면 아래 줄에 [보이기]', await ev(() => Array.from(document.querySelectorAll('main .fpiv-foot [data-show]')).map(b => b.dataset.show)), ['NONE']);
     await ev(async () => { const DB = ERP.db; DB.setSetting('floorCards', null); ['Z-0', 'U-2'].forEach(c => { const r = DB.rows('items').find(x => x.code === c); if (r) DB.remove('items', r._id); }); const so = DB.rows('stock_open').find(x => x.code === 'U-2'); if (so) DB.remove('stock_open', so._id); await DB.flush(); ERP.render(); }); await settle();
+  });
+
+  await sec('15. (1.15.6) 현장 재고는 마이너스 수량을 0 으로 보임 — 카드 · 품목 표 · 수불부 · 엑셀 · 종합 현황 · 휴대폰 · AI 비서 (계산은 그대로)', async () => {
+    // 사용자 2026-11-25 "현장재고 마이너스로 표시안되게해줘 마이너스 수량이되면 그냥 0으로 표시되게 바꿔줘"
+    // 조립 A-M1 500 을 더 만들면 MH 100 − 100 − 500 = −500 · B-M1 200 − 100 − 500 = −400 (BP 는 처음부터 −20) → 홀더 · Mini 칸 = MH −500 + Holder 300 = −200
+    await ev(async (o) => { ERP.db.add('prod_log', { date: o.D1, process: 'ASM', shift: 'N', division: 'Mini', code: 'A-M1', name: 'A-M1', ok_qty: 500, ok_ea: 500, ng_qty: 0, src: 't15' }); await ERP.db.flush(); }, { D1 });
+    await floor();
+    const minusNum = /(^|[^\w])[−-]\d/;   // 마이너스 숫자 (날짜 2026-08-31 의 '-' 는 빼고)
+    const c = await card('INJ');
+    // (그 밖의 부품 Mini 7 = U-1 — 11장에서 생산 공정을 사출로 넣음)
+    eq('사출 카드: 홀더 · Mini 칸 (계산 −200) = 0 · 줄 합계 0 · 배럴 Mini = −400 + 600 = 200 (품목군 합은 그대로)', c.rows, [['배럴', '580', '200', '380', '·'], ['노즈콘', '30', '·', '30', '·'], ['홀더', '0', '0', '·', '·'], ['그 밖의 부품', '16', '7', '·', '9']]);
+    ok('어느 카드에도 마이너스 숫자 없음', !minusNum.test(await ev(() => document.querySelector('main .fpiv').innerText)), await ev(() => document.querySelector('main .fpiv').innerText.match(/.{0,20}(^|[^\w])[−-]\d.{0,10}/gm)));
+    eq('사출 카드 경고 = 0 으로 보임 3품목 (BP · B-M1 · MH)', c.warns, [['neg', '0 으로 보임 3품목']]);
+    const tip = await ev(() => { const td = document.querySelector('main .fpiv-card[data-id="INJ"] tbody tr[data-k="HOLDER"] td:nth-child(3)'); return td && td.title; });
+    // (Codex 검토) 0 으로 보이는 칸은 식 (… = 값) 대신 '재고 0 (계산이 0 아래)' 한 줄 + 내역 한 줄
+    ok('홀더 · Mini 칸 설명: 재고 0 (계산이 0 아래) + 내역 (식 "=" 없음) — 마이너스 숫자 없음', /\n재고 0 \(계산이 0 아래\)\n내역: 실사 /.test(tip || '') && !/ = /.test(tip || '') && !minusNum.test(tip || ''), tip);
+    const tips = await ev(() => { const mk = (c) => ({ proc: 'INJ', itemMode: true, cols: [{ k: '_', label: '현재 재고' }], rows: [{ k: 'X', unit: 'PCS', title: 'X', label: 'X', cells: new Map([['_', c]]) }], tots: [], rowTot: false, units: ['PCS'], firstHead: '품목' });
+      const t = (c) => { const td = ERP.pivot.tableEl(mk(c), () => {}).querySelector('tbody td:nth-child(2)'); return [td.textContent.trim(), td.title]; };
+      return [t({ v: -3, show: 0, zero: true, open: -5, prod: 2, use: 0, oth: 0, flow: true }), t({ v: 15, show: 15, zero: false, open: -5, prod: 20, use: 0, oth: 0, flow: true }), t({ v: 7, show: 7, zero: false, open: 5, prod: 2, use: 0, oth: 0, flow: true })]; });
+    eq('칸 설명: 계산 −3 → 재고 0 + 내역 (실사 −5 → 0) · 계산 15 · 실사 −5 → 실사 0 · 0 아래 없는 칸은 예전 식 그대로', tips, [['0', 'X\n재고 0 (계산이 0 아래)\n내역: 실사 0 (계산이 0 아래) + 생산 2 − 사용 0 ± 기타 0'],
+      ['15', 'X\n재고 15\n내역: 실사 0 (계산이 0 아래) + 생산 20 − 사용 0 ± 기타 0'], ['7', 'X\n실사 5 + 생산 2 − 사용 0 ± 기타 0 = 7']]);
+    eq('계산은 그대로: MH −500 · B-M1 −400 · BP −20 (재고 계산 · 카드 칸 값)', await ev(() => { const st = ERP.calc.stock(); const d = ERP.pivot.buildCard('INJ', ERP.pivot.cleanCfg(null)); const hm = d.rows.find(r => r.k === 'HOLDER').cells.get('MINI');
+      return [st.get('MH').bal, st.get('B-M1').bal, st.get('BP').bal, hm.v, hm.show]; }), [-500, -400, -20, -200, 0]);
+    // 아래 품목 표 (경고를 누르면 0 으로 보이는 품목만)
+    await A.click('main .fpiv-card[data-id="INJ"] .fpiv-w[data-w="neg"]'); await settle();
+    const tb = await ev(() => Array.from(document.querySelectorAll('main table.tbl:not(.fpiv-t):not(.fraw-t) tbody tr')).map(tr => { const t = Array.from(tr.children).map(td => td.innerText.replace(/\s+/g, ' ').trim()); return [t[0], t[7], t[8], t[9], t[11]]; }).sort());
+    eq('품목 표: BP · B-M1 · MH 의 창고 · 공장 · 합계 = 0 · 상태 = 0 으로 보임', tb, [['B-M1', '0', '0', '0', '0 으로 보임'], ['BP', '0', '0', '0', '0 으로 보임'], ['MH', '0', '0', '0', '0 으로 보임']]);
+    const k = await ev(() => Array.from(document.querySelectorAll('main .kpis .kpi')).map(x => [x.querySelector('.kpi-label').textContent, x.querySelector('.kpi-val .v').textContent]));
+    ok('숫자 카드: "0 으로 보이는 품목 3" · "마이너스 재고" 없음', k.some(x => x[0] === '0 으로 보이는 품목' && x[1] === '3') && !k.some(x => /마이너스/.test(x[0])), k);
+    eq('상태 고르기: 0 으로 보임 (계산 0 아래)', await ev(() => (Array.from(document.querySelectorAll('main select[data-k="status"] option')).find(o => o.value === 'neg') || {}).textContent), '0 으로 보임 (계산 0 아래)');
+    // 엑셀 (공정마다 시트 · 현재 보기)
+    const xl = await ev(() => { let sh = null, aoa = null; const o1 = ERP.xl.exportSheets, o2 = ERP.xl.exportAoa; ERP.xl.exportSheets = (n, s) => { sh = s; }; ERP.xl.exportAoa = (n, hd, rows) => { aoa = { hd, rows }; };
+      try { ERP.pivot.exportAll(); Array.from(document.querySelectorAll('main button')).find(b => b.textContent === '현재 보기 엑셀').click(); } finally { ERP.xl.exportSheets = o1; ERP.xl.exportAoa = o2; }
+      const inj = sh.find(s => s.name === '사출'); const items = sh.find(s => s.name === '품목 목록'); const ix = (n) => aoa.hd.indexOf(n);
+      return { holder: inj.rows.find(r => r[0] === '홀더'), mh: items.rows.find(r => r[0] === 'MH').slice(11, 14), view: aoa.rows.filter(r => r[0] === 'MH').map(r => [r[ix('창고')], r[ix('공장')], r[ix('합계')]]) }; });
+    eq('엑셀: 사출 시트 홀더 줄 0 · 품목 목록 MH 창고 · 공장 · 현재 0 · 현재 보기 MH 0', xl, { holder: ['홀더', 0, 0, 0, 0], mh: [0, 0, 0], view: [[0, 0, 0]] });
+    // 수불부 (품목 상세)
+    await ev(() => ERP.itemDetail('MH')); await settle();
+    const md = await ev(() => { const m = document.querySelector('.modal'); const t = m.querySelector('table'); const hd = Array.from(t.querySelectorAll('thead th')).map(x => x.innerText.trim());
+      const cols = ['창고 잔액', '공장 잔액', '합계'].map(n => hd.indexOf(n)); const vals = Array.from(t.querySelectorAll('tbody tr')).map(tr => cols.map(i => tr.children[i].innerText.trim()));
+      return { kpis: m.querySelector('.kpis').innerText.replace(/\s+/g, ' '), vals, note: m.innerText.includes('0 아래인 잔액은 0 으로 보입니다') }; });
+    ok('수불부: 숫자 카드 · 잔액 칸에 마이너스 없음 (± 칸은 그대로) · 0 으로 보임 · 안내 글', !minusNum.test(md.kpis) && /0 으로 보임/.test(md.kpis) && md.vals.every(r => r.every(v => !minusNum.test(v))) && md.note, md);
+    await A.keyboard.press('Escape'); await settle();
+    // 종합 현황 위젯 · 휴대폰 요약 · AI 비서
+    const w = await ev(() => ({ neg: ERP.widgets.kpi_neg.render({}).textContent, flow: ERP.widgets.flow.render({}).textContent }));
+    ok('종합 현황 "마이너스 재고" = 원부자재만 (0) · 현장 재고는 "0 으로 보임 3" · 재고 흐름에 현장 −숫자 없음', /^마이너스 재고0품목/.test(w.neg) && /현장 재고: 0 으로 보임 3/.test(w.neg) && /마이너스 0/.test(w.flow) && /현장 0 으로 보임 3/.test(w.flow) && !/−\d/.test(w.flow), w);
+    eq('휴대폰 요약: 마이너스 = 원부자재 0 · 현장 0 (0 으로 보임 3)', await ev(() => ERP.mobileSummary().kpi.neg), { mat: 0, floor: 0, floorZero: 3 });
+    const ai = await ev(() => { const T = ERP.ai.tools; const r = T.material_stock({ query: 'MH' }).rows.find(x => x.code === 'MH'); const o = T.overview(); return [r.balance, r.factory, r.shown_as_zero, o.negative_stock_items, o.floor_shown_as_zero]; });
+    eq('AI 비서: MH 재고 0 (shown_as_zero) · 마이너스 품목 = 원부자재만 0 · 현장 0 으로 보임 3', ai, [0, 0, true, 0, 3]);
+    // ---- 아래는 Codex 검토 (1.15.6) 뒤에 더한 곳
+    // 재고 흐름 위젯: 현장 단계의 '재고 있는 품목' = 보이는 재고가 0 보다 큰 품목 (홀더 단계 = Holder 만, MH 는 0 으로 보임)
+    eq('재고 흐름: 홀더 단계 1 / 2 (MH 는 재고 없는 품목)', await ev(() => { const el = ERP.widgets.flow.render({}); const i = ERP.inv.STAGES.findIndex(x => x.code === 'WIP03'); return el.querySelectorAll('button.st')[i].querySelector('.n').textContent.replace(/\s+/g, ' '); }), '1 / 2');
+    // 카드 경고를 누르면 아래 표도 카드와 같은 범위 · 품목군 — 센 품목 = 표 줄
+    const chipRun = async (cfg) => { await ev(async (c) => { ERP.db.setSetting('floorCards', { INJ: c }); await ERP.db.flush(); ERP.state.stk_floor = null; ERP.goStock('floor'); ERP.render(); }, cfg); await settle();
+      const w = ((await card('INJ')).warns.find(x => x[0] === 'neg') || [])[1] || '';
+      await A.click('main .fpiv-card[data-id="INJ"] .fpiv-w[data-w="neg"]'); await settle();
+      return [w, await tableCodes(), await ev(() => [ERP.state.stk_floor.scope, ERP.state.stk_floor.fline])]; };
+    eq('공장 범위 카드: 경고 3품목 → 아래 표도 공장 범위 · 3품목', await chipRun({ scope: 'FAC' }), ['0 으로 보임 3품목', ['B-M1', 'BP', 'MH'], ['FAC', '']]);
+    eq('품목군 Pencil 만 고른 카드: 경고 = 그 품목군 품목만 → 아래 표도 Pencil', await chipRun({ divs: ['PEN'] }), ['0 으로 보임 1품목', ['BP'], ['all', 'PEN']]);
+    await ev(async () => { ERP.db.setSetting('floorCards', null); await ERP.db.flush(); }); await floor();
+    // 품목 표 거르기: '재고 0' 에 0 으로 보이는 품목도 · 공장 범위 '재고 0 숨김' 은 0 으로 보이는 품목을 숨김
+    const flt = async (o) => { await ev((x) => { ERP.state.stk_floor = Object.assign({ stage: '', line: '', sub: '', cat: '', scope: 'all', status: '', q: '', hideZero: true, sk: 'code', sd: 1, page: 0, ps: 100 }, x); ERP.goStock('floor'); ERP.render(); }, o); await settle(); return tableCodes(); };
+    const zr = await flt({ proc: 'INJ', status: 'zero' }), hf = await flt({ proc: 'INJ', scope: 'FAC' });
+    ok('상태 "재고 0" = 0 으로 보이는 MH · B-M1 · BP 도 들어감 · 공장 범위 "재고 0 숨김" 은 그 셋을 숨김', ['MH', 'B-M1', 'BP'].every(x => zr.includes(x)) && !['MH', 'B-M1', 'BP'].some(x => hf.includes(x)), { zr, hf });
+    await floor();
+    // 통합 검색
+    const sr = await ev(async () => { ERP.search(); const inp = document.querySelector('.modal input'); inp.value = 'MINI HOLDER'; inp.dispatchEvent(new Event('input')); await new Promise(r => setTimeout(r, 100));
+      const t = document.querySelector('.modal').innerText; document.querySelector('.modal-back').remove(); return t; });
+    ok('통합 검색: MH 재고 0 (마이너스 숫자 없음)', /MH · MINI HOLDER/.test(sr) && /· 0 PCS/i.test(sr) && !minusNum.test(sr), sr);
+    // AI 비서 · 휴대폰: 안전재고가 있는 현장 품목 (MH 안전재고 50, 계산 −500) — 권장 = 50 − 보이는 재고 0
+    await ev(async () => { const DB = ERP.db; const r = DB.rows('items').find(x => x.code === 'MH'); DB.update('items', r._id, { safety: 50 }); await DB.flush(); });
+    const ai2 = await ev(() => { const r = ERP.ai.tools.material_stock({ query: 'MH' }).rows.find(x => x.code === 'MH'); const lo = ERP.mobileSummary().low.find(x => x.code === 'MH'); return [r.balance, r.status, r.recommended_order, r.pct_of_safety, lo && lo.bal, lo && lo.neg]; });
+    eq('AI 비서: MH 재고 0 · 미달 · 권장 50 (보이는 재고 기준) · 0% · 휴대폰 미달 목록도 0 (마이너스 표시 없음)', ai2, [0, 'low', 50, 0, 0, false]);
+    // 해외 주문: 현장 재고 품목이 해외 주문 품목이면 보이는 재고 · Total 0 (계산은 그대로)
+    await ev(async () => { const DB = ERP.db; const r = DB.rows('items').find(x => x.code === 'MH'); DB.update('items', r._id, { buy: true }); await DB.flush(); });
+    const bq = await ev(async () => { const r = ERP.buy.rows().find(x => x.code === 'MH'); ERP.goStock('buy'); ERP.render(); await new Promise(res => setTimeout(res, 300));
+      const tr = Array.from(document.querySelectorAll('main table tbody tr')).find(x => x.children[0] && /\bMH\b/.test(x.innerText)); return [r.fl, r.bal < 0, ERP.buy.showBal(r), ERP.buy.showTot(r), tr ? !/(^|[^\w])[−-]\d/.test(tr.innerText) : 'no row']; });
+    eq('해외 주문: MH (계산 0 아래) → 재고 0 · Total 0 · 표 줄에 마이너스 숫자 없음', bq, [true, true, 0, 0, true]);
+    await ev(async () => { const DB = ERP.db; const r = DB.rows('items').find(x => x.code === 'MH'); DB.update('items', r._id, { buy: false, safety: null }); await DB.flush(); }); await floor();
+    // 수주 상세 · 품목 상세의 완제품 재고: K-P1 을 −1,000 set (조정) → 0 set 로 보임
+    await ev(async (o) => { const DB = ERP.db; DB.add('stock_tx', { date: o.D1, kind: 'ADJ', to_scope: 'FAC', code: 'K-P1', qty: -1000, src: 't15' }); DB.add('po', { po_no: 'T15-PO', customer: 'T15', item_no: 'K-P1', sets: 10, date: o.D1, due: '2026-12-31', src: 't15' }); await DB.flush(); }, { D1 });
+    eq('계산: K-P1 재고 · set 이 0 아래', await ev(() => { const s = ERP.calc.stock().get('K-P1'); return [s.bal < 0, s.sets < 0]; }), [true, true]);
+    await ev(() => ERP.openPo('T15-PO')); await settle();
+    const pc = await ev(() => { const t = Array.from(document.querySelectorAll('main table')).find(x => Array.from(x.querySelectorAll('thead th')).some(th => th.innerText.trim() === '완제품 재고')); if (!t) return null;
+      const i = Array.from(t.querySelectorAll('thead th')).findIndex(th => th.innerText.trim() === '완제품 재고'); const tr = Array.from(t.querySelectorAll('tbody tr')).find(r => r.innerText.includes('K-P1')); const td = tr && tr.children[i];
+      return td ? [td.innerText.replace(/\s+/g, ' ').trim(), (td.querySelector('[title]') || td).title] : null; });
+    ok('수주 상세: K-P1 완제품 재고 0 · 0 set · 설명 (창고 · 공장) 에도 마이너스 없음', !!pc && /^0 /.test(pc[0]) && /0 set/.test(pc[0]) && !minusNum.test(pc.join(' ')), pc);
+    await ev(() => ERP.itemDetail('K-P1')); await settle();
+    const kd = await ev(() => document.querySelector('.modal').innerText);
+    ok('품목 상세: "완제품 재고 0 set · 남은 수주 10 set"', /완제품 재고 0 set · 남은 수주 10 set/.test(kd), kd.match(/완제품 재고.{0,40}/));
+    await A.keyboard.press('Escape'); await settle();
+    // 자료 점검: 마이너스 목록에 현장 재고 없음 · '0 으로 보이는 현장 재고' 따로 (숫자 없이) · 이동 누락 의심의 현장 줄은 0 으로 (MH 창고 +100 · 공장 −500)
+    await ev(async (o) => { ERP.db.add('stock_tx', { date: o.D1, kind: 'IN', to_scope: 'WH', code: 'MH', qty: 100, src: 't15' }); await ERP.db.flush(); }, { D1 });
+    const chk = async (open) => { await ev((x) => { ERP.state.chk = { open: x }; ERP.goStock('check'); ERP.render(); }, open); await settle();
+      return ev(() => Array.from(document.querySelectorAll('main .card')).filter(c => c.querySelector('.click')).map(c => { const hd = c.querySelector('.click'); return { t: hd.querySelector('b').textContent, n: (hd.querySelector('.chip') || {}).textContent || '', rows: Array.from(c.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.trim())) }; })); };
+    const cs = await chk('susp'), cn = await chk('neg'), cz = await chk('fzero');
+    const sec1 = (a, t) => a.find(x => x.t === t) || { rows: [], n: '' };
+    const FL = ['B-M1', 'BP', 'K-P1', 'MH'];
+    ok('자료 점검 이동 누락 의심: MH 창고 100 · 공장 0 · 합계 0 (현장 재고는 0 아래 쪽이 0)', JSON.stringify(sec1(cs, '이동 누락 의심 (창고 +, 공장 − 또는 반대)').rows.find(r => r[0] === 'MH')) === JSON.stringify(['MH', 'MINI HOLDER', '100', '0', '0', 'PCS']), sec1(cs, '이동 누락 의심 (창고 +, 공장 − 또는 반대)'));
+    ok('자료 점검 마이너스 재고: 현장 재고 품목 없음', !sec1(cn, '마이너스 재고 (합계 기준)').rows.some(r => FL.includes(r[0])), sec1(cn, '마이너스 재고 (합계 기준)'));
+    const fz = sec1(cz, '0 으로 보이는 현장 재고 (계산이 0 아래)');
+    ok('자료 점검 "0 으로 보이는 현장 재고" 4품목 (B-M1 · BP · K-P1 · MH) · 숫자 없음', fz.n === '4' && JSON.stringify(fz.rows.map(r => r[0]).sort()) === JSON.stringify(FL) && fz.rows.every(r => !minusNum.test(r.join(' '))), fz);
+    const xs = await ev(async () => { let blob = null; const o = ERP.download; ERP.download = (n, b) => { blob = b; }; try { Array.from(document.querySelectorAll('main button')).find(b => b.textContent === '점검 결과 엑셀').click(); } finally { ERP.download = o; }
+      const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' }); const sh = (n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1 });
+      return { neg: sh('negative').slice(1).map(r => r[0]), fz: sh('floor_shown_zero').slice(1).map(r => [r[0], r[4]]).sort(), mv: sh('move_suspect').slice(1).filter(r => r[0] === 'MH') }; });
+    ok('자료 점검 엑셀: negative 에 현장 재고 없음 · floor_shown_zero 4품목 (재고 0) · move_suspect MH 100 · 0 · 0', !xs.neg.some(c => FL.includes(c)) && JSON.stringify(xs.fz) === JSON.stringify(FL.map(c => [c, 0])) && JSON.stringify(xs.mv) === JSON.stringify([['MH', 'MINI HOLDER', 100, 0, 0, 'PCS']]), xs);
+    await ev(() => { ERP.setLang('vi'); ERP.state.chk = { open: 'fzero' }; ERP.goStock('check'); ERP.render(); }); await settle();
+    const vz = await ev(() => Array.from(document.querySelectorAll('main .card .click b')).map(b => b.textContent).find(t => /hiện 0/i.test(t)) || '');
+    ok('자료 점검 (vi): 0 으로 보이는 현장 재고 제목에 한글 없음', !!vz && !/[가-힣]/.test(vz), vz);
+    await ev(() => { ERP.setLang('ko'); ERP.render(); }); await floor();
+    // 베트남어
+    await ev(() => { ERP.setLang('vi'); ERP.render(); }); await settle();
+    const vw = await ev(() => Array.from(document.querySelectorAll('main .fpiv-card[data-id="INJ"] .fpiv-w')).map(b => b.innerText.trim()));
+    ok('베트남어: 경고에 한글 없음', vw.length && vw.every(t => !/[가-힣]/.test(t)), vw);
+    await ev(() => { ERP.setLang('ko'); ERP.render(); }); await settle();
+    // 되돌림
+    await ev(async () => { const DB = ERP.db; ['prod_log', 'stock_tx', 'po'].forEach(t => DB.rows(t).filter(r => r.src === 't15').forEach(r => DB.remove(t, r._id))); await DB.flush(); }); await floor();
+    eq('되돌리면 사출 카드가 앞과 같음 (3장 + U-1)', (await card('INJ')).rows, [['배럴', '1,080', '700', '380', '·'], ['노즈콘', '30', '·', '30', '·'], ['홀더', '300', '300', '·', '·'], ['그 밖의 부품', '16', '7', '·', '9']]);
   });
 
   await sec('12. 베트남어 · 오류 없음', async () => {

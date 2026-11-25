@@ -64,16 +64,20 @@
   ERP.itemDetail = ERP.materialDetail = function (code) {
     const m = INV.item(code); const key = m ? m.code : code; const s = C.stock().get(key); const led = INV.ledger(key);
     const S = STAT(); const u = s ? s.prim : (m ? INV.unitShow(m.unit) : '');
+    // 1.15.6 (사용자 2026-11-25 "현장재고 마이너스로 표시안되게 … 그냥 0으로"): 현장 재고 품목은 잔액 (창고 · 공장 · 합계) 이 0 아래면 0 으로 — ± 칸은 그대로
+    const fl = s ? INV.isFloorRow(s) : grpOf(m) === 'floor'; const zq = (v) => (fl && typeof v === 'number' && v < -EPS ? 0 : v);
+    const zeroed = fl && (led.rows.some(r => [r.balWH, r.balFAC, r.bal].some(v => v < -EPS)) || (s && [s.by.WH, s.by.FAC, s.bal].some(v => v < -EPS)));
+    const scopeKpi = (label, v) => ERP.kpi(label, fq(zq(v), u), u, v < -EPS ? (fl ? 'warn' : 'bad') : 'neutral', v < -EPS ? (fl ? L('0 으로 보임', 'Hiện 0') : L('마이너스', 'Âm')) : null);
     const kv = (k, v) => [h('dt', k), h('dd', v === undefined || v === null || v === '' ? '–' : v)];
     const info = h('dl', { class: 'kv' }, kv(L('품목코드', 'Mã hàng'), key), kv(L('품명', 'Tên'), m ? m.name : (s ? s.name : '')), kv('ERP CODE', m ? m.erp_code : ''), kv(L('분류', 'Phân loại'), s ? ERP.codeChips(s) : ''),
       kv(L('세관신고 코드 (Mã XNK)', 'Mã XNK'), m ? m.xnk : ''), kv(L('품목구분', 'Loại'), m ? m.etype : ''), kv(L('단위', 'Đơn vị'), u + (m && m.kg_per_ea ? L(' (개당 ', ' (') + F.n(m.kg_per_ea, 4) + ' kg)' : '')),
       m && m.name_vn ? kv(L('품명 (베트남어 원문)', 'Tên tiếng Việt'), m.name_vn) : null,
       m && (m.set_per_ct || m.pcs_per_set) ? kv(L('환산', 'Quy đổi'), [m.set_per_ct ? F.n(m.set_per_ct, 2) + ' set/CT' : null, m.pcs_per_set ? F.n(m.pcs_per_set, 2) + ' pcs/set' : null].filter(Boolean).join(' · ')) : null,
       m && m.missing ? kv(L('주의', 'Lưu ý'), ERP.chip('warn', L('최근 ECOUNT 품목등록 파일에 없음', 'Không có trong file ECOUNT gần nhất'))) : null);
+    const fz = fl && s && s.bal < -EPS;   // 현장 재고 · 합계가 0 아래 → 0 으로 보임
     const kpis = s ? h('div', { class: 'kpis' },
-      ERP.kpi(L('창고', 'Kho'), fq(s.by.WH, u), u, s.by.WH < -EPS ? 'bad' : 'neutral', s.by.WH < -EPS ? L('마이너스', 'Âm') : null),
-      ERP.kpi(L('공장', 'Xưởng'), fq(s.by.FAC, u), u, s.by.FAC < -EPS ? 'bad' : 'neutral', s.by.FAC < -EPS ? L('마이너스', 'Âm') : null),
-      ERP.kpi(L('합계', 'Tổng'), fq(s.bal, u), u, s.status === 'na' ? (s.negative ? 'bad' : 'neutral') : S[s.status][1], s.status !== 'na' ? S[s.status][0] : (s.susp ? L('이동 누락 의심', 'Nghi thiếu phiếu chuyển') : null), s.sets !== null && s.sets !== undefined ? F.n(s.sets) + ' set' + (s.pcs !== null && s.pcs !== undefined ? ' · ' + F.n(s.pcs) + ' pcs' : '') : null),
+      scopeKpi(L('창고', 'Kho'), s.by.WH), scopeKpi(L('공장', 'Xưởng'), s.by.FAC),
+      ERP.kpi(L('합계', 'Tổng'), fq(zq(s.bal), u), u, fz ? 'warn' : s.status === 'na' ? (s.negative ? 'bad' : 'neutral') : S[s.status][1], fz ? L('0 으로 보임', 'Hiện 0') : s.status !== 'na' ? S[s.status][0] : (s.susp ? L('이동 누락 의심', 'Nghi thiếu phiếu chuyển') : null), s.sets !== null && s.sets !== undefined ? F.n(zq(s.sets)) + ' set' + (s.pcs !== null && s.pcs !== undefined ? ' · ' + F.n(zq(s.pcs)) + ' pcs' : '') : null),
       ERP.kpi(L('안전재고', 'Tồn an toàn'), s.safety === null ? '–' : F.n(s.safety), u, 'neutral', null)) : null;
     const rows = led.rows.length > 160 ? [led.rows[0]].concat(led.rows.slice(-159)) : led.rows;
     // 기초재고 출처 (14차: 창고 입출고장 · ECOUNT 보완 · 현장 실사)
@@ -82,10 +86,10 @@
     const ledger = ERP.simpleTable([
       { label: L('일자', 'Ngày'), render: r => F.d(r.date) }, { label: L('구분', 'Loại'), render: r => r.open ? ERP.chip('neutral', L('기초재고', 'Tồn đầu')) : kindChip(r.kind) },
       { label: L('전표 / 출처', 'Số CT / nguồn'), render: r => r.open ? openSrc : [r.doc_no, r.proc ? ERP.procName(r.proc) : null, r.manual ? null : null].filter(Boolean).join(' · ') || srcLabel(r) },
-      { label: L('창고 ±', 'Kho ±'), num: 1, render: r => (r.open ? fq(r.wh, u) : (r.wh ? (r.wh > 0 ? '+' : '') + fq(r.wh, u) : '')), style: r => negStyle(r.wh) },
-      { label: L('공장 ±', 'Xưởng ±'), num: 1, render: r => (r.open ? fq(r.fac, u) : (r.fac ? (r.fac > 0 ? '+' : '') + fq(r.fac, u) : '')), style: r => negStyle(r.fac) },
-      { label: L('창고 잔액', 'Tồn kho'), num: 1, render: r => fq(r.balWH, u), style: r => negStyle(r.balWH) }, { label: L('공장 잔액', 'Tồn xưởng'), num: 1, render: r => fq(r.balFAC, u), style: r => negStyle(r.balFAC) },
-      { label: L('합계', 'Tổng'), num: 1, render: r => h('b', fq(r.bal, u)), style: r => negStyle(r.bal) },
+      { label: L('창고 ±', 'Kho ±'), num: 1, render: r => (r.open ? fq(zq(r.wh), u) : (r.wh ? (r.wh > 0 ? '+' : '') + fq(r.wh, u) : '')), style: r => (r.open ? negStyle(zq(r.wh)) : negStyle(r.wh)) },
+      { label: L('공장 ±', 'Xưởng ±'), num: 1, render: r => (r.open ? fq(zq(r.fac), u) : (r.fac ? (r.fac > 0 ? '+' : '') + fq(r.fac, u) : '')), style: r => (r.open ? negStyle(zq(r.fac)) : negStyle(r.fac)) },
+      { label: L('창고 잔액', 'Tồn kho'), num: 1, render: r => fq(zq(r.balWH), u), style: r => negStyle(zq(r.balWH)) }, { label: L('공장 잔액', 'Tồn xưởng'), num: 1, render: r => fq(zq(r.balFAC), u), style: r => negStyle(zq(r.balFAC)) },
+      { label: L('합계', 'Tổng'), num: 1, render: r => h('b', fq(zq(r.bal), u)), style: r => negStyle(zq(r.bal)) },
       { label: L('비고', 'Ghi chú'), render: r => r.before ? ERP.chip('neutral', L('기준일 이전 (반영 안 됨)', 'Trước ngày chốt (không tính)')) : [partnerText(r), txNote(r)].filter(Boolean).join(' · ') }], rows, { maxH: '320px' });
     // where used
     const used = [];
@@ -94,9 +98,10 @@
     if (bomParts) used.push(L('예시 BOM(색상별) 부품으로 ', 'Linh kiện trong BOM mẫu: ') + bomParts + L('곳', ' chỗ'));
     const po = C.orders().filter(o => String(o.p.item_no || '') === key && C.isOpen(o)).sort(C.byDueDesc);   // 1.13.12: 늦은 납기부터
     const poBox = po.length ? h('div', h('h3', L('진행 중 수주 (이 품번)', 'PO đang mở (mã này)')), ERP.simpleTable([{ label: 'PO', render: o => o.p.po_no }, { label: L('거래처', 'Khách'), render: o => o.p.customer || '' }, { label: L('주문 set', 'Đặt (set)'), num: 1, render: o => F.n(o.sets) }, { label: L('포장 set', 'Đã đóng'), num: 1, render: o => F.n(o.packed) }, { label: L('남은 set', 'Còn lại'), num: 1, render: o => h('b', F.n(Math.max(0, o.sets - o.packed))) }, { label: L('납기', 'Hạn'), render: o => F.d(o.p.due) }], po.slice(0, 20), { maxH: '200px' }),
-      s && s.sets !== null && s.sets !== undefined ? h('p', { class: 'help' }, L('완제품 재고 ', 'Tồn thành phẩm ') + F.n(s.sets) + L(' set · 남은 수주 ', ' set · PO còn lại ') + F.n(po.reduce((a, o) => a + Math.max(0, o.sets - o.packed), 0)) + ' set') : null) : null;
+      s && s.sets !== null && s.sets !== undefined ? h('p', { class: 'help' }, L('완제품 재고 ', 'Tồn thành phẩm ') + F.n(zq(s.sets)) + L(' set · 남은 수주 ', ' set · PO còn lại ') + F.n(po.reduce((a, o) => a + Math.max(0, o.sets - o.packed), 0)) + ' set') : null) : null;
     ERP.modal({ title: key + ' · ' + ((m && m.name) || (s && s.name) || ''), width: '1100px', body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } }, info, kpis,
       h('h3', { style: { margin: '4px 0 0' } }, L('수불부', 'Sổ nhập xuất tồn') + ' (' + F.n(led.rows.length - 1) + L('건', ' dòng') + ')'), ledger,
+      zeroed ? h('p', { class: 'help' }, L('현장 재고는 계산이 0 아래인 잔액은 0 으로 보입니다 (± 칸은 그대로).', 'Tồn hiện trường: số dư tính ra âm hiển thị 0 (cột ± giữ nguyên).')) : null,
       used.length ? h('p', { class: 'help' }, L('사용처: ', 'Dùng trong: ') + used.slice(0, 8).join(' · ')) : null, poBox),
     buttons: [{ label: L('닫기', 'Đóng') },
       { label: L('수불 입력', 'Nhập phiếu'), onClick: () => { const fl = grpOf(m) === 'floor'; const k = fl ? 'txe_floor' : 'txe'; const e = ERP.state[k] = ERP.state[k] || { rows: [] }; e.rows = e.rows.filter(r => r.code); e.rows.push(fl ? { date: F.today(), kind: 'ADJ', to: 'FAC', code: key } : { date: F.today(), kind: 'IN', to: 'WH', code: key }); ERP.goStock(fl ? 'fentry' : 'entry'); setTimeout(() => ERP.render(), 0); } },
@@ -142,14 +147,18 @@
       const etc = byStage.get('ETC'); if (etc && etc.items) flow.append(h('span', { class: 'arrow' }, '·'), h('div', { class: 'grp' }, h('small', L('기타', 'Khác')), h('div', card('ETC'))));
     }
     const hasStock = (s) => Math.abs(s.by.WH) > EPS || Math.abs(s.by.FAC) > EPS;
-    const tot = { items: all.length, stock: all.filter(s => Math.abs(s.bal) > EPS || hasStock(s)).length, neg: all.filter(s => s.negative).length, low: all.filter(s => s.status === 'low' || s.status === 'neg').length, susp: all.filter(s => s.susp).length, safety: all.filter(s => s.safety > 0).length,
+    // 1.15.6 (사용자 2026-11-25 "현장재고 마이너스로 표시안되게 … 그냥 0으로"): 현장 재고는 재고 수량 (기초 · 창고 · 공장 · 합계 · set) 이 0 아래면 0 으로 보인다 — 흐름 (생산 · 소모 · 기타) 은 그대로
+    const isF = group === 'floor'; const zq = (s, v) => (isF ? INV.showQty(s, v) : v);
+    const zChip = () => ERP.chip('warn', L('0 으로 보임', 'Hiện 0'));
+    const statText = (s) => (isF && s.bal < -EPS ? L('0 으로 보임', 'Hiện 0') : S[s.status][0]);
+    const tot = { items: all.length, stock: all.filter(s => (isF ? s.bal > EPS || s.by.WH > EPS || s.by.FAC > EPS : Math.abs(s.bal) > EPS || hasStock(s))).length, neg: all.filter(s => s.negative).length, low: all.filter(s => s.status === 'low' || s.status === 'neg').length, susp: all.filter(s => s.susp).length, safety: all.filter(s => s.safety > 0).length,
       prodN: all.filter(s => s.prod > EPS).length, prodQ: all.reduce((a, s) => a + (s.prod || 0), 0), useN: all.filter(s => s.use > EPS).length, useQ: all.reduce((a, s) => a + (s.use || 0), 0) };
     const meta = INV.meta();
     const kpis = group === 'floor' ? [
       ERP.kpi(L('재고 있는 품목', 'Mã có tồn'), F.n(tot.stock), L('품목', 'mã'), 'neutral', null, L('반제품 · 완제품 ', 'BTP · TP ') + F.n(tot.items) + L('품목 중', ' mã')),
       ERP.kpi(L('생산 입고 (기초 이후)', 'Nhập SX (sau tồn đầu)'), F.n(tot.prodN), L('품목', 'mã'), tot.prodN ? 'ok' : 'neutral', meta.mode === 'off' ? L('반영 꺼짐', 'Đang tắt') : (meta.lastProd ? L('마지막 ', 'Gần nhất ') + meta.lastProd : L('아직 없음', 'Chưa có')), L('생산일보에서 자동 계산', 'Tự tính từ báo cáo SX')),
       ERP.kpi(L('조립·공정 부품 차감', 'Trừ linh kiện theo SX'), F.n(tot.useN), L('품목', 'mã'), 'neutral', null, L('BOM이 있는 생산품만 차감', 'Chỉ trừ khi có BOM')),
-      ERP.kpi(L('마이너스 재고', 'Tồn âm'), F.n(tot.neg), L('품목', 'mã'), tot.neg ? 'bad' : 'ok', tot.neg ? L('확인 필요', 'Cần kiểm tra') : L('없음', 'Không có'), L('창고+공장 합계 기준', 'Theo tổng Kho + Xưởng'))] : [
+      ERP.kpi(L('0 으로 보이는 품목', 'Mã hiện 0'), F.n(tot.neg), L('품목', 'mã'), tot.neg ? 'warn' : 'ok', tot.neg ? L('계산이 0 아래 — 코드 · BOM 확인', 'Tính ra âm — kiểm tra mã · BOM') : L('없음', 'Không có'), L('창고+공장 합계 기준', 'Theo tổng Kho + Xưởng'))] : [
       ERP.kpi(L('재고 있는 품목', 'Mã có tồn'), F.n(tot.stock), L('품목', 'mã'), 'neutral', null, L('원부자재 ', 'NVL ') + F.n(tot.items) + L('품목 중', ' mã')),
       ERP.kpi(L('마이너스 재고', 'Tồn âm'), F.n(tot.neg), L('품목', 'mã'), tot.neg ? 'bad' : 'ok', tot.neg ? L('확인 필요', 'Cần kiểm tra') : L('없음', 'Không có'), L('창고+공장 합계 기준', 'Theo tổng Kho + Xưởng')),
       ERP.kpi(L('안전재고 미달', 'Dưới tồn an toàn'), F.n(tot.low), L('품목', 'mã'), tot.low ? 'bad' : 'ok', tot.low ? L('발주 필요', 'Cần đặt') : L('정상', 'Tốt'), L('안전재고 설정 ', 'Đã cài ') + F.n(tot.safety) + L('품목 중', ' mã')),
@@ -178,9 +187,11 @@
     const lines = group === 'floor' ? [] : uniq(rows.map(s => s.line)), subs = group === 'floor' ? [] : uniq(rows.map(s => s.sub)), cats = group === 'floor' ? [] : uniq(rows.map(s => s.cat));
     if (st.line) rows = rows.filter(s => s.line === st.line); if (st.sub) rows = rows.filter(s => s.sub === st.sub); if (st.cat) rows = rows.filter(s => s.cat === st.cat);
     const val = (s) => (st.scope === 'WH' ? s.by.WH : st.scope === 'FAC' ? s.by.FAC : s.bal);
-    if (st.hideZero && !st.status && !st.q) rows = rows.filter(s => (st.scope === 'all' ? hasStock(s) || s.n > 0 : Math.abs(val(s)) > EPS));
+    // 1.15.6 (Codex 검토): 현장 재고는 보이는 값 (0 아래면 0) 으로 '재고 0' · '재고 0 숨김' 을 가른다 — 0 으로 보이는 품목도 재고 0. '0 으로 보임' 은 그중 계산이 0 아래인 것
+    const sv = (s) => zq(s, val(s)); const hasSt = (s) => (isF ? s.by.WH > EPS || s.by.FAC > EPS : hasStock(s));
+    if (st.hideZero && !st.status && !st.q) rows = rows.filter(s => (st.scope === 'all' ? hasSt(s) || s.n > 0 : Math.abs(sv(s)) > EPS));
     if (st.status === 'neg') rows = rows.filter(s => val(s) < -EPS); else if (st.status === 'low') rows = rows.filter(s => s.status === 'low' || s.status === 'neg' || s.status === 'near');
-    else if (st.status === 'susp') rows = rows.filter(s => s.susp); else if (st.status === 'zero') rows = rows.filter(s => Math.abs(val(s)) <= EPS); else if (st.status === 'safety') rows = rows.filter(s => s.safety > 0);
+    else if (st.status === 'susp') rows = rows.filter(s => s.susp); else if (st.status === 'zero') rows = rows.filter(s => Math.abs(sv(s)) <= EPS); else if (st.status === 'safety') rows = rows.filter(s => s.safety > 0);
     else if (st.status === 'moved') rows = rows.filter(s => s.n > 0); else if (st.status === 'prod') rows = rows.filter(s => s.prod > EPS || s.use > EPS);
     if (st.q) { const k = INV.normName(st.q); rows = rows.filter(s => [s.code, s.m && s.m.erp_code, s.m && s.m.xnk, s.name].some(v => INV.normName(v).includes(k))); }
     const keyF = { code: s => s.code, name: s => s.name, unit: s => s.prim, open: s => s.openTot, in2: s => (group === 'floor' ? s.prod : s.in), use: s => s.use, oth: s => other(s, group), wh: s => s.by.WH, fac: s => s.by.FAC, bal: s => s.bal, sets: s => (s.sets === null ? -Infinity : s.sets), safety: s => (s.safety === null ? -Infinity : s.safety), status: s => s.status, last: s => s.last || '' };
@@ -194,7 +205,7 @@
     const in2Label = group === 'floor' ? L('생산 입고 +', 'Nhập SX +') : L('입고 +', 'Nhập +');
     const useLabel = group === 'floor' ? L('부품 소모 −', 'Tiêu hao −') : L('생산 소모 −', 'Dùng cho SX −');
     const othLabel = group === 'floor' ? L('기타 수불 ±', 'Phiếu khác ±') : L('출고·조정 ±', 'Xuất · ĐC ±');
-    const statusOpts = [['neg', L('마이너스', 'Âm')], ['low', L('안전재고 미달·임박', 'Dưới / sắp dưới tồn AT')], ['susp', L('이동 누락 의심', 'Nghi thiếu phiếu chuyển')], ['moved', L('기초 이후 수불 있음', 'Có phát sinh sau tồn đầu')], ['prod', L('생산 반영 있음', 'Có cập nhật SX')], ['safety', L('안전재고 설정됨', 'Đã cài tồn AT')], ['zero', L('재고 0', 'Tồn = 0')]];
+    const statusOpts = [['neg', isF ? L('0 으로 보임 (계산 0 아래)', 'Hiện 0 (tính ra âm)') : L('마이너스', 'Âm')], ['low', L('안전재고 미달·임박', 'Dưới / sắp dưới tồn AT')], ['susp', L('이동 누락 의심', 'Nghi thiếu phiếu chuyển')], ['moved', L('기초 이후 수불 있음', 'Có phát sinh sau tồn đầu')], ['prod', L('생산 반영 있음', 'Có cập nhật SX')], ['safety', L('안전재고 설정됨', 'Đã cài tồn AT')], ['zero', L('재고 0', 'Tồn = 0')]];
     const tb = h('div', { class: 'toolbar', 'data-anchor': group + '-table' },
       h('label', { class: 'search' }, ERP.svg('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z', 17), q),
       st.stage ? h('button', { class: 'btn sm', onclick: () => { st.stage = ''; st.line = st.sub = st.cat = ''; ERP.render(); } }, INV.stageTitle(st.stage) + ' ×') : null,
@@ -214,7 +225,7 @@
       h('span', { class: 'sp' }),
       h('button', { class: 'btn sm', onclick: () => {
         const tail = ['Mã XNK', L('단위', 'ĐV'), L('기초', 'Đầu kỳ'), in2Label, useLabel, othLabel, L('창고', 'Kho'), L('공장', 'Xưởng'), L('합계', 'Tổng'), 'set', 'pcs', L('안전재고', 'Tồn AT'), L('상태', 'Trạng thái'), L('최근 수불', 'Phát sinh gần nhất')];
-        const tailOf = (s) => [s.m ? s.m.xnk || '' : '', s.prim, s.openTot, group === 'floor' ? s.prod : s.in, s.use, other(s, group), s.by.WH, s.by.FAC, s.bal, s.sets, s.pcs, s.safety, S[s.status][0], s.last || ''];
+        const tailOf = (s) => [s.m ? s.m.xnk || '' : '', s.prim, zq(s, s.openTot), group === 'floor' ? s.prod : s.in, s.use, other(s, group), zq(s, s.by.WH), zq(s, s.by.FAC), zq(s, s.bal), zq(s, s.sets), zq(s, s.pcs), s.safety, statText(s), s.last || ''];
         // 20차: 현장 재고는 공정 · 구분 · 품목군 (현장 분류), 원부자재는 예전처럼 ERP CODE 단계 · 제품군 · 분류 · 세부
         if (group === 'floor') ERP.xl.exportAoa('floor_stock_' + (st.proc || 'all'), [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('공정', 'Công đoạn'), L('구분', 'Loại'), L('품목군', 'Nhóm'), 'ERP CODE'].concat(tail),
           rows.map(s => { const c = INV.floorClassOf(s.code); return [s.code, s.name, PV.procLabel(c.proc || PV.NONE), c.kind ? INV.floorKindName(c.kind) : '', c.multi ? L('일보 품목군별', 'theo nhóm báo cáo') : PV.lineName(c.line), s.m ? s.m.erp_code || '' : ''].concat(tailOf(s)); }));
@@ -230,15 +241,16 @@
         group === 'floor' ? th('sets', 'set', 1) : th('safety', L('안전재고', 'Tồn AT'), 1), th('status', L('상태', 'TT')), th('last', L('최근 수불', 'Gần nhất')))),
       h('tbody', slice.map(s => h('tr', { class: 'click', onclick: () => ERP.itemDetail(s.code) },
         h('td', h('b', s.code)), h('td', { class: 'namecell', title: (s.m && s.m.erp_code) || '' }, h('div', s.name || ''), group === 'floor' ? floorChips(s) : ERP.codeChips(s), s.m && s.m.buy ? ERP.chip('info', L('해외 주문', 'Đặt nước ngoài')) : null), h('td', s.prim),
-        h('td', { class: 'num', style: negStyle(s.openTot) }, fq(s.openTot, s.prim)),
+        h('td', { class: 'num', style: negStyle(zq(s, s.openTot)) }, fq(zq(s, s.openTot), s.prim)),
         h('td', { class: 'num', style: { color: '#0E7A5F' } }, sgn(group === 'floor' ? s.prod : s.in, s.prim)), h('td', { class: 'num', style: { color: '#B45F06' } }, sgn(-s.use, s.prim)), h('td', { class: 'num' }, sgn(other(s, group), s.prim)),
-        h('td', { class: 'num', style: negStyle(s.by.WH) }, fq(s.by.WH, s.prim)), h('td', { class: 'num', style: negStyle(s.by.FAC) }, fq(s.by.FAC, s.prim)), h('td', { class: 'num', style: negStyle(s.bal) || { fontWeight: 700 } }, fq(s.bal, s.prim)),
-        group === 'floor' ? h('td', { class: 'num' }, s.sets === null || s.sets === undefined ? '' : F.n(s.sets)) : h('td', { class: 'num' }, s.safety === null ? '' : F.n(s.safety)),
-        h('td', s.status !== 'na' ? ERP.chip(S[s.status][1], S[s.status][0]) : (s.susp ? ERP.chip('neutral', L('이동 누락', 'Thiếu chuyển')) : (s.negative ? ERP.chip('bad', L('마이너스', 'Âm')) : ''))), h('td', s.last ? F.d(s.last) : ''))))));
+        h('td', { class: 'num', style: negStyle(zq(s, s.by.WH)) }, fq(zq(s, s.by.WH), s.prim)), h('td', { class: 'num', style: negStyle(zq(s, s.by.FAC)) }, fq(zq(s, s.by.FAC), s.prim)), h('td', { class: 'num', style: negStyle(zq(s, s.bal)) || { fontWeight: 700 } }, fq(zq(s, s.bal), s.prim)),
+        group === 'floor' ? h('td', { class: 'num' }, s.sets === null || s.sets === undefined ? '' : F.n(zq(s, s.sets))) : h('td', { class: 'num' }, s.safety === null ? '' : F.n(s.safety)),
+        h('td', isF && s.bal < -EPS ? zChip() : s.status !== 'na' ? ERP.chip(S[s.status][1], S[s.status][0]) : (s.susp ? ERP.chip('neutral', L('이동 누락', 'Thiếu chuyển')) : (s.negative ? ERP.chip('bad', L('마이너스', 'Âm')) : ''))), h('td', s.last ? F.d(s.last) : ''))))));
     const pager = h('div', { class: 'pager' }, h('span', F.n(total) + L('품목', ' mã') + (total !== all.length ? ' / ' + L('전체 ', 'tổng ') + F.n(all.length) : '')),
       h('span', { style: { display: 'inline-flex', gap: '8px', alignItems: 'center' } }, h('button', { class: 'btn', disabled: st.page === 0, onclick: () => { st.page--; ERP.render(); } }, '‹'), (st.page + 1) + ' / ' + pages, h('button', { class: 'btn', disabled: st.page >= pages - 1, onclick: () => { st.page++; ERP.render(); } }, '›')));
     put(host, tb, total ? table : h('div', { class: 'empty' }, L('조건에 맞는 품목이 없습니다.', 'Không có mã phù hợp.')), total ? pager : null,
-      h('p', { class: 'help' }, (group === 'floor' ? L('합계 = 기초(공정 중: 현장 실사 · 포장품: ECOUNT) + ', 'Tổng = đầu kỳ (đang SX: kiểm kê · đóng gói: ECOUNT) + ') : L('합계 = 기초재고(ECOUNT) + ', 'Tổng = tồn đầu (ECOUNT) + ')) + in2Label.replace(/ [+]$/, '') + L(' − 소모 ± 기타 수불 (기준일 다음 날부터). ', ' − tiêu hao ± phiếu khác (từ ngày sau ngày chốt). ') + basisLine(),
+      h('p', { class: 'help' }, (group === 'floor' ? L('합계 = 기초(공정 중: 현장 실사 · 포장품: ECOUNT) + ', 'Tổng = đầu kỳ (đang SX: kiểm kê · đóng gói: ECOUNT) + ') : L('합계 = 기초재고(ECOUNT) + ', 'Tổng = tồn đầu (ECOUNT) + ')) + in2Label.replace(/ [+]$/, '') + L(' − 소모 ± 기타 수불 (기준일 다음 날부터). ', ' − tiêu hao ± phiếu khác (từ ngày sau ngày chốt). ')
+        + (isF ? L('계산이 0 아래인 재고는 0 으로 보입니다. ', 'Tồn tính ra âm hiển thị 0. ') : '') + basisLine(),
         group === 'floor' ? h('span', ' ', h('a', { href: 'javascript:void 0', onclick: () => ERP.goStock('post') }, L('생산 반영 확인 →', 'Kiểm tra cập nhật SX →'))) : null));
   }
 
@@ -378,7 +390,8 @@
     function projected() {   // stock after the pending rows, to warn about negatives
       const by = new Map(); st.rows.forEach(r => { const c = check(r); if (!c.ok) return; const t = { kind: r.kind, from_scope: r.from || undefined, to_scope: r.to || undefined, qty: num(r.qty) };
         INV.effects(t).forEach(([sc, q]) => { const k = c.it.code + '|' + sc; by.set(k, (by.get(k) || 0) + q); }); });
-      const neg = []; by.forEach((q, k) => { const [code, sc] = k.split('|'); const s = stock.get(code); const before = s ? s.by[sc] : 0; if (before + q < -EPS && q < 0) neg.push(code + ' ' + ERP.scopeName(sc) + ' ' + fq(before + q)); });
+      // 1.15.6: 현장 재고는 마이너스 숫자를 보이지 않는다 — 0 아래가 될 품목 · 범위만 (저장하면 0 으로 보임)
+      const neg = []; by.forEach((q, k) => { const [code, sc] = k.split('|'); const s = stock.get(code); const before = s ? s.by[sc] : 0; if (before + q < -EPS && q < 0) neg.push(code + ' ' + ERP.scopeName(sc) + (group === 'floor' ? '' : ' ' + fq(before + q))); });
       return neg;
     }
     function draw() {
@@ -394,7 +407,7 @@
           cell(r, 'from', r.kind === 'OUT' || r.kind === 'MOVE' ? scopeSel('from') : h('span', { class: 'muted' }, '')),
           cell(r, 'to', r.kind === 'OUT' ? h('span', { class: 'muted' }, L('외부', 'Ngoài')) : scopeSel('to')),
           cell(r, 'code', h('input', { list: dlId, value: r.code || '', style: { minWidth: '140px' }, onchange: (e) => { let v = e.target.value.trim(); if (v && !INV.item(v)) { const hits = INV.search(v, 2); if (hits.length === 1) v = hits[0].code; } r.code = v; draw(); } })),
-          h('td', { style: { minWidth: '200px', fontSize: '12px' } }, c.it ? [h('div', { class: 'strong' }, (c.it.name || '').slice(0, 40)), h('div', { class: 'muted' }, INV.unitShow(c.it.unit) + (s ? ' · ' + L('창고 ', 'Kho ') + fq(s.by.WH, s.prim) + ' / ' + L('공장 ', 'Xưởng ') + fq(s.by.FAC, s.prim) : ''))] : (r.code ? h('span', { style: { color: '#B3261E' } }, L('품목코드를 찾을 수 없음', 'Không tìm thấy mã')) : '')),
+          h('td', { style: { minWidth: '200px', fontSize: '12px' } }, c.it ? [h('div', { class: 'strong' }, (c.it.name || '').slice(0, 40)), h('div', { class: 'muted' }, INV.unitShow(c.it.unit) + (s ? ' · ' + L('창고 ', 'Kho ') + fq(INV.showQty(s, s.by.WH), s.prim) + ' / ' + L('공장 ', 'Xưởng ') + fq(INV.showQty(s, s.by.FAC), s.prim) : ''))] : (r.code ? h('span', { style: { color: '#B3261E' } }, L('품목코드를 찾을 수 없음', 'Không tìm thấy mã')) : '')),
           cell(r, 'qty', h('input', { type: 'number', step: 'any', value: r.qty === undefined ? '' : r.qty, style: { width: '96px', textAlign: 'right' }, onchange: (e) => { r.qty = e.target.value === '' ? undefined : Number(e.target.value); draw(); } })),
           cell(r, 'partner', h('input', { value: r.partner || '', onchange: (e) => { r.partner = e.target.value; } })),
           cell(r, 'ref', h('input', { value: r.ref || '', style: { width: '100px' }, onchange: (e) => { r.ref = e.target.value; } })),
@@ -412,7 +425,7 @@
           h('button', { class: 'btn', onclick: () => ERP.goto('data') }, L('엑셀 파일 올리기', 'Tải file Excel')),
           h('span', { class: 'sp' }), h('button', { class: 'btn', onclick: () => { st.rows = []; draw(); } }, L('모두 지우기', 'Xóa hết')),
           h('button', { class: 'btn primary', onclick: save }, L('저장 ', 'Lưu ') + '(' + okN + ')')),
-        neg.length ? h('div', { class: 'warn-box', style: { marginBottom: '10px' } }, L('저장하면 마이너스가 되는 품목: ', 'Sẽ âm sau khi lưu: ') + neg.slice(0, 6).join(' · ') + (neg.length > 6 ? ' …' : '')) : null,
+        neg.length ? h('div', { class: 'warn-box', style: { marginBottom: '10px' } }, (group === 'floor' ? L('저장하면 0 아래가 되는 품목 (0 으로 보임): ', 'Sẽ tính ra âm sau khi lưu (hiện 0): ') : L('저장하면 마이너스가 되는 품목: ', 'Sẽ âm sau khi lưu: ')) + neg.slice(0, 6).join(' · ') + (neg.length > 6 ? ' …' : '')) : null,
         h('div', { class: 'entry-wrap' }, h('table', { class: 'tbl entry' }, h('thead', h('tr', ['#', L('일자', 'Ngày'), L('구분', 'Loại'), L('출발', 'Từ'), L('도착', 'Đến'), L('품목코드', 'Mã hàng'), L('품명 · 현재고', 'Tên · tồn hiện tại'), L('수량 (주 단위)', 'SL (ĐV chính)'), L('거래처', 'Đối tác'), L('참조', 'Tham chiếu'), L('비고', 'Ghi chú'), '', ''].map(x => h('th', x)))), h('tbody', body))),
         h('p', { class: 'help' }, L('입고 = 외부 → 도착 범위 · 출고 = 출발 범위 → 외부(출하 등) · 이동 = 창고 ↔ 공장 (생산 투입은 창고 → 공장) · 조정 = 실사 차이 (+/−). Enter 로 다음 칸, 마지막 칸에서 Enter 면 새 줄. 생산 실적은 생산일보를 올리면 자동 반영되므로 여기에 넣지 않습니다.',
           'Nhập = ngoài → "Đến" · Xuất = "Từ" → ngoài · Chuyển = Kho ↔ Xưởng (xuất cho SX: Kho → Xưởng) · Điều chỉnh = chênh lệch kiểm kê (+/−). Enter để sang ô kế, Enter ở ô cuối để thêm dòng. Sản lượng được cập nhật tự động từ báo cáo sản xuất.')),
@@ -432,7 +445,8 @@
         const last = st.rows[st.rows.length - 1] || {}; st.rows = left.concat([last.kind ? { date: last.date || F.today(), kind: last.kind, from: last.from, to: last.to } : DEF()]); ERP.render();
       };
       const neg = projected(); const stale = ok.filter(x => x[1].warn).length;
-      const ask = []; if (neg.length) ask.push(L('저장하면 마이너스가 되는 품목이 ' + neg.length + '개 있습니다.\n' + neg.slice(0, 8).join('\n'), neg.length + ' mã sẽ bị âm:\n' + neg.slice(0, 8).join('\n')));
+      const ask = []; if (neg.length) ask.push(group === 'floor' ? L('저장하면 0 아래가 되는 품목이 ' + neg.length + '개 있습니다 (현장 재고는 0 으로 보임).\n' + neg.slice(0, 8).join('\n'), neg.length + ' mã sẽ tính ra âm (hiện 0):\n' + neg.slice(0, 8).join('\n'))
+        : L('저장하면 마이너스가 되는 품목이 ' + neg.length + '개 있습니다.\n' + neg.slice(0, 8).join('\n'), neg.length + ' mã sẽ bị âm:\n' + neg.slice(0, 8).join('\n')));
       if (stale) ask.push(L(stale + '줄은 기초재고 기준일 이전 · 당일이라 재고에 반영되지 않습니다.', stale + ' dòng trước/đúng ngày tồn đầu — không cộng vào tồn.'));
       if (ask.length) ERP.confirm(ask.join('\n\n') + L('\n그래도 저장할까요?', '\nVẫn lưu?')).then(y => { if (y) run(); }); else run();
     }
@@ -586,14 +600,21 @@
   // ===================================================================== 자료 점검
   function checkTab(host) {
     const K = INV.checks(); const stock = C.stock(); const pp = INV.prodPost().diag;
-    const susp = INV.rows().filter(s => s.susp); const neg = INV.rows().filter(s => s.negative);
+    // 1.15.6 (사용자 2026-11-25 "현장재고 마이너스로 표시안되게 … 그냥 0으로"): 현장 재고는 마이너스 목록에 넣지 않고 '0 으로 보이는 현장 재고' 로 따로 (숫자 없이).
+    //   이동 누락 의심 표의 현장 재고 줄은 0 아래인 쪽이 0 으로 보인다
+    const susp = INV.rows().filter(s => s.susp); const neg = INV.rows().filter(s => s.negative && !INV.isFloorRow(s)); const fneg = INV.rows().filter(s => INV.floorZero(s));
+    const zs = (s, v) => INV.showQty(s, v); const PV = ERP.pivot;
     const itemCols = [{ label: L('품목코드', 'Mã hàng'), render: m => h('b', m.code) }, { label: L('품명', 'Tên'), render: m => m.name || '' }, { label: 'ERP CODE', render: m => h('code', { class: 'k' }, String(m.erp_code || '').replace(/ /g, '␣')) }, { label: L('품목구분', 'Loại'), render: m => m.etype || '' }, { label: L('단위', 'ĐV'), render: m => m.unit || '' }];
     const sections = [
       { id: 'susp', title: L('이동 누락 의심 (창고 +, 공장 − 또는 반대)', 'Nghi thiếu phiếu chuyển kho (Kho +, Xưởng − hoặc ngược lại)'), n: susp.length, tone: 'warn',
-        body: () => h('div', h('p', { class: 'help' }, L('합계는 맞지만 한쪽 범위가 마이너스입니다. 생산 투입(창고 → 공장) 같은 이동 입력이 빠진 경우가 많습니다. [이동 전표 만들기]를 누르면 작은 쪽 수량만큼 이동 수불을 만들어 정리합니다 (미리보기 후 저장).', 'Tổng đúng nhưng một phạm vi bị âm — thường do thiếu phiếu chuyển (Kho → Xưởng). Bấm nút để tạo phiếu chuyển (xem trước rồi lưu).')),
+        body: () => h('div', h('p', { class: 'help' }, L('합계는 맞지만 한쪽 범위가 마이너스입니다. 생산 투입(창고 → 공장) 같은 이동 입력이 빠진 경우가 많습니다. [이동 전표 만들기]를 누르면 작은 쪽 수량만큼 이동 수불을 만들어 정리합니다 (미리보기 후 저장).', 'Tổng đúng nhưng một phạm vi bị âm — thường do thiếu phiếu chuyển (Kho → Xưởng). Bấm nút để tạo phiếu chuyển (xem trước rồi lưu).'),
+            susp.some(s => INV.isFloorRow(s)) ? L(' 현장 재고 줄은 0 아래인 쪽이 0 으로 보입니다.', ' Dòng tồn hiện trường: phía âm hiển thị 0.') : null),
           h('div', { class: 'toolbar' }, h('button', { class: 'btn primary', onclick: suggestDialog }, L('이동 전표 만들기', 'Tạo phiếu chuyển kho'))),
-          ERP.simpleTable([{ label: L('품목코드', 'Mã hàng'), render: s => h('b', s.code) }, { label: L('품명', 'Tên'), render: s => s.name }, { label: L('창고', 'Kho'), num: 1, render: s => fq(s.by.WH, s.prim), style: s => negStyle(s.by.WH) }, { label: L('공장', 'Xưởng'), num: 1, render: s => fq(s.by.FAC, s.prim), style: s => negStyle(s.by.FAC) }, { label: L('합계', 'Tổng'), num: 1, render: s => fq(s.bal, s.prim), style: s => negStyle(s.bal) }, { label: L('단위', 'ĐV'), render: s => s.prim }], susp.slice(0, 300), { maxH: '300px', onClick: s => ERP.itemDetail(s.code) })) },
+          ERP.simpleTable([{ label: L('품목코드', 'Mã hàng'), render: s => h('b', s.code) }, { label: L('품명', 'Tên'), render: s => s.name }, { label: L('창고', 'Kho'), num: 1, render: s => fq(zs(s, s.by.WH), s.prim), style: s => negStyle(zs(s, s.by.WH)) }, { label: L('공장', 'Xưởng'), num: 1, render: s => fq(zs(s, s.by.FAC), s.prim), style: s => negStyle(zs(s, s.by.FAC)) }, { label: L('합계', 'Tổng'), num: 1, render: s => fq(zs(s, s.bal), s.prim), style: s => negStyle(zs(s, s.bal)) }, { label: L('단위', 'ĐV'), render: s => s.prim }], susp.slice(0, 300), { maxH: '300px', onClick: s => ERP.itemDetail(s.code) })) },
       { id: 'neg', title: L('마이너스 재고 (합계 기준)', 'Tồn âm (theo tổng)'), n: neg.length, tone: 'bad', body: () => ERP.simpleTable([{ label: L('품목코드', 'Mã hàng'), render: s => h('b', s.code) }, { label: L('품명', 'Tên'), render: s => s.name }, { label: L('분류', 'Phân loại'), render: s => ERP.codeChips(s) }, { label: L('창고', 'Kho'), num: 1, render: s => fq(s.by.WH, s.prim) }, { label: L('공장', 'Xưởng'), num: 1, render: s => fq(s.by.FAC, s.prim) }, { label: L('합계', 'Tổng'), num: 1, render: s => h('b', { style: { color: '#9F1F18' } }, fq(s.bal, s.prim)) }], neg.slice(0, 400), { maxH: '300px', onClick: s => ERP.itemDetail(s.code) }) },
+      { id: 'fzero', title: L('0 으로 보이는 현장 재고 (계산이 0 아래)', 'Tồn hiện trường hiện 0 (tính ra âm)'), n: fneg.length, tone: 'warn',
+        body: () => h('div', h('p', { class: 'help' }, L('현장 재고는 계산이 0 아래이면 0 으로 보입니다 (숫자는 보이지 않음). 생산일보 · BOM 의 품목코드가 현장 실사 코드와 다르면 생기는 경우가 많습니다 — 품목을 누르면 수불부.', 'Tồn hiện trường tính ra âm hiển thị 0 (không hiện số âm). Thường do mã trong báo cáo SX · BOM khác mã kiểm kê — bấm vào mã để xem sổ nhập xuất.')),
+          ERP.simpleTable([{ label: L('품목코드', 'Mã hàng'), render: s => h('b', s.code) }, { label: L('품명', 'Tên'), render: s => s.name }, { label: L('공정', 'Công đoạn'), render: s => (PV ? PV.procLabel(PV.procOf(s)) : '') }, { label: L('분류', 'Phân loại'), render: s => ERP.codeChips(s) }, { label: L('단위', 'ĐV'), render: s => s.prim }], fneg.slice(0, 400), { maxH: '300px', onClick: s => ERP.itemDetail(s.code) })) },
       { id: 'type', title: L('품목구분과 ERP CODE 단계가 다름', 'Loại hàng khác với ô đầu ERP CODE'), n: K.typeMismatch.length, tone: 'warn', body: () => ERP.simpleTable(itemCols.concat([{ label: L('단계 기준 기대값', 'Theo ERP CODE nên là'), render: m => m._exp }]), K.typeMismatch.slice(0, 400), { maxH: '300px' }) },
       { id: 'space', title: L('ERP CODE 에 공백', 'ERP CODE có khoảng trắng'), n: K.space.length, tone: 'warn', body: () => ERP.simpleTable(itemCols, K.space, { maxH: '240px' }) },
       { id: 'empty', title: L('ERP CODE 에 빈 칸 (--)', 'ERP CODE có ô trống (--)'), n: K.emptySeg.length, tone: 'warn', body: () => ERP.simpleTable(itemCols, K.emptySeg, { maxH: '240px' }) },
@@ -619,8 +640,9 @@
     function exportChecks() {
       const X = window.XLSX; const wb = X.utils.book_new(); const add = (name, hdr, rows) => { X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([hdr].concat(rows.length ? rows : [['–']])), name.slice(0, 31)); };
       const ih = [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), 'ERP CODE', L('품목구분', 'Loại'), L('단위', 'ĐV')]; const ir = (a) => a.map(m => [m.code, m.name || '', m.erp_code || '', m.etype || '', m.unit || '']);
-      add('move_suspect', [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('창고', 'Kho'), L('공장', 'Xưởng'), L('합계', 'Tổng'), L('단위', 'ĐV')], susp.map(s => [s.code, s.name, s.by.WH, s.by.FAC, s.bal, s.prim]));
+      add('move_suspect', [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('창고', 'Kho'), L('공장', 'Xưởng'), L('합계', 'Tổng'), L('단위', 'ĐV')], susp.map(s => [s.code, s.name, zs(s, s.by.WH), zs(s, s.by.FAC), zs(s, s.bal), s.prim]));
       add('negative', [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('창고', 'Kho'), L('공장', 'Xưởng'), L('합계', 'Tổng'), L('단위', 'ĐV')], neg.map(s => [s.code, s.name, s.by.WH, s.by.FAC, s.bal, s.prim]));
+      add('floor_shown_zero', [L('품목코드', 'Mã hàng'), L('품명', 'Tên'), L('공정', 'Công đoạn'), L('단위', 'ĐV'), L('재고', 'Tồn')], fneg.map(s => [s.code, s.name, PV ? PV.procLabel(PV.procOf(s)) : '', s.prim, 0]));
       add('type_mismatch', ih.concat([L('기대값', 'Nên là')]), K.typeMismatch.map(m => [m.code, m.name || '', m.erp_code || '', m.etype || '', m.unit || '', m._exp]));
       add('erp_space', ih, ir(K.space)); add('erp_empty_segment', ih, ir(K.emptySeg)); add('erp_not_ending', ih, ir(K.notEnding));
       add('erp_duplicate', ['ERP CODE', L('품목코드', 'Mã hàng')], K.dup.map(d => [d.erp, d.items.map(x => x.code).join(', ')]));

@@ -435,6 +435,14 @@
   };
   INV.MAT_STAGES = ['RM', 'SM', 'CM'];
   INV.FLOOR_STAGES = ['WIP00', 'WIP01', 'WIP02', 'WIP03', 'WIP04', 'WIPx6', 'WIPx5', 'WIP11', 'WIPx1', 'WIP55', 'WIP', 'SG', 'FG'];
+  // 1.15.6 (사용자 2026-11-25 "현장재고 마이너스로 표시안되게해줘 마이너스 수량이되면 그냥 0으로 표시되게 바꿔줘"):
+  //   현장 재고 (groupOf 'floor') 의 재고 수량은 화면 · 엑셀 · 휴대폰 요약 · AI 비서에서 0 아래면 0 으로 보인다 (± 같은 흐름 숫자는 그대로).
+  //   계산 (C.stock · 카드 칸의 품목군 합 · 생산 계획 · 소요량) 은 바뀌지 않는다 — 보이는 숫자만. 원부자재는 그대로 (마이너스가 보임)
+  INV.isFloorRow = (s) => !!s && INV.groupOf(s) === 'floor';
+  /** 보이는 재고 수량: 현장 재고는 0 아래면 0 (s = 재고 줄, v = 그 줄의 수량 — bal · by.WH · by.FAC · 기초 · set · pcs) */
+  INV.showQty = (s, v) => (typeof v === 'number' && v < -EPS && INV.isFloorRow(s) ? 0 : v);
+  /** 계산은 0 아래인데 0 으로 보이는 현장 재고 품목 (창고+공장 합계 기준) */
+  INV.floorZero = (s) => INV.isFloorRow(s) && !!s && s.bal < -EPS;
   // 11차: 배럴 계열 = WIP01 + WIP11 + WIP21 · 31 … (WIPx1). 조립품(WIP) = 심(WIP00) + 배럴 계열 + 노즈콘(WIP02) + 그 밖의 WIP0x 부품
   INV.BARREL_STAGES = ['WIP01', 'WIP11', 'WIPx1'];
   INV.isBarrel = (st) => INV.BARREL_STAGES.includes(st);
