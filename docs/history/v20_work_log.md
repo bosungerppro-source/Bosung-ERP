@@ -214,3 +214,12 @@
   8. (P3) 재고 흐름 · AI 개요의 마이너스 수에 TEST 품목도 들어감 — 맞음 → 원부자재 (`groupOf` 'mat') 만 (종합 현황 마이너스 재고 · 휴대폰과 같게).
 - 전체 시험 (따로 작업 폴더 `D:\ERP\01_source\colorpencil-erp-floor0`, 가지 `floor0-1156`, 기록 `D:\ERP\21_floor_zero\tests`, Codex 고친 뒤 10:51 ~ 10:58): v20 94 · v19 167 · v18 205 · v17 216 · v16 85 · v15 165 · v14 51 · v13 28 · v12 126 · v11 50 · v8 72 · assistant 305 · v7 148 (ERP_PREV = 1.15.5 `c9013e9` 업그레이드 시험 포함) 통과, v9 는 예전부터의 1개 ("상대 경로 · 쓸 수 없는 폴더 → 400" — 이 PC 환경) 말고 통과 (86 / 87). 버전 1.15.6 (package.json · core.js · installer.nsi · release.yml · test:v18).
 - 데모 `ERP_Demo.html`: 8,145,484 bytes, SHA-256 `773b87c258dd2b719bae831d2653b98ed0cccd6238830bfbe0b63a9dd2f9de86`.
+
+### 1.15.6 GitHub · Release · 이 PC (2026-11-25)
+
+- 올림 `c7244f0` → 자동 업데이트 시험 (Windows) 성공 (Actions 45543618980, 10:58 ~ 11:09) → Release v1.15.6 (Actions 45544952370 #30, 11:14).
+  - `ColorPencil-ERP-Setup-1.15.6.exe` 114,349,777 bytes · SHA-256 `f69b42e95ef1fc2775abf7c0683428371b01a532e48c8ef5071d12a893bee8ed` (= Release 지문 · `latest.json`, `curl.exe` 로 받아 대조 → `D:\ERP\02_installer`).
+  - `ERP_Demo.html` 8,145,484 bytes · SHA-256 `773b87c2…de86` (이 PC 에서 만든 데모와 같음, `D:\ERP\03_demo`).
+- 이 PC ERP: 꺼져 있어서 13:03 에 켬. 켠 지 8초에 업데이트 확인을 요청하자 받는 중 (24 MB) 에 ERP 가 꺼짐 (오류 기록 없음 · 10-27 에도 받는 중에 창이 닫힌 적 있음). 다시 켜서 요청 없이 기다리니 ERP 가 1분 뒤 스스로 받음 (13:06:04 ~ 13:06:33) → 설치 요청 → 1.15.5 → 1.15.6 (13:07, `update_backup\2026-11-25_130647_v1.15.5_to_v1.15.6`).
+  - 읽기만 해서 확인 (Ego Lite, `127.0.0.1:3210`, `D:\ERP\21_floor_zero\ego\round-03.mjs`): 현장 재고 카드 · 표 첫 쪽에 마이너스 숫자 없음 · 0 으로 보이는 품목 305 · 경고 161 · 131 · 13 품목 · 자료 점검 마이너스 재고 0 · 0 으로 보이는 현장 재고 305 · 종합 현황 "마이너스 재고 0 · 현장 재고: 0 으로 보임 305".
+  - 13:07 ERP 닫음 (켜기 전처럼).
