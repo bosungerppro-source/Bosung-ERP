@@ -244,7 +244,7 @@
     // 하루씩 공정을 같이 돌리기 (1.14.2, Codex 검토 2026-11-04) — 예전에는 공정마다 오늘부터 따로 쌓고 끝나는 날만 max 로 맞춰서,
     // 아직 못 하는 수주 (예: 권취를 기다리는 Glass) 의 포장을 먼저 세어 뒤 수주를 늦추고, 앞 공정이 시작하기 전에도 다음 공정이 그 수주를 한다고 봤다.
     // 이제 공정마다 그날 능력을 납기 순으로 나누되 앞 공정이 기다리는 날 전까지 내준 만큼만 한다 (겹쳐 진행 · 아직 못 하는 수주는 건너뜀).
-    const TS = new Map(); let simDays = 0;
+    const TS = new Map(); let simDays = 0; let RES = null;   // RES: 1.15.7 기간 계산 (P.workIn) 이 쓰는 공정 (자원) 목록
     (function simulate() {
       const res = new Map();
       const resOf = (id, proc, perDay) => { let r = res.get(id); if (!r) { const none = !(perDay > 0); res.set(id, r = { proc, none, day: none ? null : WD.map(d => perDay * dayFactor(base, proc, d)), tasks: [] }); } return r; };
@@ -270,6 +270,7 @@
         simDays = i + 1;
       }
       seq.forEach(r => r.tasks.forEach(t => { if (!t.fin) t.fin = 'over'; }));
+      RES = res;
     })();
 
     // 끝나는 날 · 출고 가능일 · 판정
@@ -349,8 +350,83 @@
       remSets: ord.reduce((a, o) => a + o.rem, 0), lastShip: ord.map(o => o.ship).filter(isDate).sort().pop() || null, workDays: WD.slice(0, 200) };
     R.short = mats.filter(m => m.first); R.urgent = mats.filter(m => m.judge === 'late' || m.judge === 'week');
     R.notes = notesOf(R);
+    // 1.15.7: 기간 (이번 달) 계산이 쓰는 하루씩 돌린 결과 — 엑셀 · AI 비서 · JSON 에 나가지 않게 보이지 않는 칸 (enumerable 아님)
+    const cum = { INJ: CUM.INJ, REF: CUM.REF, WRP: CUM.WRP, PCK: CUM.PCK }; Object.keys(CUMF).forEach(f => { cum['ASM|' + f] = CUMF[f]; });
+    Object.defineProperty(R, '_sim', { value: { WD, cum, res: RES || new Map() } });
+    ord.forEach(o => Object.defineProperty(o, '_t', { value: TS.get(o) || null }));
     return R;
   }
+
+  // ---------------------------------------------------------------- 기간 (이번 달) 에 할 일
+  // 1.15.7 (사용자 2026-11-26 "생산 계획에 이번달에해야할거 프린트할수있게 해줘 엑셀로 다운로드 할수있게도 해주고"):
+  //   위 계산 (하루씩 공정을 같이 돌린 것) 에서 기간 안의 근무일에 공정마다 그 수주를 한 양만 뽑는다 — 새로 계산하지 않음 (끝나는 날 · 출고 가능일과 같은 계산).
+  //   줄 = 기간 안에 할 일이 있는 수주 + 납기가 기간 끝까지인데 아직 출고 전인 수주 (능력을 모르는 수주 · 납기 지난 수주가 빠지지 않게). 오늘 전 날짜는 오늘부터 (지난 날은 계획에 없음).
+  P.monthEnd = (ym) => { const m = /^(\d{4})-(\d\d)$/.exec(str(ym)); if (!m) return ''; return m[1] + '-' + m[2] + '-' + String(new Date(+m[1], +m[2], 0).getDate()).padStart(2, '0'); };
+  P.nextMonth = (ym) => { const m = /^(\d{4})-(\d\d)$/.exec(str(ym)); if (!m) return ''; const y = +m[1] + (m[2] === '12' ? 1 : 0), mo = m[2] === '12' ? 1 : +m[2] + 1; return y + '-' + String(mo).padStart(2, '0'); };
+  /** 기간 [from, to] 에 할 일 → { from (오늘보다 앞이면 오늘), to, days (근무일), rows, tot, unk, loads }
+      rows: [{ n (납기 순 순서), po, none, item, kind, customer, rem, due, ship, judge, slack, q: { INJ, REF, ASM, WRP, PCK } (pcs · undefined = 그 공정 일 없음 · null = 하루 능력 모름),
+              sets (포장 set), fin: { 공정: 기간 안에 끝나는 날 }, shipIn (출고 가능일이 기간 안) }]
+      loads: [{ id, proc, fam, q (할 양), cap (기간 능력, null = 모름), n (할 일이 있는 수주 줄) }] — 공정별 부하와 같은 줄 */
+  P.workIn = function (R, from, to) {
+    const S = R && R._sim; const today = R ? R.today : F.today(); const f = isDate(from) && from > today ? from : today;
+    const out = { from: f, to: isDate(to) ? to : '', days: 0, rows: [], tot: { INJ: 0, REF: 0, ASM: 0, WRP: 0, PCK: 0, sets: 0 }, unk: {}, loads: [], end: '', over: false };
+    if (S && S.WD.length) { out.end = S.WD[S.WD.length - 1]; out.over = isDate(to) && to > out.end; }   // Codex 검토: 계획은 800 근무일까지 — 그 뒤 날은 '할 일 없음' 이 아니라 '계산 안 함'
+    if (!S || !isDate(to) || to < f) return out;
+    const WD = S.WD; let kS = -1, kE = -1;
+    for (let i = 0; i < WD.length && WD[i] <= to; i++) if (WD[i] >= f) { if (kS < 0) kS = i; kE = i; }
+    out.days = kS < 0 ? 0 : kE - kS + 1;
+    const cumAt = (t, i) => (i < 0 || !t.hist || !t.hist.length ? 0 : (t.hist[Math.min(i, t.hist.length - 1)] || 0));
+    const qOf = (t) => (!t ? undefined : !t.hist ? null : kS < 0 ? 0 : Math.max(0, cumAt(t, kE) - cumAt(t, kS - 1)));
+    const inR = (d) => (isDate(d) && d >= f && d <= to ? d : null);
+    const per = new Map(); const bump = (id, q) => { if (!(q > 1e-9)) return; const x = per.get(id) || { q: 0, n: 0 }; x.q += q; x.n++; per.set(id, x); };
+    R.orders.forEach((o, i) => {
+      const x = o._t; if (!x) return;
+      const q = { INJ: qOf(x.INJ), REF: qOf(x.REF), ASM: undefined, WRP: qOf(x.WRP), PCK: qOf(x.PCK) };
+      // 조립 품목군이 둘 이상인데 일부만 하루 능력을 모르면 (Codex 검토) 아는 몫만 숫자 + part.ASM (화면 · 인쇄 '+?', 엑셀 비고) — 모르는 일을 0 으로 보이지 않게
+      const fams = Object.keys(x.asm || {}); const fq = fams.map(fm => qOf(x.asm[fm])); const part = {};
+      if (fams.length) { q.ASM = fq.every(v => v === null) ? null : fq.reduce((a, v) => a + (v || 0), 0); if (q.ASM !== null && fq.some(v => v === null)) part.ASM = true; }
+      const any = ['INJ', 'REF', 'ASM', 'WRP', 'PCK'].some(k => q[k] > 1e-9);
+      const pend = isDate(o.due) && o.due <= to && (!isDate(o.ship) || o.ship >= f);
+      const shipIn = !!inR(o.ship);   // Codex 검토: 그 달에 출고만 하는 수주 (포장은 앞 달에 끝남) 도 그 달 할 일
+      if (!any && !pend && !shipIn) return;
+      ['INJ', 'REF', 'WRP', 'PCK'].forEach(k => bump(k, q[k])); fams.forEach((fm, j) => bump('ASM|' + fm, fq[j]));
+      const tp = x.PCK; const sets = q.PCK === null ? null : tp && tp.load > 0 && q.PCK > 0 ? o.rem * q.PCK / tp.load : 0;
+      ['INJ', 'REF', 'ASM', 'WRP', 'PCK'].forEach(k => { if (q[k] > 0) out.tot[k] += q[k]; if (q[k] === null || part[k]) out.unk[k] = true; });
+      if (sets > 0) out.tot.sets += sets;
+      out.rows.push({ n: i + 1, id: o.id, po: o.po, none: o.none, item: o.item, kind: o.kind, customer: o.customer, rem: o.rem, due: o.due, ship: o.ship, judge: o.judge, slack: o.slack, limit: o.limit,
+        q, part, sets, fin: { INJ: inR(o.F.INJ), REF: inR(o.F.REF), ASM: inR(o.F.ASM), WRP: inR(o.F.WRP), PCK: inR(o.F.PCK) }, shipIn });
+    });
+    const capOf = (id) => { const c = S.cum[id]; if (!c || !c.length || !(c[c.length - 1] > 0)) return null; if (kS < 0) return 0; return c[kE] - (kS > 0 ? c[kS - 1] : 0); };
+    out.loads = R.loads.map(l => { const x = per.get(l.id) || { q: 0, n: 0 }; return { id: l.id, proc: l.proc, fam: l.fam, q: x.q, cap: capOf(l.id), n: x.n }; }).filter(l => l.q > 1e-9 || l.cap > 0 || l.n);
+    return out;
+  };
+  /** 달 (YYYY-MM) 에 할 일 = 1일 ~ 마지막 날 (이번 달은 오늘부터) */
+  P.month = (R, ym) => Object.assign(P.workIn(R, str(ym) + '-01', P.monthEnd(ym)), { ym: str(ym) });
+  /** 기간 할 일 → 엑셀 시트 [{ name, aoa, cols }] (화면 · 인쇄와 같은 칸) */
+  P.monthSheets = function (W, R) {
+    const r0 = (v) => (v === undefined ? '' : v === null ? L('능력 모름', 'chưa biết NL') : Math.round(v));
+    const PN = (p) => ERP.procName(p);
+    const noteOf = (x) => ['INJ', 'REF', 'ASM', 'WRP', 'PCK'].filter(k => x.fin[k]).map(k => PN(k) + ' ' + x.fin[k].slice(5))
+      .concat(x.shipIn ? [L('출고 ', 'xuất ') + x.ship.slice(5)] : [], Object.keys(x.part || {}).map(k => PN(k) + L(' 일부 능력 모름', ' một phần chưa biết NL'))).join(' · ');
+    const title = P.monthTitle(W, R);
+    const head = [L('순서', 'TT'), 'PO', L('품번', 'Mã hàng'), L('품목군', 'Nhóm'), L('거래처', 'Khách hàng'), L('남은 set', 'Còn (bộ)'), L('납기', 'Hạn giao'), L('출고 가능일', 'Ngày xuất được'), L('판정', 'Đánh giá'),
+      PN('INJ') + ' pcs', PN('REF') + ' pcs', PN('ASM') + ' pcs', PN('WRP') + ' pcs', PN('PCK') + ' pcs', PN('PCK') + ' set', L('이 기간에 끝나는 공정 · 출고 · 비고', 'Xong trong kỳ · xuất · ghi chú')];
+    const rows = W.rows.map(x => [x.n, x.po, x.item, x.kind, x.customer, x.rem, x.due || '', P.dateText(x.ship), P.judgeName(x.judge), r0(x.q.INJ), r0(x.q.REF), r0(x.q.ASM), r0(x.q.WRP), r0(x.q.PCK), r0(x.sets), noteOf(x)]);
+    const t = W.tot; const tot = [L('합계', 'Tổng'), W.rows.length + L('줄', ' dòng'), '', '', '', W.rows.reduce((a, x) => a + (x.rem || 0), 0), '', '', '', Math.round(t.INJ), Math.round(t.REF), Math.round(t.ASM), Math.round(t.WRP), Math.round(t.PCK), Math.round(t.sets), ''];
+    const unk = ['INJ', 'REF', 'ASM', 'WRP', 'PCK'].filter(k => W.unk[k]);   // 하루 능력을 모르는 일은 합계에 들어가지 않음 — 합계 아래에 적음
+    const a = [[title], [P.monthSumText(W, R)], []].concat([head], rows, [tot], unk.length ? [[L('능력 모름 (하루 능력이 없는 공정 · 품목군) 의 일은 합계에 없음: ', 'Phần chưa biết năng lực không có trong tổng: ') + unk.map(PN).join(' · ')]] : [], [[], [P.monthNote()]]);
+    const b = [[L('공정 · 품목군', 'Công đoạn · nhóm'), L('할 양 (pcs)', 'Việc (pcs)'), L('이 기간 능력 (pcs)', 'Năng lực trong kỳ (pcs)'), L('능력 대비 %', '% năng lực'), L('수주 줄', 'Số dòng PO')]]
+      .concat(W.loads.map(l => [P.loadName(l.id), Math.round(l.q), l.cap === null ? L('능력 모름', 'chưa biết NL') : Math.round(l.cap), l.cap > 0 ? Math.round(l.q / l.cap * 100) : '', l.n]));
+    return [{ name: (L('할 일 ', 'Việc ') + (W.ym || W.from.slice(0, 7))).slice(0, 31), aoa: a, cols: [6, 14, 16, 10, 14, 10, 11, 12, 12, 11, 11, 11, 11, 11, 10, 30] },
+      { name: L('공정별 합계', 'Tổng theo công đoạn'), aoa: b, cols: [24, 14, 18, 12, 10] }];
+  };
+  /** 제목 · 한 줄 요약 · 계산 설명 (화면 · 인쇄 · 엑셀 같음) */
+  P.monthTitle = (W, R) => L('생산 계획 — ', 'Kế hoạch sản xuất — ') + (W.ym && R && W.ym === R.today.slice(0, 7) ? L('이번 달 할 일 ', 'Việc tháng này ') : L('할 일 ', 'Việc ')) + (W.ym || (W.from + ' ~ ' + W.to));
+  P.monthSumText = (W, R) => [W.ym || '', W.days ? W.from.slice(5) + ' ~ ' + W.to.slice(5) : '', L('근무일 ', 'Ngày làm ') + W.days + L('일', ''), L('수주 ', 'PO ') + W.rows.length + L('줄', ' dòng'),
+    L('포장 ', 'Đóng gói ') + F.n(Math.round(W.tot.sets)) + ' set (' + F.n(Math.round(W.tot.PCK)) + ' pcs)', R ? (R.scope === 'firm' ? L('확정 PO 만', 'Chỉ PO đã chốt') : L('PO미정 포함', 'Gồm PO chưa có số')) : ''].filter(Boolean).join(' · ')
+    + (W.over ? ' — ' + L('계획은 ' + W.end + ' 까지만 계산합니다 (800 근무일)', 'kế hoạch chỉ tính đến ' + W.end + ' (800 ngày làm)') : W.days ? '' : ' — ' + L('이 기간에 남은 근무일이 없습니다', 'không còn ngày làm trong kỳ'));
+  P.monthNote = () => L('생산 계획 계산 (진행 중 수주를 납기 순으로 하루씩 공정을 같이 돌린 것) 에서 이 기간 근무일에 공정마다 그 수주를 하는 양만 뽑았습니다. 빈칸 = 그 공정 일이 없거나 이 기간에 하지 않음 · 능력 모름 = 하루 능력이 없는 공정. 대강의 계획입니다 (공정 안 품목별 속도 · 설비 배정은 보지 않음).',
+    'Lấy từ kế hoạch (PO đang mở theo hạn, chạy song song từng ngày): lượng mỗi công đoạn làm cho PO trong các ngày làm của kỳ. Trống = không có việc ở công đoạn đó trong kỳ · chưa biết NL = công đoạn chưa có năng lực/ngày. Kế hoạch sơ bộ.');
 
   // ---------------------------------------------------------------- 확인할 것
   function notesOf(R) {

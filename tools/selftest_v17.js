@@ -457,15 +457,16 @@ const FLOOR = '2026-08-31', EC = '2026-06-30';
       rows: Array.from(c.querySelectorAll('tbody tr')).map(tr => Array.from(tr.children).map(td => td.innerText.replace(/\s+/g, ' ').trim())) }; });
     const pk = (r) => { const t = r.join(' '); return (t.match(/PO-K\d/) || [''])[0] + ' ' + (t.match(/T-K\d/) || [''])[0]; };
     let g = await list();
-    eq('PO별 보기 머리글: 품번 수 없음 → 그 자리에 품목군 · 납기 ▼', g.head, ['PO 번호', '거래처', '품번', '품목군', '세트', '납기 ▼', '상태', '진행', '납기']);
-    eq('PO별 보기: 늦은 납기부터 · 납기 없는 PO 는 맨 뒤 · 품목군 = 줄들의 품목군 (같은 것은 하나, 앞뒤 공백 무시, 여러 개면 " · ")', g.rows.map(r => r.slice(0, 6)),
-      [['PO-K2', 'TEST', 'T-K3 …', 'Mini', '200', D.k2], ['PO-K1', 'TEST', 'T-K1 …', 'Dial · Pencil', '200', D.k1], ['PO-K3', 'TEST', 'T-K1', '', '100', D.k3], ['PO-K4', 'TEST', 'T-K5', 'Glass', '100', '']]);
+    // 1.15.7: 세트 왼쪽 pcs · 오른쪽 CT (시험 줄은 카톤 수가 없어 CT 빈칸)
+    eq('PO별 보기 머리글: 품번 수 없음 → 그 자리에 품목군 · pcs · 세트 · CT · 납기 ▼', g.head, ['PO 번호', '거래처', '품번', '품목군', 'pcs', '세트', 'CT', '납기 ▼', '상태', '진행', '납기']);
+    eq('PO별 보기: 늦은 납기부터 · 납기 없는 PO 는 맨 뒤 · 품목군 = 줄들의 품목군 (같은 것은 하나, 앞뒤 공백 무시, 여러 개면 " · ")', g.rows.map(r => r.slice(0, 8)),
+      [['PO-K2', 'TEST', 'T-K3 …', 'Mini', '2,400', '200', '', D.k2], ['PO-K1', 'TEST', 'T-K1 …', 'Dial · Pencil', '2,400', '200', '', D.k1], ['PO-K3', 'TEST', 'T-K1', '', '1,200', '100', '', D.k3], ['PO-K4', 'TEST', 'T-K5', 'Glass', '1,200', '100', '', '']]);
     await A.fill('main section.card.grow .search input', 'Pencil'); await A.waitForTimeout(600);
     eq('검색에 품목군도 걸림 (Pencil → PO-K1)', (await list()).rows.map(r => r[0]), ['PO-K1']);
     await A.fill('main section.card.grow .search input', ''); await A.waitForTimeout(600);
     await A.click('main section.card.grow th.sortable:has-text("납기")'); await settle();
     const up = await list(); await ev(() => ERP.render()); await settle(); const again = await list();
-    eq('납기를 눌러 ▲ 로 바꿔도 화면을 다시 열면 늦은 날짜부터 (▼)', [up.head[5], up.rows[0][0], again.head[5], again.rows[0][0]], ['납기 ▲', 'PO-K3', '납기 ▼', 'PO-K2']);
+    eq('납기를 눌러 ▲ 로 바꿔도 화면을 다시 열면 늦은 날짜부터 (▼)', [up.head[7], up.rows[0][0], again.head[7], again.rows[0][0]], ['납기 ▲', 'PO-K3', '납기 ▼', 'PO-K2']);
     await ev(() => { ERP.state.ord.view = 'line'; ERP.render(); }); await settle();
     g = await list();
     eq('품번 라인별 보기도 납기 ▼ · 늦은 줄부터 · 납기 없는 줄은 맨 뒤', [g.head.filter(t => /[▲▼]/.test(t)), g.rows.map(pk)], [['납기 ▼'], ['PO-K2 T-K3', 'PO-K2 T-K4', 'PO-K1 T-K1', 'PO-K1 T-K2', 'PO-K3 T-K1', 'PO-K4 T-K5']]);

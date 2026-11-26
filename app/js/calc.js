@@ -152,6 +152,8 @@
         const act = lines.filter(o => o.st !== 'cancel' && o.st !== 'hold'); const use = act.length ? act : lines;
         const sets = use.reduce((a, o) => a + o.sets, 0); const packed = use.reduce((a, o) => a + Math.min(o.packed, o.sets || o.packed), 0);
         const pcs = use.reduce((a, o) => a + num(o.p.pcs), 0);
+        // 1.15.7 (사용자 "수주목록에 … 세트 오른쪽에 CT 박스 수량도"): CT = 줄의 카톤 수 (cs) 합 — 카톤 수가 없는 줄은 짐작하지 않고 세어 둔다 (csMiss)
+        const cs = use.reduce((a, o) => a + (num(o.p.cs) > 0 ? num(o.p.cs) : 0), 0); const csMiss = use.filter(o => !(num(o.p.cs) > 0)).length;
         const openL = act.filter(o => o.st !== 'done'); const dues = (openL.length ? openL : use).map(o => o.p.due).filter(Boolean).sort();
         // 머리 (거래처 등) = 첫 줄. 1.13.19: PO미정 은 여러 거래처 · 날짜가 섞이므로 첫 진행 중 줄
         const first = (po === C.poNone() ? (openL[0] || use[0] || lines[0]) : lines[0]).p;
@@ -159,7 +161,7 @@
         let st = 'wait'; if (!act.length) st = lines.some(o => o.st === 'hold') ? 'hold' : 'cancel'; else if (done) st = 'done'; else if (openL.some(o => o.st === 'late')) st = 'late'; else if (act.some(o => o.packed > 0)) st = 'prod';
         const dd = due ? F.diffDays(due, today) : null; const items = Array.from(new Set(lines.map(o => o.p.item_no).filter(Boolean)));
         const rep = Object.assign({}, first, { item_no: items.length > 1 ? items[0] + L(' 외 ' + (items.length - 1), ' +' + (items.length - 1)) : items[0], due, pcs });
-        out.push({ p: rep, po_no: po, lines, n: lines.length, items, sets, packed, prog: sets > 0 ? packed / sets : 0, st, forced: act.some(o => o.forced), doneAt: lines.map(o => o.p.done_at).filter(Boolean).sort().pop() || '', dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, orphan: lines[0].orphan });
+        out.push({ p: rep, po_no: po, lines, n: lines.length, items, sets, cs, csMiss, csN: use.length, packed, prog: sets > 0 ? packed / sets : 0, st, forced: act.some(o => o.forced), doneAt: lines.map(o => o.p.done_at).filter(Boolean).sort().pop() || '', dday: dd, soon: C.isOpen({ st }) && dd !== null && dd >= 0 && dd <= 7, orphan: lines[0].orphan });
       });
       return out;
     });

@@ -2,6 +2,7 @@
 /* 13차(v1.8.0) 자동 시험: 수주 강제 완료 (완료 버튼 · 완료 취소 · 납기 기준 일괄 완료)
    1 완료 전 상태 · 2 납기(Checking) 2025-01 ~ 2026-09 일괄 완료 (취소 · 보류 · 이미 완료 · PO 번호 없는 줄은 그대로, 다품번 PO 는 줄마다) ·
    3 수주를 다시 올려도(upsert) 완료 표시가 남음 · 4 수주 목록의 완료 버튼 → 확인 → 완료 / 완료 취소 · 5 상세 칸 · AI 비서 · 6 한 / 베 오류 없음
+   7 수주 목록 pcs · CT (1.15.7): 세트 왼쪽 pcs · 오른쪽 CT (수주의 카톤 수 cs 합, 없는 줄이 있으면 +? · 설명) · 정렬 · 품번 라인별 보기 · 베트남어
    사용:  npm run test:v13   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -115,6 +116,46 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('AI 비서 도구: 완료 = A · E', ai, ['PO-A', 'PO-E']);
     await ev(() => { ERP.state.ord = { tab: 'all', sel: null, view: 'line' }; ERP.render(); }); await settle();
     ok('품번 라인별 보기도 열림', await ev(() => document.querySelectorAll('main table.tbl tbody tr').length >= 7));
+  });
+
+  // ------------------------------------------------------------------------------------------
+  await sec('7. 수주 목록 pcs · CT (1.15.7, 사용자 "수주목록에 세트 왼쪽에 pcs 표기해주고 세트 오른쪽에 CT 박스 수량도")', async () => {
+    await ev(async () => { const DB = ERP.db; const po = (o) => Object.assign({ date: '2025-01-05', customer: 'TEST', kind: 'Dial', packed: 0, due: '2099-02-01' }, o);
+      DB.add('po', po({ po_no: 'PO-G', item_no: 'IG1', pcs: 1200, sets: 100, cs: 5 })); DB.add('po', po({ po_no: 'PO-G', item_no: 'IG2', pcs: 2400, sets: 200 }));   // 두 번째 줄은 카톤 수 없음
+      DB.add('po', po({ po_no: 'PO-H', item_no: 'IH', pcs: 360, sets: 30 })); await DB.flush(); });
+    const grab = () => ev(() => { const t = document.querySelector('main section.grow table.tbl'); const hd = Array.from(t.querySelectorAll('thead th')).map(th => th.innerText.replace(/[▲▼]/g, '').trim());
+      const tip = (td) => { const x = td.querySelector('[title]'); return x ? x.getAttribute('title') : ''; };
+      const rows = {}; Array.from(t.querySelectorAll('tbody tr')).forEach(tr => { const c = Array.from(tr.children); const po = c[hd.indexOf(hd.includes('PO 번호') ? 'PO 번호' : 'Số PO')].innerText.trim(); const ci = hd.indexOf('CT');
+        rows[po] = [c[hd.indexOf('pcs')].innerText.trim(), c[ci - 1].innerText.trim(), c[ci].innerText.trim(), tip(c[ci])]; }); return { hd, rows }; });
+    await ev(() => { ERP.setLang('ko'); ERP.state.ord = { tab: 'all', sel: null, view: 'po' }; ERP.goto('orders'); ERP.render(); }); await settle();
+    let g = await grab();
+    ok('PO별 보기 칸 순서: 품목군 · pcs · 세트 · CT · 납기', g.hd.indexOf('pcs') === g.hd.indexOf('품목군') + 1 && g.hd.indexOf('세트') === g.hd.indexOf('pcs') + 1 && g.hd.indexOf('CT') === g.hd.indexOf('세트') + 1 && g.hd.indexOf('납기') === g.hd.indexOf('CT') + 1, g.hd);
+    eq('PO-D (한 줄): pcs 1,000 · 세트 100 · CT 10', g.rows['PO-D'], ['1,000', '100', '10', '']);
+    eq('PO-B (두 줄): 두 줄 합 pcs 2,000 · 세트 200 · CT 20', g.rows['PO-B'].slice(0, 3), ['2,000', '200', '20']);
+    eq('PO-G (두 줄, 한 줄은 카톤 수 없음): CT = 있는 줄만 5 +? · 설명', g.rows['PO-G'], ['3,600', '300', '5 +?', '카톤 수 (cs) 가 없는 줄 1개 — CT 는 있는 줄만 더함 (수주 편집에서 넣을 수 있어요)']);
+    eq('PO-H (카톤 수 없음): CT 빈칸', g.rows['PO-H'].slice(0, 3), ['360', '30', '']);
+    // pcs · CT 머리글을 누르면 그 순서 (빈칸은 맨 뒤)
+    const firstCol = () => ev(() => Array.from(document.querySelectorAll('main section.grow table.tbl tbody tr')).map(tr => tr.children[0].innerText.trim()));
+    await A.click('main section.grow table.tbl thead th:nth-child(' + (g.hd.indexOf('pcs') + 1) + ')'); await settle();
+    eq('pcs 머리글 → 적은 순 (PO-H 360 이 먼저)', (await firstCol())[0], 'PO-H');
+    await A.click('main section.grow table.tbl thead th:nth-child(' + (g.hd.indexOf('CT') + 1) + ')'); await settle();
+    const byCt = await firstCol(); eq('CT 머리글 → 적은 순 · 카톤 수 없는 PO-H 는 맨 뒤', [byCt[0], byCt[byCt.length - 1]], ['PO-G', 'PO-H']);
+    // 좁은 화면: 칸이 늘어 표가 옆으로 넘쳐도 상태 (완료 단추) 칸은 오른쪽 끝에 붙어 보임
+    await A.setViewportSize({ width: 1100, height: 900 }); await ev(() => { ERP.state.ord = { tab: 'open', sel: null, view: 'po' }; ERP.render(); }); await settle();
+    const nar = await ev(() => { const w = document.querySelector('main section.grow .tbl-wrap'); const b = w.querySelector('tbody button'); const wr = w.getBoundingClientRect(), br = b.getBoundingClientRect();
+      return { over: w.scrollWidth > w.clientWidth + 2, b: Math.round(br.right), w: Math.round(wr.right), sticky: getComputedStyle(b.closest('td')).position, zi: [getComputedStyle(w.querySelector('th.stick-r')).zIndex, getComputedStyle(b.closest('td')).zIndex, getComputedStyle(w.querySelector('th:not(.stick-r)')).zIndex] }; });
+    ok('좁은 화면 (1100): 표가 넘쳐도 완료 단추는 보이는 곳 (상태 칸 = 오른쪽 끝에 붙음)', nar.over && nar.b <= nar.w && nar.sticky === 'sticky', nar);
+    eq('붙은 칸은 머리글 아래 (위아래로 밀어도 머리글을 가리지 않음, Codex 검토): 상태 머리 2 · 붙은 칸 0 · 다른 머리 1', nar.zi, ['2', '0', '1']);
+    await A.setViewportSize({ width: 1480, height: 920 }); await settle();
+    // 품번 라인별 보기
+    await ev(() => { ERP.state.ord = { tab: 'all', sel: null, view: 'line' }; ERP.render(); }); await settle();
+    const lh = await ev(() => Array.from(document.querySelectorAll('main section.grow table.tbl thead th')).map(th => th.innerText.replace(/[▲▼]/g, '').trim()));
+    ok('품번 라인별 보기도 pcs · 세트 · CT 순서', lh.indexOf('세트') === lh.indexOf('pcs') + 1 && lh.indexOf('CT') === lh.indexOf('세트') + 1, lh);
+    // 베트남어 머리글
+    await ev(() => { ERP.setLang('vi'); ERP.state.ord = { tab: 'all', sel: null, view: 'po' }; ERP.render(); }); await settle();
+    g = await grab();
+    ok('베트남어: pcs · Bộ · CT · 설명도 베트남어', g.hd.indexOf('Bộ') === g.hd.indexOf('pcs') + 1 && g.hd.indexOf('CT') === g.hd.indexOf('Bộ') + 1 && g.rows['PO-G'] && !/[가-힣]/.test(g.rows['PO-G'][3]) && g.rows['PO-G'][3].length > 0, g);
+    await ev(async () => { ERP.setLang('ko'); const DB = ERP.db; DB.rows('po').filter(p => ['PO-G', 'PO-H'].includes(p.po_no)).forEach(p => DB.remove('po', p._id)); await DB.flush(); });
   });
 
   // ------------------------------------------------------------------------------------------

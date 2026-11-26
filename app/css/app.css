@@ -58,6 +58,9 @@ table.tbl{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
 .tbl th.sortable{cursor:pointer}.tbl th.sortable:hover{color:var(--text)}
 .tbl td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
 .tbl tr:hover td{background:#F7FAFF}.tbl tr.sel td{background:#EAF1FD}.tbl td.num,.tbl th.num{text-align:right}
+/* 1.15.7: 표가 옆으로 넘쳐도 이 칸 (수주 목록 상태 · 완료 단추) 은 오른쪽 끝에 붙어 보임 */
+.tbl th.stick-r,.tbl td.stick-r{position:sticky;right:0;box-shadow:-8px 0 8px -8px rgba(15,23,42,.22)}.tbl td.stick-r{background:#fff;z-index:0}.tbl th.stick-r{z-index:2}   /* 붙은 칸 < 머리글 (Codex 검토: 위아래로 밀 때 머리글을 가리지 않게) */
+.tbl tr:hover td.stick-r{background:#F7FAFF}.tbl tr.sel td.stick-r{background:#EAF1FD}
 .tbl tr.click{cursor:pointer}
 .pager{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;color:var(--muted)}
 .pager .btn{min-height:32px}

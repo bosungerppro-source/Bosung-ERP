@@ -106,14 +106,15 @@
       const thead = h('tr', canEdit ? h('th', { style: { width: '32px' } }, h('input', { type: 'checkbox', 'aria-label': 'select all', checked: slice.length && slice.every(r => st.sel.has(r._id)), onchange: (e) => { slice.forEach(r => e.target.checked ? st.sel.add(r._id) : st.sel.delete(r._id)); render(); } })) : null,
         cols.map(c => h('th', { class: 'sortable' + (c.t === 'n' ? ' num' : ''), onclick: () => { if (st.sk === c.k) st.sd = -st.sd; else { st.sk = c.k; st.sd = 1; } render(); } },
           ERP.colLabel(c), st.sk === c.k ? (st.sd > 0 ? ' ▲' : ' ▼') : '')),
-        (opt.extraCols || []).map(c => h('th', { class: c.num ? 'num' : '' }, c.label())));
+        (opt.extraCols || []).map(c => h('th', { class: (c.num ? 'num' : '') + (c.cls ? ' ' + c.cls : '') }, c.label())));
       const tbody = slice.map(r => h('tr', { class: (opt.onRowClick || canEdit ? 'click' : '') + (st.sel.has(r._id) ? ' sel' : ''), onclick: (e) => {
           if (e.target.tagName === 'INPUT') return;
           if (opt.onRowClick) opt.onRowClick(r, render); else if (canEdit) ERP.form(table, r, { onSaved: render, beforeSave: opt.beforeSave });
         } },
         canEdit ? h('td', h('input', { type: 'checkbox', checked: st.sel.has(r._id), onchange: (e) => { e.target.checked ? st.sel.add(r._id) : st.sel.delete(r._id); render(); } })) : null,
-        cols.map(c => h('td', { class: c.t === 'n' ? 'num' : '', title: r[c.k] !== undefined ? String(r[c.k]) : null }, ERP.cellText(c, r[c.k]))),
-        (opt.extraCols || []).map(c => h('td', { class: c.num ? 'num' : '' }, c.render(r)))));
+        // 1.15.7: 칸에 cell(r) 이 있으면 그것으로 그린다 (정렬 · 찾기는 그대로 r[c.k]) — 수주 목록 CT 의 '+?' · 설명
+        cols.map(c => h('td', { class: c.t === 'n' ? 'num' : '', title: !c.cell && r[c.k] !== undefined ? String(r[c.k]) : null }, c.cell ? c.cell(r) : ERP.cellText(c, r[c.k]))),
+        (opt.extraCols || []).map(c => h('td', { class: (c.num ? 'num' : '') + (c.cls ? ' ' + c.cls : '') }, c.render(r)))));
       const body = h('div', { class: 'tbl-wrap', style: opt.maxH ? { maxHeight: opt.maxH } : null }, h('table', { class: 'tbl' }, h('thead', thead), h('tbody', tbody)));
       const pager = h('div', { class: 'pager' },
         h('span', total.toLocaleString() + L('건', ' dòng') + (total !== baseRows().length ? ' / ' + L('전체 ', 'tổng ') + baseRows().length.toLocaleString() : '')),
@@ -126,6 +127,31 @@
     }
     render();
     return { el, refresh: render, state: st };
+  };
+
+  // 1.15.7 (생산 계획 이번 달 할 일 인쇄): 화면의 한 부분만 인쇄 — body 끝에 #erpPrint 를 그리고 인쇄하는 동안만 그것만 보이게 (A4, 기본 가로).
+  //   인쇄가 끝나면 (afterprint) 치운다. 못 치웠어도 화면에는 안 보이고 다음 인쇄 때 지운다
+  ERP.printEl = function (nodes, o) {
+    o = o || {};
+    if (typeof ERP.printEl._done === 'function') ERP.printEl._done();   // 지난 인쇄가 afterprint 없이 남았으면 (Codex 검토) 먼저 치움 — 듣는 것까지
+    ['erpPrint', 'erpPrintCss'].forEach(id => { const x = document.getElementById(id); if (x) x.remove(); });
+    const css = document.createElement('style'); css.id = 'erpPrintCss';
+    // 인쇄용 표는 화면 표 (.tbl: 줄바꿈 없음 · 칸 너비 제한 · 머리 고정) 규칙을 덮어 A4 안에서 줄바꿈 (Codex 검토) — 숫자 칸만 줄바꿈 없음
+    css.textContent = '@page{size:A4 ' + (o.portrait ? 'portrait' : 'landscape') + ';margin:9mm}#erpPrint{display:none}'
+      + '@media print{body.erp-printing>*:not(#erpPrint){display:none!important}body.erp-printing #erpPrint{display:block!important}'
+      + '#erpPrint{font:10px/1.35 "Malgun Gothic","Segoe UI",Arial,sans-serif;color:#000}#erpPrint h1{font-size:15px;margin:0 0 3px}#erpPrint h2{font-size:12px;margin:10px 0 4px}#erpPrint p{margin:6px 0}'
+      + '#erpPrint table{width:100%;table-layout:auto;border-collapse:collapse;margin:0 0 6px}'
+      + '#erpPrint th,#erpPrint td{border:1px solid #999;padding:2px 4px;vertical-align:top;text-align:left;white-space:normal;word-break:break-word;max-width:none;overflow:visible;text-overflow:clip;position:static}#erpPrint th{background:#EEE}'
+      + '#erpPrint td.num,#erpPrint th.num{text-align:right;white-space:nowrap}#erpPrint thead{display:table-header-group}#erpPrint tfoot td{font-weight:700;background:#F4F4F4}#erpPrint tr{page-break-inside:avoid}'
+      + '#erpPrint .sub,#erpPrint .muted{color:#444;font-size:9px}}';
+    const box = h('div', { id: 'erpPrint' }, nodes);
+    document.head.appendChild(css); document.body.appendChild(box); document.body.classList.add('erp-printing');
+    let t = null;
+    const done = () => { clearTimeout(t); window.removeEventListener('afterprint', done); document.body.classList.remove('erp-printing'); box.remove(); css.remove(); if (ERP.printEl._done === done) ERP.printEl._done = null; };
+    ERP.printEl._done = done;
+    window.addEventListener('afterprint', done);
+    try { window.print(); } catch (e) { done(); ERP.toast(L('인쇄하지 못했습니다: ', 'Không in được: ') + ((e && e.message) || e), 'bad'); return; }
+    t = setTimeout(done, 30000);   // afterprint 가 오지 않는 곳 대비 — window.print 는 인쇄 창이 닫힐 때까지 기다리므로 그 뒤에 치움
   };
 
   // simple table (no CRUD) used by reports

@@ -168,15 +168,21 @@
         const mk = (k, ko, vi, t) => ({ k, ko, vi, t: t || 't' });
         // 1.13.12 (사용자 2026-10-27): 품번 수 → 품목군 (줄들의 품목군, 같은 것은 하나) · 납기는 늦은 날짜부터
         const kindsOf = (o) => Array.from(new Set(o.lines.map(l => String(l.p.kind || '').trim()).filter(Boolean))).join(' · ');
-        g = ERP.grid({ table: 'po', rows: () => all.filter(match).map(o => ({ _id: o.po_no, po_no: o.po_no, customer: o.p.customer, item_no: o.items.length > 1 ? o.items[0] + ' …' : (o.items[0] || ''), kind: kindsOf(o), sets: o.sets, due: o.p.due })), pageSize: 25, sortKey: 'due', sortDir: -1, canAdd: false, canEdit: false, export: false, maxH: '60vh',
+        // 1.15.7 (사용자 2026-11-26 "수주목록에 세트 왼쪽에 pcs 표기해주고 세트 오른쪽에 CT 박스 수량도 표시할수있게"): pcs = 줄의 pcs 합 (상세 칸과 같음), CT = 줄의 카톤 수 (cs) 합.
+        //   카톤 수가 없는 줄은 짐작하지 않는다 — 있는 줄만 더하고 '+?' · 설명, 모두 없으면 빈칸
+        const ctCell = (r) => { if (!(r.cs > 0)) return ''; const t = F.n(r.cs); if (!r.csMiss) return t;
+          return h('span', { title: L('카톤 수 (cs) 가 없는 줄 ' + r.csMiss + '개 — CT 는 있는 줄만 더함 (수주 편집에서 넣을 수 있어요)', 'Có ' + r.csMiss + ' dòng chưa có số thùng (cs) — CT chỉ cộng các dòng có số (nhập ở Sửa PO)') }, t, h('span', { class: 'muted' }, ' +?')); };
+        g = ERP.grid({ table: 'po', rows: () => all.filter(match).map(o => ({ _id: o.po_no, po_no: o.po_no, customer: o.p.customer, item_no: o.items.length > 1 ? o.items[0] + ' …' : (o.items[0] || ''), kind: kindsOf(o),
+            pcs: o.p.pcs > 0 ? o.p.pcs : undefined, sets: o.sets, cs: o.cs > 0 ? o.cs : undefined, csMiss: o.cs > 0 ? o.csMiss : 0, due: o.p.due })), pageSize: 25, sortKey: 'due', sortDir: -1, canAdd: false, canEdit: false, export: false, maxH: '60vh',
           searchKeys: ['po_no', 'customer', 'item_no', 'kind'],
-          cols: [mk('po_no', 'PO 번호', 'Số PO'), mk('customer', '거래처', 'Khách hàng'), mk('item_no', '품번', 'Mã hàng'), mk('kind', '품목군', 'Nhóm hàng'), mk('sets', '세트', 'Bộ', 'n'), mk('due', '납기', 'Hạn giao', 'd')],
+          cols: [mk('po_no', 'PO 번호', 'Số PO'), mk('customer', '거래처', 'Khách hàng'), mk('item_no', '품번', 'Mã hàng'), mk('kind', '품목군', 'Nhóm hàng'), mk('pcs', 'pcs', 'pcs', 'n'), mk('sets', '세트', 'Bộ', 'n'), Object.assign(mk('cs', 'CT', 'CT', 'n'), { cell: ctCell }), mk('due', '납기', 'Hạn giao', 'd')],
           // 13차: 상태 칸에 완료 버튼을 같이 둔다 (좁은 화면에서도 보이게 진행 칸 앞으로)
-          extraCols: [{ label: () => L('상태', 'Trạng thái'), render: r => { const o = byPo.get(r._id); return h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', whiteSpace: 'nowrap' } }, ERP.statusChip(o.st), doneBtn(o)); } }, { label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }],
+          // 1.15.7: pcs · CT 칸이 늘어 표가 옆으로 넘치면 상태 (완료 단추) 칸은 표 오른쪽 끝에 붙어 보임 (stick-r)
+          extraCols: [{ cls: 'stick-r', label: () => L('상태', 'Trạng thái'), render: r => { const o = byPo.get(r._id); return h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', whiteSpace: 'nowrap' } }, ERP.statusChip(o.st), doneBtn(o)); } }, { label: () => L('진행', 'Tiến độ'), render: r => progCell(byPo.get(r._id)) }, { label: () => L('납기', 'Hạn'), render: r => { const o = byPo.get(r._id); return ERP.ddayChip(o.dday, o.st); } }],
           onRowClick: (r) => { st.sel = r._id; drawAside(); } });
       } else {
         g = ERP.grid({ table: 'po', rows: () => lineAll.filter(match).map(o => o.p), pageSize: 25, sortKey: 'due', sortDir: -1, canAdd: false, maxH: '60vh',
-          cols: ['po_no', 'customer', 'item_no', 'kind', 'sets', 'due'].map(POC),
+          cols: ['po_no', 'customer', 'item_no', 'kind', 'pcs', 'sets', 'cs', 'due'].map(k => (k === 'pcs' ? Object.assign({}, POC(k), { ko: 'pcs', vi: 'pcs' }) : k === 'cs' ? Object.assign({}, POC(k), { ko: 'CT', vi: 'CT' }) : POC(k))),   // 1.15.7: 세트 왼쪽 pcs · 오른쪽 CT (줄의 카톤 수)
           extraCols: [{ label: () => L('진행', 'Tiến độ'), render: p => progCell(byId.get(p._id)) }, { label: () => L('납기', 'Hạn'), render: p => { const o = byId.get(p._id); return ERP.ddayChip(o.dday, o.st); } }, { label: () => L('상태', 'Trạng thái'), render: p => ERP.statusChip(byId.get(p._id).st) }],
           onRowClick: (p) => { st.sel = String(p.po_no); drawAside(); } });
       }

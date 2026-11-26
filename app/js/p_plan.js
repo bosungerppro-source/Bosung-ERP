@@ -67,6 +67,63 @@
     draw();
   }
 
+  // ---------- 탭: 이번 달 할 일 (1.15.7) ----------
+  // 사용자 2026-11-26 "생산 계획에 이번달에해야할거 프린트할수있게 해줘 엑셀로 다운로드 할수있게도 해주고" — 계산은 plan.js P.month (하루씩 같이 돌린 계산에서 그 달 근무일 몫).
+  //   화면 · 인쇄 · 엑셀이 같은 칸: 공정별 합계 (할 양 · 그 달 능력) + 수주별 (납기 순, 공정마다 pcs · 포장 set · 그 달에 끝나는 날)
+  const QK = ['INJ', 'REF', 'ASM', 'WRP', 'PCK'];
+  const unknownCap = () => L('능력 모름', 'chưa biết NL');
+  function monthTables(W, R, forPrint) {
+    const qCell = (x, k) => { const v = x.q[k], fin = x.fin[k]; const n = v > 0 ? Math.round(v) : 0; const part = x.part && x.part[k];
+      return h('td', { class: 'num' }, v === null ? unknownCap() : n ? F.n(n) : '',
+        part ? h('span', { class: 'muted', title: L('일부 품목군은 하루 능력을 몰라 이 숫자에 들어가지 않음', 'Một số nhóm chưa biết năng lực nên không có trong số này') }, ' +?') : null,
+        fin ? h('div', { class: 'sub' }, L('끝 ', 'xong ') + F.md(fin)) : null); };
+    const head = [L('순서', 'TT'), 'PO', L('품번', 'Mã hàng'), L('품목군', 'Nhóm'), L('거래처', 'Khách hàng'), L('남은 set', 'Còn (bộ)'), L('납기', 'Hạn giao'), L('출고 가능일', 'Ngày xuất được'), L('판정', 'Đánh giá')]
+      .concat(QK.slice(0, 4).map(k => ERP.procName(k)), [ERP.procName('PCK') + ' pcs', ERP.procName('PCK') + ' set']);
+    const orders = h('table', { class: 'tbl', 'data-plan-month-orders': '1' }, h('thead', h('tr', head.map((x, i) => h('th', { class: i === 0 || i === 5 || i >= 9 ? 'num' : '' }, x)))),
+      h('tbody', W.rows.map(x => h('tr',
+        h('td', { class: 'num' }, x.n), h('td', forPrint ? x.po : h('a', { href: '#', onclick: (e) => { e.preventDefault(); ERP.openPo(x.po); } }, x.po)), h('td', x.item), h('td', x.kind || ''), h('td', x.customer || ''),
+        h('td', { class: 'num' }, F.n(x.rem)), h('td', x.due ? F.md(x.due) : '–'), h('td', h(x.shipIn ? 'b' : 'span', dT(x.ship) || '–')), h('td', forPrint ? P.judgeName(x.judge) : jChip(x.judge)),
+        QK.map(k => qCell(x, k)), h('td', { class: 'num' }, x.sets === null ? unknownCap() : x.sets > 0 ? F.n(Math.round(x.sets)) : '')))),
+      h('tfoot', h('tr', h('td', { colspan: 5 }, L('합계', 'Tổng') + ' · ' + W.rows.length + L('줄', ' dòng')), h('td', { class: 'num' }, F.n(W.rows.reduce((a, x) => a + (x.rem || 0), 0))), h('td', { colspan: 3 }, ''),
+        QK.map(k => h('td', { class: 'num' }, F.n(Math.round(W.tot[k])) + (W.unk[k] ? ' +?' : ''))), h('td', { class: 'num' }, F.n(Math.round(W.tot.sets))))));
+    const loads = h('table', { class: 'tbl', 'data-plan-month-loads': '1' }, h('thead', h('tr', [L('공정 · 품목군', 'Công đoạn · nhóm'), L('할 양 (pcs)', 'Việc (pcs)'), L('이 기간 능력 (pcs)', 'Năng lực trong kỳ (pcs)'), L('능력 대비', '% năng lực'), L('수주 줄', 'Số dòng PO')].map((x, i) => h('th', { class: i ? 'num' : '' }, x)))),
+      h('tbody', W.loads.map(l => h('tr', h('td', P.loadName(l.id)), h('td', { class: 'num' }, F.n(Math.round(l.q))), h('td', { class: 'num' }, l.cap === null ? unknownCap() : F.n(Math.round(l.cap))),
+        h('td', { class: 'num' }, l.cap > 0 ? F.n(Math.round(l.q / l.cap * 100)) + '%' : ''), h('td', { class: 'num' }, l.n)))));
+    return { orders, loads };
+  }
+  function printMonth(W, R) {
+    const T = monthTables(W, R, true); const now = new Date();
+    ERP.printEl([h('h1', P.monthTitle(W, R)), h('div', { class: 'muted' }, P.monthSumText(W, R) + ' · ' + L('뽑은 때 ', 'In lúc ') + F.today() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + ' · ERP ' + ERP.v),
+      h('h2', L('공정별 합계', 'Tổng theo công đoạn')), T.loads, h('h2', L('수주별 (납기 순)', 'Theo PO (theo hạn)')), W.rows.length ? T.orders : h('p', L('이 달에 할 일이 없습니다.', 'Không có việc trong tháng này.')), h('p', { class: 'muted' }, P.monthNote())]);
+  }
+  function exportMonth(W, R) {
+    const X = window.XLSX; const wb = X.utils.book_new();
+    P.monthSheets(W, R).forEach(s => { const ws = X.utils.aoa_to_sheet(s.aoa); ws['!cols'] = s.cols.map(w => ({ wch: w })); X.utils.book_append_sheet(wb, ws, s.name); });
+    ERP.xl.saveBook(wb, 'production_plan_month_' + (W.ym || W.from.slice(0, 7)) + '.xlsx');
+  }
+  function monthTab(host, R, st) {
+    const cur = R.today.slice(0, 7);
+    if (!/^\d{4}-\d\d$/.test(String(st.month || '')) || st.month < cur) st.month = cur;   // 지난 달은 계획에 없음 (오늘부터 계산)
+    const W = P.month(R, st.month); const T = monthTables(W, R, false); const maxM = W.end ? W.end.slice(0, 7) : '';
+    const go = (m) => { st.month = m < cur ? cur : maxM && m > maxM ? maxM : m; ERP.render(); };
+    // Codex 검토: 화면을 연 채 날이 바뀌면 (밤 12시) 인쇄 · 엑셀 전에 다시 계산 — 이번 달은 오늘부터
+    const fresh = (fn) => { const R2 = P.run(st.scope); const c2 = R2.today.slice(0, 7); if (st.month < c2) st.month = c2; fn(P.month(R2, st.month), R2); if (R2.today !== R.today) ERP.render(); };
+    host.append(h('div', { class: 'toolbar' },
+      h('span', { class: 'muted', style: { fontSize: '12.5px' } }, L('달', 'Tháng')),
+      h('input', { class: 'inp', type: 'month', min: cur, max: maxM || null, value: st.month, 'data-plan-month': '1', style: { width: '160px' }, onchange: (e) => { const v = String(e.target.value || ''); if (/^\d{4}-\d\d$/.test(v)) go(v); } }),
+      h('button', { type: 'button', class: 'btn sm' + (st.month === cur ? ' primary' : ''), onclick: () => go(cur) }, L('이번 달', 'Tháng này')),
+      h('button', { type: 'button', class: 'btn sm', onclick: () => go(P.nextMonth(st.month)) }, L('다음 달', 'Tháng sau')),
+      h('span', { class: 'sp' }),
+      h('button', { type: 'button', class: 'btn', 'data-plan-month-print': '1', onclick: () => fresh(printMonth) }, L('인쇄', 'In')),
+      h('button', { type: 'button', class: 'btn', 'data-plan-month-xlsx': '1', onclick: () => fresh(exportMonth) }, L('엑셀로 받기', 'Tải Excel'))),
+      h('p', { class: 'help', 'data-plan-month-sum': '1', style: { marginTop: 0 } }, P.monthSumText(W, R)),
+      h('h3', { style: { margin: '10px 0 6px' } }, L('공정별 합계', 'Tổng theo công đoạn')), h('div', { class: 'tbl-wrap' }, T.loads),
+      h('h3', { style: { margin: '14px 0 6px' } }, L('수주별 (납기 순)', 'Theo PO (theo hạn)')),
+      W.rows.length ? h('div', { class: 'tbl-wrap', style: { maxHeight: '62vh' } }, T.orders)
+        : h('div', { class: 'empty' }, W.over && !W.days ? L('이 달은 계획 범위 (800 근무일) 밖입니다.', 'Tháng này nằm ngoài phạm vi kế hoạch (800 ngày làm).') : L('이 달에 할 일이 없습니다.', 'Không có việc trong tháng này.')),
+      h('p', { class: 'help' }, P.monthNote()));
+  }
+
   // ---------- 탭: 공정별 부하 ----------
   function loadsTab(host, R) {
     const cap = R.cap; const maxDays = Math.max(1, ...R.loads.map(r => r.days || 0));
@@ -221,11 +278,11 @@
       ERP.kpi(L('납기 지연 예상', 'Dự kiến trễ hạn'), F.n(R.counts.late), L('줄', 'dòng'), R.counts.late ? 'bad' : 'ok', R.counts.late ? L('확인', 'Kiểm tra') : L('없음', 'Không có'), L('빠듯함 ', 'Sát hạn ') + R.counts.tight + L(' · 납기 지남 ', ' · quá hạn ') + R.counts.past),
       ERP.kpi(L('모자랄 자재', 'Vật tư sẽ thiếu'), F.n(R.short.length), L('종', 'mã'), R.urgent.length ? 'bad' : R.short.length ? 'warn' : 'ok', L('급함 ', 'Gấp ') + R.urgent.length, L('리드타임 없음 ', 'Chưa có thời gian giao ') + R.short.filter(m => !m.lead).length)));
     const warnN = R.notes.filter(x => x.tone === 'bad' || x.tone === 'warn').length;
-    const tabs = [{ id: 'orders', label: L('수주별 완료 예상', 'Dự kiến theo PO') + ' ' + R.orders.length }, { id: 'loads', label: L('공정별 부하', 'Tải công đoạn') },
+    const tabs = [{ id: 'orders', label: L('수주별 완료 예상', 'Dự kiến theo PO') + ' ' + R.orders.length }, { id: 'month', label: L('이번 달 할 일', 'Việc tháng này') }, { id: 'loads', label: L('공정별 부하', 'Tải công đoạn') },
       { id: 'mats', label: L('자재', 'Vật tư') + ' ' + R.short.length }, { id: 'base', label: L('기준 자료', 'Dữ liệu chuẩn') }, { id: 'notes', label: L('확인할 것', 'Cần kiểm tra') + (warnN ? ' ' + warnN : '') }];
     if (!tabs.some(t => t.id === st.tab)) st.tab = 'orders';
     const host = h('div', { class: 'card' });
     root.append(ERP.tabs(tabs, st.tab, (id) => { st.tab = id; ERP.render(); }), host);
-    ({ orders: ordersTab, loads: loadsTab, mats: matsTab, base: baseTab, notes: notesTab })[st.tab](host, R, st);
+    ({ orders: ordersTab, month: monthTab, loads: loadsTab, mats: matsTab, base: baseTab, notes: notesTab })[st.tab](host, R, st);
   } };
 })();

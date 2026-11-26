@@ -10,6 +10,7 @@
    13 Codex 검토 (1.14.2): 하루씩 공정을 같이 돌리기 (앞 공정이 내준 만큼만 · 아직 못 하는 수주는 뒤 수주를 막지 않음) · 불량률이 부품 · 자재로 · 달력 조 수 0 · 오늘 전 필요한 날
       · (고친 코드의 Codex 검토) 조립 품목군이 둘인 수주의 자재는 그 품목군 진행으로 · 800 근무일 안에 다 못 쓴 나머지도 셈
    14 자재 구분 골라 보기 (1.15.2, 사용자 "원자재 부자재 소모품 반제품 이런식으로 선택해서 표시"): 구분 = 품목 마스터 단계 → 품목구분 · 품목에 없는 코드 따로 · 단추 · 알림 · 엑셀 · AI 비서
+   17 이번 달 할 일 (1.15.7, 사용자 "생산 계획에 이번달에해야할거 프린트할수있게 해줘 엑셀로 다운로드 할수있게도"): 기간 안에 공정마다 하는 양 (손 계산 오늘 ~ +9) · 탭 · 달 고르기 · 인쇄 · 엑셀
    사용:  npm run test:v19   (Playwright 필요: npm i -D playwright 또는 playwright-core + 설치된 Chrome/Edge) */
 const path = require('path'), fs = require('fs'), os = require('os');
 const ROOT = path.join(__dirname, '..');
@@ -191,15 +192,15 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     await A.click('button[data-plan-scope="firm"]'); await settle(); r = await rows();
     eq('확정 PO 만 → 5줄 (PO미정 빠짐)', [r.length, r.some(x => x[1] === 'PO미정')], [5, false]);
     await A.click('button[data-plan-scope="all"]'); await settle();
-    // 자재 탭: 리드타임 칸 → 품목 마스터 · 판정
-    await A.click('.tabs .tab:nth-child(3)'); await settle();
+    // 자재 탭: 리드타임 칸 → 품목 마스터 · 판정 (1.15.7: 탭 순서 = 수주별 · 이번 달 할 일 · 공정별 부하 · 자재 · 기준 자료 · 확인할 것)
+    await A.click('.tabs .tab:nth-child(4)'); await settle();
     r = await rows(); ok('자재 탭: 모자라는 것 3종 (케이스 · 카톤 · 원료)', r.length === 3 && r.some(x => x[0].startsWith('CASE-M')), r);
     const idx = r.findIndex(x => x[0].startsWith('CASE-M'));
     await A.fill(`#main .card table tbody tr:nth-child(${idx + 1}) input`, '3'); await A.press(`#main .card table tbody tr:nth-child(${idx + 1}) input`, 'Tab'); await settle();
     eq('리드타임 칸 → 품목 lead_days 3 · 판정 여유', await ev(() => [ERP.db.rows('items').find(i => i.code === 'CASE-M').lead_days, ERP.plan.run('all').mats.find(m => m.code === 'CASE-M').judge]), [3, 'ok']);
     await ev(async () => { const DB = ERP.db; const it = DB.rows('items').find(i => i.code === 'CASE-M'); DB.update('items', it._id, { lead_days: undefined }); await DB.flush(); });
     // 기준 자료 탭: 조립 조 수 2 · 권취 하루 능력 직접 · 쉬는 날 넣기 · 기다리는 날
-    await A.click('.tabs .tab:nth-child(4)'); await settle();
+    await A.click('.tabs .tab:nth-child(5)'); await settle();
     await A.selectOption('select[data-plan-shift="ASM"]', '2'); await settle();
     eq('조 수 2 → 표 plan_proc · 조립 Mini 4,000', await ev(() => [ERP.db.rows('plan_proc').find(r => r.process === 'ASM' && !r.division).shifts, ERP.plan.capacity().famDay.Mini]), [2, 4000]);
     await A.fill('input[data-plan-cap="WRP"]', '1000'); await A.press('input[data-plan-cap="WRP"]', 'Tab'); await settle();
@@ -212,8 +213,8 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     ok('달력 표에 3줄', (await ev(() => document.querySelectorAll('#main .card section:nth-of-type(4) table tbody tr').length)) === 3);
     await ev(async () => { const DB = ERP.db; ['plan_proc', 'plan_cal', 'plan_wait'].forEach(t => DB.replace(t, [])); await DB.flush(); ERP.render(); }); await settle();
     // 확인할 것 탭 · 공정별 부하 탭
-    await A.click('.tabs .tab:nth-child(5)'); await settle(); ok('확인할 것 탭에 글', (await ev(() => document.querySelectorAll('#main .plan-note').length)) >= 8);
-    await A.click('.tabs .tab:nth-child(2)'); await settle(); r = await rows(); ok('공정별 부하: 6줄 · 포장 = 가장 막힘', r.length === 6 && /가장 막힘/.test(r.find(x => x[0].startsWith('포장'))[0]), r);
+    await A.click('.tabs .tab:nth-child(6)'); await settle(); ok('확인할 것 탭에 글', (await ev(() => document.querySelectorAll('#main .plan-note').length)) >= 8);
+    await A.click('.tabs .tab:nth-child(3)'); await settle(); r = await rows(); ok('공정별 부하: 6줄 · 포장 = 가장 막힘', r.length === 6 && /가장 막힘/.test(r.find(x => x[0].startsWith('포장'))[0]), r);
     // PO 를 누르면 수주 관리
     await A.click('.tabs .tab:nth-child(1)'); await settle(); await A.click('#main .card table tbody tr:nth-child(4) td:nth-child(2) a'); await settle();
     eq('PO-B 를 누르면 수주 관리 · 선택', await ev(() => [location.hash, ERP.state.ord.sel]), ['#/orders', 'PO-B']);
@@ -403,7 +404,7 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('부자재를 더 누르면 같이: 4줄 · 켜진 단추 원재료 · 부자재', [codes(v), v.btn.filter(b => b[2]).map(b => b[0])], [['CASE-M', 'CTN-M', 'LBL-9', 'RES-1'], ['RM', 'SM']]);
     await A.click('#main button[data-plan-mkind="RM"]'); await settle(); v = await view();
     eq('원재료를 다시 누르면 뺌: 부자재 3줄', codes(v), ['CASE-M', 'CTN-M', 'LBL-9']);
-    await A.click('.tabs .tab:nth-child(1)'); await settle(); await A.click('.tabs .tab:nth-child(3)'); await settle(); v = await view();
+    await A.click('.tabs .tab:nth-child(1)'); await settle(); await A.click('.tabs .tab:nth-child(4)'); await settle(); v = await view();
     eq('다른 탭에 갔다 와도 고른 구분 그대로', [v.btn.filter(b => b[2]).map(b => b[0]), v.rows.length], [['SM'], 3]);
     await A.click('#main button[data-plan-mkind="all"]'); await settle(); v = await view();
     eq('모든 구분 → 7줄', [v.rows.length, v.btn.filter(b => b[2]).map(b => b[0])], [7, ['all']]);
@@ -576,9 +577,104 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
     eq('되돌리면 시험 자료 없음 (품목 · 색상별 BOM · 배합표 · 코드 연결 줄 수가 처음과 같음)', await cnt(), base0);
   });
 
+  await sec('17. 이번 달 할 일 (1.15.7): 기간 안에 공정마다 하는 양 · 탭 · 달 고르기 · 인쇄 · 엑셀', async () => {
+    // 손 계산 (매일 일함 · 공정 사이 1일 · 포장 → 출고 1일), 기간 = 오늘 ~ +9 (10 근무일)
+    //   사출 1만/일: B 55,680 (+5 끝) → PO미정 5,760 (+6 끝) → A 28,800 (+9 끝) · 리필 5천/일: B 5만 (+11 끝이라 이 기간 5만)
+    //   조립 Dial 1천/일: C 1만 · 조립 Mini 2천/일: B 는 리필이 낸 다음 날부터 (+1 ~ +9) 18,000 · 권취 500/일: G 5,000
+    //   포장 2,400/일: 오늘 X 2,400 → +1 X 480 (끝) · G 500 · C 1,000 (B 는 조립이 아직 0 이라 420 남음) → +2 ~ +9 날마다 G 500 · C 1,000 · B 900
+    const W = await ev((o) => { const R = ERP.plan.run('all'); const w = ERP.plan.workIn(R, o.f, o.t); const r0 = (v) => (v === undefined ? '-' : v === null ? 'x' : Math.round(v));
+      return { days: w.days, from: w.from, to: w.to, rows: w.rows.map(x => [x.po, r0(x.q.INJ), r0(x.q.REF), r0(x.q.ASM), r0(x.q.WRP), r0(x.q.PCK), r0(x.sets)]),
+        fin: w.rows.map(x => [x.po, ['INJ', 'REF', 'ASM', 'WRP', 'PCK'].filter(k => x.fin[k]).map(k => k + ' ' + x.fin[k]).join(','), x.shipIn]),
+        tot: Object.fromEntries(Object.entries(w.tot).map(([k, v]) => [k, Math.round(v)])), loads: w.loads.map(l => [l.id, Math.round(l.q), l.cap === null ? null : Math.round(l.cap), l.n]) }; }, { f: D(0), t: D(9) });
+    eq('근무일 10 · 기간 오늘 ~ +9', [W.days, W.from, W.to], [10, D(0), D(9)]);
+    eq('수주 줄마다 사출 · 리필 · 조립 · 권취 · 포장 pcs · 포장 set (- = 그 공정 일 없음)', W.rows, [
+      ['PO-X', '-', '-', '-', '-', 2880, 120], ['PO-G', '-', '-', '-', 5000, 4500, 45], ['PO-C', '-', '-', 10000, '-', 9000, 375],
+      ['PO-B', 55680, 50000, 18000, '-', 7200, 300], ['PO미정', 5760, 0, 0, '-', 0, 0], ['PO-A', 28800, 0, 0, '-', 0, 0]]);
+    eq('기간 안에 끝나는 공정 · 출고', W.fin, [['PO-X', 'PCK ' + D(1), true], ['PO-G', '', false], ['PO-C', '', false], ['PO-B', 'INJ ' + D(5), false], ['PO미정', 'INJ ' + D(6), false], ['PO-A', 'INJ ' + D(9), false]]);
+    eq('합계', W.tot, { INJ: 90240, REF: 50000, ASM: 28000, WRP: 5000, PCK: 23580, sets: 840 });
+    eq('공정별: 할 양 · 이 기간 능력 · 수주 줄', W.loads, [['INJ', 90240, 100000, 3], ['REF', 50000, 50000, 1], ['ASM|Mini', 18000, 20000, 1], ['ASM|Dial', 10000, 10000, 1], ['WRP', 5000, 5000, 1], ['PCK', 23580, 24000, 4]]);
+    const sub = (f, t) => ev((o) => { const w = ERP.plan.workIn(ERP.plan.run('all'), o.f, o.t); return [w.from, w.days, w.rows.map(x => x.po)]; }, { f, t });
+    eq('오늘 전 날은 오늘부터 (−5 ~ +9 = 오늘 ~ +9)', await sub(D(-5), D(9)), [D(0), 10, ['PO-X', 'PO-G', 'PO-C', 'PO-B', 'PO미정', 'PO-A']]);
+    eq('지난 기간 = 없음', await sub(D(-30), D(-1)), [D(0), 0, []]);
+    eq('+40 ~ +49: A 만 (PO미정 은 납기 +40 이지만 +38 에 출고 → 빠짐)', (await sub(D(40), D(49)))[2], ['PO-A']);
+    // 달: 이번 달 = 오늘 ~ 달 마지막 날 · 다음 달 = 1일 ~ 마지막 날
+    const ym = T0.slice(0, 7);
+    const M = await ev((y) => { const P = ERP.plan, R = P.run('all'); const m = P.month(R, y); const w = P.workIn(R, y + '-01', P.monthEnd(y)); const n = P.nextMonth(y); const m2 = P.month(R, n);
+      return { from: m.from, to: m.to, end: P.monthEnd(y), same: JSON.stringify(m.rows.map(r => [r.po, r.q])) === JSON.stringify(w.rows.map(r => [r.po, r.q])), ym: m.ym, n, n2: [m2.from, m2.to], feb: P.monthEnd('2028-02') }; }, ym);
+    eq('이번 달 = 오늘 ~ 마지막 날 (기간 계산과 같음) · 다음 달 · 2월 말', [M.from, M.to, M.same, M.ym, M.n2, M.feb], [T0, M.end, true, ym, [M.n + '-01', await ev((n) => ERP.plan.monthEnd(n), M.n)], '2028-02-29']);
+    // 화면: 두 번째 탭 '이번 달 할 일' · 달 고르기 · 표 (수주별 + 합계) · 인쇄 · 엑셀
+    await ev(() => { ERP.setLang('ko'); ERP.state.plan = { tab: 'orders' }; location.hash = '#/plan'; ERP.render(); }); await settle();
+    await A.click('.tabs .tab:nth-child(2)'); await settle();
+    const ui = () => ev(() => { const t = document.querySelector('table[data-plan-month-orders]'); const l = document.querySelector('table[data-plan-month-loads]');
+      return { tabs: Array.from(document.querySelectorAll('#main .tabs .tab')).map(x => x.textContent.trim().replace(/\s+\d+$/, '')), on: (document.querySelector('#main .tabs .tab.on') || {}).textContent, month: (document.querySelector('input[data-plan-month]') || {}).value,
+        sum: (document.querySelector('[data-plan-month-sum]') || {}).innerText || '', head: t ? Array.from(t.querySelectorAll('thead th')).map(x => x.innerText.trim()) : [], pos: t ? Array.from(t.querySelectorAll('tbody tr')).map(tr => tr.children[1].innerText.trim()) : null,
+        foot: t && t.tFoot ? t.tFoot.innerText.replace(/\s+/g, ' ').trim() : '', loads: l ? Array.from(l.querySelectorAll('tbody tr')).map(tr => tr.children[0].innerText.trim()) : null }; });
+    let u = await ui();
+    eq('탭: 수주별 완료 예상 · 이번 달 할 일 (두 번째) · 고른 탭', [u.tabs.slice(0, 3), u.on], [['수주별 완료 예상', '이번 달 할 일', '공정별 부하'], '이번 달 할 일']);
+    eq('달 = 이번 달 · 수주 줄 = 계산과 같음', [u.month, u.pos], [ym, await ev((y) => ERP.plan.month(ERP.plan.run('all'), y).rows.map(r => r.po), ym)]);
+    ok('머리 · 합계 줄 · 공정별 표 · 설명 (근무일)', u.head.includes('사출') && u.head.includes('포장 set') && u.head.includes('출고 가능일') && /^합계/.test(u.foot) && u.loads && u.loads[0].startsWith('사출') && /근무일/.test(u.sum) && u.sum.includes(ym), u);
+    // 다음 달로 바꾸기
+    await A.fill('input[data-plan-month]', M.n); await A.dispatchEvent('input[data-plan-month]', 'change'); await settle(); u = await ui();
+    eq('다음 달로 바꾸면 그 달 · 그 달 수주 줄', [u.month, u.pos, await ev(() => ERP.state.plan.month)], [M.n, await ev((n) => ERP.plan.month(ERP.plan.run('all'), n).rows.map(r => r.po), M.n), M.n]);
+    // 인쇄: window.print 를 바꿔 끼워 인쇄할 글만 봄 (대화 상자 안 띄움)
+    await ev(() => { window.__pr = null; window.__print0 = window.print; window.print = () => { const p = document.getElementById('erpPrint');
+      window.__pr = { txt: p ? p.innerText : '', cls: document.body.classList.contains('erp-printing'), page: Array.from(document.querySelectorAll('style')).some(s => /size:\s*A4 landscape/.test(s.textContent)), tables: p ? p.querySelectorAll('table').length : 0, inputs: p ? p.querySelectorAll('input, button').length : -1 }; }; });
+    await A.click('button[data-plan-month-print]'); await settle();
+    const pr = await ev(() => window.__pr);
+    ok('인쇄: 제목 · 달 · 기간 · 공정별 · 수주별 · 합계 · A4 가로 · 인쇄 중에만 이것만 보임 (단추 · 칸 없음)', pr && /할 일/.test(pr.txt) && pr.txt.includes(M.n) && /공정별 합계/.test(pr.txt) && /합계/.test(pr.txt) && pr.cls && pr.page && pr.tables === 2 && pr.inputs === 0, pr);
+    // Codex 검토: 인쇄 (print) 에서는 인쇄용만 보이고, 글 칸은 줄바꿈 (A4 밖으로 밀리지 않게) · 숫자 칸은 그대로 · 화면 표의 머리 고정 없음
+    await A.emulateMedia({ media: 'print' });
+    const pm = await ev(() => { const p = document.getElementById('erpPrint'); const td = p.querySelector('table[data-plan-month-orders] tbody td:nth-child(3)'); const other = Array.from(document.body.children).find(e => e.id !== 'erpPrint' && !/^(SCRIPT|STYLE|LINK)$/.test(e.tagName));
+      return { box: getComputedStyle(p).display, other: other ? getComputedStyle(other).display : 'none', ws: td ? getComputedStyle(td).whiteSpace : '', numWs: getComputedStyle(p.querySelector('tbody td.num')).whiteSpace, pos: getComputedStyle(p.querySelector('th')).position }; });
+    await A.emulateMedia({ media: 'screen' });
+    eq('인쇄 (print 화면): 인쇄용만 보임 · 글 칸 줄바꿈 · 숫자 칸 줄바꿈 없음 · 머리 고정 없음', [pm.box, pm.other, pm.ws, pm.numWs, pm.pos], ['block', 'none', 'normal', 'nowrap', 'static']);
+    eq('인쇄가 끝나면 (afterprint) 인쇄용 글 · 표시를 치움', await ev(() => { window.dispatchEvent(new Event('afterprint')); window.print = window.__print0; return [!!document.getElementById('erpPrint'), document.body.classList.contains('erp-printing')]; }), [false, false]);
+    // Codex 검토: afterprint 가 오지 않은 채 또 인쇄 → 하나만 남고 다 치움 · 인쇄가 안 되면 (오류) 치우고 알림
+    const rb = await ev(() => { window.print = () => {}; ERP.printEl([h('p', 'A')]); ERP.printEl([h('p', 'B')]); const n1 = document.querySelectorAll('#erpPrint').length, txt = document.getElementById('erpPrint').innerText;
+      window.dispatchEvent(new Event('afterprint')); const left = [!!document.getElementById('erpPrint'), document.body.classList.contains('erp-printing'), !!document.getElementById('erpPrintCss')];
+      window.print = () => { throw new Error('no printer'); }; ERP.printEl([h('p', 'C')]); const after = [!!document.getElementById('erpPrint'), document.body.classList.contains('erp-printing')];
+      window.print = window.__print0; return { n1, txt, left, after, toast: (document.getElementById('toasts') || {}).innerText || '' }; });
+    eq('인쇄 두 번 → 하나만 · afterprint 에 다 치움 · 인쇄 오류 → 치우고 알림', [rb.n1, rb.txt, rb.left, rb.after, /인쇄하지 못했습니다/.test(rb.toast)], [1, 'B', [false, false, false], [false, false], true]);
+    // 엑셀: saveBook 을 바꿔 끼워 받을 책만 봄
+    await ev(() => { window.__xl = null; ERP.xl.__save0 = ERP.xl.saveBook; ERP.xl.saveBook = (wb, name) => { const s = (i) => XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], { header: 1, defval: '' }); window.__xl = { name, sheets: wb.SheetNames, a: s(0), b: s(1) }; }; });
+    await A.click('button[data-plan-month-xlsx]'); await settle();
+    const xl = await ev(() => { ERP.xl.saveBook = ERP.xl.__save0; return window.__xl; });
+    const want = await ev((n) => { const w = ERP.plan.month(ERP.plan.run('all'), n); return { rows: w.rows.map(r => r.po), loads: w.loads.length }; }, M.n);
+    eq('엑셀: 파일 이름 · 시트 (할 일 · 공정별 합계)', xl && [xl.name, xl.sheets], ['production_plan_month_' + M.n + '.xlsx', ['할 일 ' + M.n, '공정별 합계']]);
+    const hi = xl.a.findIndex(r => r[0] === '순서');
+    ok('엑셀 할 일: 제목 줄 · 머리 · 수주 줄 · 합계 줄', /할 일/.test(String(xl.a[0][0])) && hi > 0 && JSON.stringify(xl.a.slice(hi + 1, hi + 1 + want.rows.length).map(r => r[1])) === JSON.stringify(want.rows) && xl.a[hi + 1 + want.rows.length][0] === '합계', { a: xl.a.slice(0, hi + 3 + want.rows.length), want });
+    eq('엑셀 공정별 합계: 머리 + 공정 줄', [xl.b[0][0], xl.b.length - 1], ['공정 · 품목군', want.loads]);
+    // Codex 검토: 화면을 연 채 날이 바뀌면 (다음 달 1일) 엑셀 · 인쇄는 다시 계산한 새 이번 달
+    const nm = await ev(async (n) => { const F = ERP.fmt; const t0 = F.today; let got = null; const s0 = ERP.xl.saveBook; ERP.xl.saveBook = (wb, name) => { got = name; };
+      ERP.state.plan.month = t0().slice(0, 7); ERP.render(); await new Promise(r => setTimeout(r, 300));
+      F.today = () => n + '-01'; try { document.querySelector('button[data-plan-month-xlsx]').click(); } finally { F.today = t0; ERP.xl.saveBook = s0; }
+      ERP.render(); return { got, month: ERP.state.plan.month }; }, M.n); await settle();
+    eq('화면을 연 채 다음 달 1일이 되면 엑셀 = 새 이번 달 (다시 계산)', [nm.got, nm.month], ['production_plan_month_' + M.n + '.xlsx', M.n]);
+    // Codex 검토 (가짜 계산 결과로): 조립 품목군 일부만 능력 모름 → 아는 몫 + '+?' · 출고만 하는 수주도 줄 · 계획 범위 (800 근무일) 밖
+    const X = await ev((o) => { const P = ERP.plan; const tk = (hist, load) => ({ hist, load }); const flat = (v) => Array(10).fill(v); const ramp = (s, load) => Array.from({ length: 10 }, (_, i) => Math.min(load, s * (i + 1)));
+      const ord = (po, x, e) => { const r = Object.assign({ id: po, po, none: false, item: 'IT-' + po, kind: 'Mini', customer: 'T', rem: 100, due: o.d40, ship: o.d30, judge: 'ok', slack: 0, limit: '', F: { INJ: null, REF: null, ASM: null, WRP: null, PCK: null } }, e || {}); Object.defineProperty(r, '_t', { value: x }); return r; };
+      const R = { today: o.wd[0], scope: 'all', loads: [{ id: 'ASM|Mini', proc: 'ASM', fam: 'Mini' }, { id: 'ASM|Glass', proc: 'ASM', fam: 'Glass' }, { id: 'PCK', proc: 'PCK', fam: null }],
+        orders: [ord('P-PART', { asm: { Mini: tk(ramp(100, 1000), 1000), Glass: tk(null, 500) } }), ord('P-SHIP', { PCK: tk(flat(800), 800), asm: {} }, { ship: o.wd[3] }), ord('P-OUT', { PCK: tk(flat(800), 800), asm: {} }),
+          ord('P-NONE', { asm: { Glass: tk(null, 300) } }, { due: o.wd[5], ship: 'nocap', judge: 'na' })] };
+      Object.defineProperty(R, '_sim', { value: { WD: o.wd, cum: { 'ASM|Mini': ramp(100, 1e9), PCK: ramp(800, 1e9) }, res: new Map() } });
+      const w = P.workIn(R, o.wd[3], o.wd[9]); const s = P.monthSheets(Object.assign({ ym: '' }, w), R)[0].aoa; const w2 = P.workIn(R, o.wd[3], o.far);
+      return { rows: w.rows.map(r => [r.po, r.q.ASM === undefined ? '-' : r.q.ASM === null ? 'x' : r.q.ASM, !!(r.part && r.part.ASM), r.shipIn]), unk: w.unk, tot: Math.round(w.tot.ASM), loads: w.loads.map(l => [l.id, Math.round(l.q), l.cap, l.n]),
+        note: s.filter(r => /^P-/.test(String(r[1]))).map(r => [r[1], r[15]]), unkLine: s.some(r => /능력 모름 .*합계에 없음: 조립/.test(String(r[0]))), over: [w.over, w.end, w2.over, P.monthSumText(w2, R).includes('까지만 계산')] }; },
+      { wd: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => D(k)), d30: D(30), d40: D(40), far: D(20) });
+    eq('줄: 일부 능력 모름 (아는 몫 700 + 표시) · 출고만 (+3) · 능력 모름 + 납기 안 → 남음 · 아무 일 없는 수주는 빠짐', X.rows, [['P-PART', 700, true, false], ['P-SHIP', '-', false, true], ['P-NONE', 'x', false, false]]);
+    eq('합계 · 공정별 (능력 모르는 품목군은 줄 없음)', [X.unk, X.tot, X.loads], [{ ASM: true }, 700, [['ASM|Mini', 700, 700, 1], ['PCK', 0, 5600, 0]]]);
+    eq('엑셀 비고: 일부 능력 모름 · 출고 · 합계 아래 능력 모름 줄', [X.note, X.unkLine], [[['P-PART', '조립 일부 능력 모름'], ['P-SHIP', '출고 ' + D(3).slice(5)], ['P-NONE', '']], true]);
+    eq('계획 범위 (가짜 근무일 +9 까지) 밖 → 알림', X.over, [false, D(9), true, true]);
+    // 베트남어
+    await ev(() => { ERP.setLang('vi'); ERP.render(); }); await settle();
+    const vi = await ev(() => ({ tab: (document.querySelector('#main .tabs .tab.on') || {}).textContent, txt: (document.querySelector('#main .card') || {}).innerText || '' }));
+    ok('베트남어: 탭 = Việc tháng này · 화면에 한글 없음', vi.tab === 'Việc tháng này' && !/[가-힣]/.test(vi.txt.replace(/PO미정/g, '')), { tab: vi.tab, ko: (vi.txt.match(/[가-힣][^\n]{0,30}/g) || []).slice(0, 5) });
+    await ev(() => { ERP.setLang('ko'); ERP.state.plan = null; });
+  });
+
   await sec('12. 베트남어 · 휴대폰 폭 · 오류 없음', async () => {
     await ev(() => { ERP.setLang('vi'); ERP.state.plan = { tab: 'orders' }; location.hash = '#/plan'; ERP.render(); }); await settle();
-    for (const t of [1, 2, 3, 4, 5]) { await A.click('.tabs .tab:nth-child(' + t + ')'); await settle(); }
+    for (const t of [1, 2, 3, 4, 5, 6]) { await A.click('.tabs .tab:nth-child(' + t + ')'); await settle(); }
     const vi = await ev(() => ({ h1: document.querySelector('.page-head h1').textContent, ko: /[가-힣]/.test(Array.from(document.querySelectorAll('.page-head, .kpis, .tabs')).map(e => e.innerText).join(' ')), po: ERP.plan.run('all').orders.find(o => o.none).po }));
     eq('베트남어: 제목 · 머리 · 카드 · 탭에 한글 없음 · PO미정 = Chưa có PO', [vi.h1, vi.ko, vi.po], ['Kế hoạch sản xuất', false, 'Chưa có PO']);
     await A.setViewportSize({ width: 390, height: 840 }); await ev(() => ERP.render()); await settle();
