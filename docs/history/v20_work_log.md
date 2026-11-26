@@ -245,3 +245,11 @@
 - 같이: `D:\ERP\08_erp_code\scripts\run_all.ps1` 이 node 출력을 UTF-8 로 받음 (기록 파일의 한글이 깨지던 것).
 - 전체 시험 (따로 작업 폴더 `D:\ERP\01_source\colorpencil-erp-month`, 가지 `month-1157`, 기록 `D:\ERP\24_po_pcs_ct\tests\run_all2.log`, Codex 고친 뒤 2026-11-26 08:46 ~ 08:52): v20 94 · v19 193 · v18 205 (판 번호 확인을 1.15.7 로 고친 뒤) · v17 216 · v16 85 · v15 165 · v14 51 · v13 39 · v12 126 · v11 50 · v8 72 · assistant 305 · v7 (ERP_PREV = v1.15.6) 148 — v9 86/87 (상대 경로 · 쓸 수 없는 폴더 → 400, 예전부터 이 PC 환경 탓).
 - 데모 `ERP_Demo.html`: 8,168,549 bytes, SHA-256 `4f2ac791e05a4ca5529b0a346ef85280c13a51900222b9ce39e1c8e57e8a6237`.
+
+### 1.15.7 GitHub · Release · 이 PC (2026-11-26)
+
+- 올림 `4574dda` → 자동 업데이트 시험 (Windows) 성공 (Actions 45738831310, 08:54 ~ 09:03) → Release v1.15.7 (Actions 45739944273 #31, 09:04 ~ 09:08).
+  - `ColorPencil-ERP-Setup-1.15.7.exe` 114,236,862 bytes · SHA-256 `e3ebc31cc643844eda78ef198632df649be60f66ce5c35fb3a21e3e3369b94c1` (= Release 지문 · `latest.json`, `curl.exe` 로 받아 대조 → `D:\ERP\02_installer`).
+  - `ERP_Demo.html` 8,168,549 bytes · SHA-256 `4f2ac791…6237` (이 PC 에서 만든 데모와 같음, `D:\ERP\03_demo`).
+- 이 PC ERP: 07:56 부터 켜져 있음 (수주 관리 화면 — 사용자가 쓰는 중) → 끄거나 설치하지 않고 확인 요청만 (POST /api/update/check) → 09:11 1.15.7 받아 둠. 화면 위 [지금 업데이트] 를 누르거나 다음에 켤 때 설치.
+- 포장 수량 고침 (`D:\ERP\12_pack_qty`) 은 다음 판 1.15.8 로 (포장 수량 세션에 알림).
